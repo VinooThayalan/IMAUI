@@ -9,6 +9,7 @@ const banks = [
     accountNumber: '****1234',
     balance: 'Rs. 1,234,567.89',
     currency: 'LKR',
+    shareId: 'JKH',
     status: 'Active'
   },
   {
@@ -18,6 +19,7 @@ const banks = [
     accountNumber: '****5678',
     balance: 'Rs. 456,789.00',
     currency: 'LKR',
+    shareId: 'NDB',
     status: 'Active'
   },
   {
@@ -27,6 +29,7 @@ const banks = [
     accountNumber: '****9012',
     balance: 'Rs. 789,012.34',
     currency: 'LKR',
+    shareId: 'Sampath',
     status: 'Active'
   },
   {
@@ -36,6 +39,7 @@ const banks = [
     accountNumber: '****3456',
     balance: 'Rs. 234,567.89',
     currency: 'LKR',
+    shareId: 'Dialog',
     status: 'Active'
   },
 ];
@@ -124,6 +128,7 @@ export function Banks() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity ID</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank Name</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Number</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share ID</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Balance</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -139,6 +144,9 @@ export function Banks() {
                     <div className="text-sm font-bold text-gray-900">{bank.name}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bank.accountNumber}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="text-sm font-bold text-gray-900">{bank.shareId}</span>
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{bank.balance}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
@@ -198,6 +206,22 @@ export function Banks() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter account number"
                   />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Share ID</label>
+                  <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select share</option>
+                    <option value="JKH">JKH</option>
+                    <option value="NDB">NDB</option>
+                    <option value="Sampath">Sampath</option>
+                    <option value="Dialog">Dialog</option>
+                    <option value="ADL">ADL</option>
+                    <option value="HNB">HNB</option>
+                    <option value="CTC">CTC</option>
+                    <option value="LOLC">LOLC</option>
+                    <option value="Hemas">Hemas</option>
+                    <option value="Commercial">Commercial</option>
+                  </select>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
