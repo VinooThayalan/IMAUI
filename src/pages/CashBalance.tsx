@@ -1,86 +1,153 @@
-import { Plus, Search, Filter, Wallet, TrendingUp, TrendingDown, AlertCircle, Settings, Building2 } from 'lucide-react';
-import { useState } from 'react';
+import { Plus, Search, BookOpen, Wallet, TrendingUp, TrendingDown, Building2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { supabase, type CashTransaction } from '../lib/supabase';
 
-const entities = [
-  { id: 'E001', name: 'Fernando Family Trust', type: 'Trust', currentBalance: 5025000.00, odLimit: 500000.00 },
-  { id: 'E002', name: 'Perera Holdings', type: 'Company', currentBalance: 2345600.00, odLimit: 1000000.00 },
-  { id: 'E003', name: 'Silva Investment Group', type: 'Company', currentBalance: 4893750.00, odLimit: 750000.00 },
-  { id: 'E004', name: 'Jayasinghe Capital', type: 'Company', currentBalance: 4925600.00, odLimit: 600000.00 },
-  { id: 'E005', name: 'Wijesinghe Retirement Fund', type: 'Fund', currentBalance: 4908600.00, odLimit: 400000.00 },
-  { id: 'E006', name: 'De Silva Ventures', type: 'Company', currentBalance: 3200000.00, odLimit: 850000.00 },
-  { id: 'E007', name: 'Rajapaksa Enterprises', type: 'Company', currentBalance: 1850000.00, odLimit: 950000.00 },
-  { id: 'E008', name: 'Gunasekara Holdings', type: 'Company', currentBalance: 4500000.00, odLimit: 300000.00 }
-];
-
-const transactions = [
-  {
-    id: 1,
-    entityId: 'E001',
-    entityName: 'Fernando Family Trust',
-    type: 'Addition',
-    description: 'Dividend received from JKH',
-    amount: 'Rs. 25,000.00',
-    timestamp: '2024-01-20 10:00 AM',
-    runningBalance: 'Rs. 5,025,000.00',
-    createdBy: 'System'
-  },
-  {
-    id: 2,
-    entityId: 'E003',
-    entityName: 'Silva Investment Group',
-    type: 'Deduction',
-    description: 'Share purchase - Sampath',
-    amount: 'Rs. 131,250.00',
-    timestamp: '2024-01-19 02:30 PM',
-    runningBalance: 'Rs. 4,893,750.00',
-    createdBy: 'Trader'
-  },
-  {
-    id: 3,
-    entityId: 'E005',
-    entityName: 'Wijesinghe Retirement Fund',
-    type: 'Addition',
-    description: 'Sale of ADL shares',
-    amount: 'Rs. 14,850.00',
-    timestamp: '2024-01-18 11:15 AM',
-    runningBalance: 'Rs. 4,908,600.00',
-    createdBy: 'Trader'
-  },
-  {
-    id: 4,
-    entityId: 'E004',
-    entityName: 'Jayasinghe Capital',
-    type: 'Addition',
-    description: 'Dividend received from Dialog',
-    amount: 'Rs. 18,500.00',
-    timestamp: '2024-01-16 10:30 AM',
-    runningBalance: 'Rs. 4,925,600.00',
-    createdBy: 'System'
-  },
-  {
-    id: 5,
-    entityId: 'E002',
-    entityName: 'Perera Holdings',
-    type: 'Deduction',
-    description: 'Share purchase - HNB',
-    amount: 'Rs. 75,400.00',
-    timestamp: '2024-01-15 03:45 PM',
-    runningBalance: 'Rs. 2,345,600.00',
-    createdBy: 'System'
-  },
-];
+interface Entity {
+  id: string;
+  name: string;
+  type: string;
+  current_balance: number;
+  od_limit: number;
+}
 
 export function CashBalance() {
   const [showModal, setShowModal] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
+  const [cashBookEntity, setCashBookEntity] = useState<string>('');
   const [transactionType, setTransactionType] = useState<'Addition' | 'Deduction'>('Addition');
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [transactions, setTransactions] = useState<CashTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formData, setFormData] = useState({
+    entityId: '',
+    code: '',
+    amount: '',
+    description: '',
+    date: new Date().toISOString().split('T')[0],
+    createdBy: ''
+  });
 
-  const totalBalance = entities.reduce((sum, entity) => sum + entity.currentBalance, 0);
-  const totalODLimit = entities.reduce((sum, entity) => sum + entity.odLimit, 0);
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
+    if (entities.length > 0 && !cashBookEntity) {
+      setCashBookEntity(entities[0].id);
+    }
+  }, [entities]);
+
+  async function loadData() {
+    try {
+      setLoading(true);
+
+      const { data: entitiesData, error: entitiesError } = await supabase
+        .from('entities')
+        .select('*')
+        .order('name');
+
+      if (entitiesError) throw entitiesError;
+
+      const { data: transactionsData, error: transactionsError } = await supabase
+        .from('cash_balance_ledger')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      if (transactionsError) throw transactionsError;
+
+      setEntities(entitiesData || []);
+      setTransactions(transactionsData || []);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAddTransaction(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!formData.entityId || !formData.amount || !formData.description || !formData.createdBy) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const entity = entities.find(e => e.id === formData.entityId);
+      if (!entity) return;
+
+      const entityTransactions = transactions
+        .filter(t => t.entity_id === formData.entityId)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      const lastBalance = entityTransactions.length > 0
+        ? entityTransactions[entityTransactions.length - 1].running_balance
+        : 0;
+
+      const amount = parseFloat(formData.amount);
+      const newBalance = transactionType === 'Addition'
+        ? lastBalance + amount
+        : lastBalance - amount;
+
+      const { error } = await supabase
+        .from('cash_balance_ledger')
+        .insert({
+          type: transactionType,
+          description: formData.description,
+          code: formData.code || null,
+          amount: amount,
+          date: formData.date,
+          running_balance: newBalance,
+          entity_id: formData.entityId,
+          created_by: formData.createdBy
+        });
+
+      if (error) throw error;
+
+      await supabase
+        .from('entities')
+        .update({ current_balance: newBalance })
+        .eq('id', formData.entityId);
+
+      await loadData();
+
+      setShowModal(false);
+      setFormData({
+        entityId: '',
+        code: '',
+        amount: '',
+        description: '',
+        date: new Date().toISOString().split('T')[0],
+        createdBy: ''
+      });
+    } catch (error) {
+      console.error('Error adding transaction:', error);
+      alert('Failed to add transaction');
+    }
+  }
+
+  const totalBalance = entities.reduce((sum, entity) => sum + entity.current_balance, 0);
+  const totalODLimit = entities.reduce((sum, entity) => sum + entity.od_limit, 0);
 
   const filteredTransactions = selectedEntity === 'all'
     ? transactions
-    : transactions.filter(t => t.entityId === selectedEntity);
+    : transactions.filter(t => t.entity_id === selectedEntity);
+
+  const cashBookTransactions = transactions.filter(t => t.entity_id === cashBookEntity);
+  const amountInTransactions = cashBookTransactions.filter(t => t.type === 'Addition');
+  const amountOutTransactions = cashBookTransactions.filter(t => t.type === 'Deduction');
+
+  const totalAmountIn = amountInTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const totalAmountOut = amountOutTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const cashBookBalance = totalAmountIn - totalAmountOut;
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center justify-center h-screen">
+        <div className="text-lg text-gray-600">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -148,7 +215,7 @@ export function CashBalance() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {entities.map((entity) => {
-                const availableCredit = entity.currentBalance + entity.odLimit;
+                const availableCredit = entity.current_balance + entity.od_limit;
                 return (
                   <tr key={entity.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -164,12 +231,12 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
-                        Rs. {entity.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {entity.current_balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        Rs. {entity.odLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -221,6 +288,7 @@ export function CashBalance() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Timestamp</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Code</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Running Balance</th>
@@ -228,39 +296,55 @@ export function CashBalance() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredTransactions.map((transaction) => (
-                <tr key={transaction.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{transaction.timestamp}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-bold text-blue-600">{transaction.entityId}</div>
-                    <div className="text-xs text-gray-500">{transaction.entityName}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      transaction.type === 'Addition' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {transaction.type === 'Addition' ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-                      {transaction.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-gray-900">{transaction.description}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className={`text-sm font-semibold ${transaction.type === 'Addition' ? 'text-green-600' : 'text-red-600'}`}>
-                      {transaction.type === 'Addition' ? '+' : '-'}{transaction.amount}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-bold text-gray-900">{transaction.runningBalance}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{transaction.createdBy}</div>
-                  </td>
-                </tr>
-              ))}
+              {filteredTransactions.map((transaction) => {
+                const entity = entities.find(e => e.id === transaction.entity_id);
+                return (
+                  <tr key={transaction.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {new Date(transaction.timestamp).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit'
+                        })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-blue-600">{transaction.entity_id || '-'}</div>
+                      <div className="text-xs text-gray-500">{entity?.name || 'N/A'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        transaction.type === 'Addition' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {transaction.type === 'Addition' ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                        {transaction.type}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{transaction.code || '-'}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900">{transaction.description}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className={`text-sm font-semibold ${transaction.type === 'Addition' ? 'text-green-600' : 'text-red-600'}`}>
+                        {transaction.type === 'Addition' ? '+' : '-'}Rs. {transaction.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-gray-900">
+                        Rs. {transaction.running_balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{transaction.created_by}</div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -272,11 +356,16 @@ export function CashBalance() {
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-2xl font-bold text-gray-900">Add Cash Transaction</h2>
             </div>
-            <div className="p-6 space-y-6">
+            <form onSubmit={handleAddTransaction} className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-6">
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Entity</label>
-                  <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Entity *</label>
+                  <select
+                    value={formData.entityId}
+                    onChange={(e) => setFormData({ ...formData, entityId: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
                     <option value="">Select entity</option>
                     {entities.map((entity) => (
                       <option key={entity.id} value={entity.id}>
@@ -289,6 +378,7 @@ export function CashBalance() {
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Type</label>
                   <div className="flex space-x-4">
                     <button
+                      type="button"
                       onClick={() => setTransactionType('Addition')}
                       className={`flex-1 px-4 py-3 rounded-lg border-2 font-medium transition-colors ${
                         transactionType === 'Addition'
@@ -300,6 +390,7 @@ export function CashBalance() {
                       Addition
                     </button>
                     <button
+                      type="button"
                       onClick={() => setTransactionType('Deduction')}
                       className={`flex-1 px-4 py-3 rounded-lg border-2 font-medium transition-colors ${
                         transactionType === 'Deduction'
@@ -312,60 +403,77 @@ export function CashBalance() {
                     </button>
                   </div>
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Description</label>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Code</label>
                   <input
                     type="text"
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., Manual deposit, Shares bought/sold"
+                    placeholder="e.g., 001, 002, 900"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Amount (LKR)</label>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Amount (LKR) *</label>
                   <input
                     type="number"
                     step="0.01"
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Date/Time</label>
-                  <input
-                    type="datetime-local"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    defaultValue={new Date().toISOString().slice(0, 16)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Created By</label>
-                  <input
-                    type="text"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Your name"
+                    required
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (Optional)</label>
-                  <textarea
-                    rows={3}
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Description *</label>
+                  <input
+                    type="text"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Add any additional notes..."
+                    placeholder="e.g., Manual deposit, Shares bought/sold"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Date *</label>
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Created By *</label>
+                  <input
+                    type="text"
+                    value={formData.createdBy}
+                    onChange={(e) => setFormData({ ...formData, createdBy: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Your name"
+                    required
                   />
                 </div>
               </div>
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                Add Transaction
-              </button>
-            </div>
+              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Add Transaction
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
