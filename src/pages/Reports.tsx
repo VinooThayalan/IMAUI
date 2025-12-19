@@ -182,24 +182,6 @@ export function Reports() {
           </table>
         </div>
       </div>
-
-      <div className="bg-blue-50 rounded-xl border border-blue-200 p-6">
-        <div className="flex items-start space-x-4">
-          <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <FileText className="w-6 h-6 text-blue-600" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Custom Report Builder</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Need a custom report? Use our report builder to create personalized reports with specific data points,
-              date ranges, and formats tailored to your needs.
-            </p>
-            <button className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
-              Build Custom Report
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
