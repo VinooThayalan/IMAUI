@@ -4,6 +4,7 @@ import { supabase, type CashTransaction } from '../lib/supabase';
 
 interface Entity {
   id: string;
+  entity_id: string;
   name: string;
   type: string;
   current_balance: number;
@@ -33,7 +34,7 @@ export function CashBalance() {
 
   useEffect(() => {
     if (entities.length > 0 && !cashBookEntity) {
-      setCashBookEntity(entities[0].id);
+      setCashBookEntity(entities[0].entity_id);
     }
   }, [entities]);
 
@@ -73,7 +74,7 @@ export function CashBalance() {
     }
 
     try {
-      const entity = entities.find(e => e.id === formData.entityId);
+      const entity = entities.find(e => e.entity_id === formData.entityId);
       if (!entity) return;
 
       const entityTransactions = transactions
@@ -107,7 +108,7 @@ export function CashBalance() {
       await supabase
         .from('entities')
         .update({ current_balance: newBalance })
-        .eq('id', formData.entityId);
+        .eq('entity_id', formData.entityId);
 
       await loadData();
 
@@ -219,7 +220,7 @@ export function CashBalance() {
                 return (
                   <tr key={entity.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-blue-600">{entity.id}</div>
+                      <div className="text-sm font-bold text-blue-600">{entity.entity_id}</div>
                     </td>
                     <td className="px-6 py-4">
                       <div className="text-sm font-bold text-gray-900">{entity.name}</div>
@@ -273,8 +274,8 @@ export function CashBalance() {
             >
               <option value="all">All Entities</option>
               {entities.map((entity) => (
-                <option key={entity.id} value={entity.id}>
-                  {entity.id} - {entity.name}
+                <option key={entity.id} value={entity.entity_id}>
+                  {entity.entity_id} - {entity.name}
                 </option>
               ))}
             </select>
@@ -297,7 +298,7 @@ export function CashBalance() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredTransactions.map((transaction) => {
-                const entity = entities.find(e => e.id === transaction.entity_id);
+                const entity = entities.find(e => e.entity_id === transaction.entity_id);
                 return (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -368,8 +369,8 @@ export function CashBalance() {
                   >
                     <option value="">Select entity</option>
                     {entities.map((entity) => (
-                      <option key={entity.id} value={entity.id}>
-                        {entity.id} - {entity.name}
+                      <option key={entity.id} value={entity.entity_id}>
+                        {entity.entity_id} - {entity.name}
                       </option>
                     ))}
                   </select>
