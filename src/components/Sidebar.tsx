@@ -10,7 +10,9 @@ import {
   PieChart,
   Calendar,
   Wallet,
-  BarChart3
+  BarChart3,
+  CheckSquare,
+  FileEdit
 } from 'lucide-react';
 
 interface NavItem {
@@ -27,6 +29,8 @@ const navItems: NavItem[] = [
   { icon: Landmark, label: 'Banks', href: '#banks' },
   { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
   { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
+  { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
+  { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
   { icon: DollarSign, label: 'Dividends', href: '#dividends' },
   { icon: Calendar, label: 'Daily Prices', href: '#daily-prices' },
   { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics' },
