@@ -61,15 +61,15 @@ export function Reports() {
 
       const { data: prices, error: priceError } = await supabase
         .from('daily_share_prices')
-        .select('share_id, closing_price, price_date')
-        .order('price_date', { ascending: false });
+        .select('share_id, share_price, effective_date')
+        .order('effective_date', { ascending: false });
 
       if (priceError) throw priceError;
 
       const latestPrices = new Map<string, number>();
       prices?.forEach(p => {
         if (!latestPrices.has(p.share_id)) {
-          latestPrices.set(p.share_id, p.closing_price);
+          latestPrices.set(p.share_id, p.share_price);
         }
       });
 
@@ -108,7 +108,7 @@ export function Reports() {
       const shareHoldings: ShareHolding[] = Array.from(shareMap.entries())
         .map(([shareId, data]) => {
           const avgCost = data.total_shares > 0 ? data.total_cost / data.total_shares : 0;
-          const currentPrice = latestPrices.get(shareId) || avgCost;
+          const currentPrice = latestPrices.get(data.symbol) || avgCost;
           const currentValue = data.total_shares * currentPrice;
           const gainLoss = currentValue - data.total_cost;
           const gainLossPercent = data.total_cost > 0 ? (gainLoss / data.total_cost) * 100 : 0;
@@ -167,15 +167,15 @@ export function Reports() {
 
       const { data: prices, error: priceError } = await supabase
         .from('daily_share_prices')
-        .select('share_id, closing_price, price_date')
-        .order('price_date', { ascending: false });
+        .select('share_id, share_price, effective_date')
+        .order('effective_date', { ascending: false });
 
       if (priceError) throw priceError;
 
       const latestPrices = new Map<string, number>();
       prices?.forEach(p => {
         if (!latestPrices.has(p.share_id)) {
-          latestPrices.set(p.share_id, p.closing_price);
+          latestPrices.set(p.share_id, p.share_price);
         }
       });
 
@@ -229,7 +229,7 @@ export function Reports() {
         .map(([entityId, data]) => {
           const holdings = Array.from(data.shares.entries())
             .map(([shareId, share]) => {
-              const currentPrice = latestPrices.get(shareId) || share.avg_price;
+              const currentPrice = latestPrices.get(share.symbol) || share.avg_price;
               const currentValue = share.total_shares * currentPrice;
 
               return {
