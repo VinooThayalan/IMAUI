@@ -7,6 +7,7 @@ import { Banks } from './pages/Banks';
 import { Transactions } from './pages/Transactions';
 import { TransactionApprovals } from './pages/TransactionApprovals';
 import { ScripEntry } from './pages/ScripEntry';
+import { BuyAndSellNotes } from './pages/BuyAndSellNotes';
 import { Dividends } from './pages/Dividends';
 import { Portfolio } from './pages/Portfolio';
 import { Reports } from './pages/Reports';
@@ -44,6 +45,8 @@ function App() {
         return <TransactionApprovals />;
       case 'scrip-entry':
         return <ScripEntry />;
+      case 'buy-sell-notes':
+        return <BuyAndSellNotes />;
       case 'dividends':
         return <Dividends />;
       case 'portfolio':

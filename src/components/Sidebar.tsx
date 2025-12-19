@@ -12,7 +12,8 @@ import {
   Wallet,
   BarChart3,
   CheckSquare,
-  FileEdit
+  FileEdit,
+  FileUp
 } from 'lucide-react';
 
 interface NavItem {
@@ -31,6 +32,7 @@ const navItems: NavItem[] = [
   { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
   { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
   { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
+  { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes' },
   { icon: DollarSign, label: 'Dividends', href: '#dividends' },
   { icon: Calendar, label: 'Daily Prices', href: '#daily-prices' },
   { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics' },
