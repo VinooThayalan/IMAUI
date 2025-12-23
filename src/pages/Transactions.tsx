@@ -55,7 +55,15 @@ export function Transactions() {
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
 
-      setTransactions(transactionsRes.data || []);
+      const parsedTransactions = (transactionsRes.data || []).map(txn => ({
+        ...txn,
+        no_of_shares: Number(txn.no_of_shares) || 0,
+        price_per_share: Number(txn.price_per_share) || 0,
+        total_amount: Number(txn.total_amount) || 0,
+        fees: Number(txn.fees) || 0
+      }));
+
+      setTransactions(parsedTransactions);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
     } catch (error) {
