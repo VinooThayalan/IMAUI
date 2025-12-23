@@ -34,8 +34,8 @@ interface Entity {
 
 interface Share {
   id: string;
-  share_id: string;
-  company_name: string;
+  symbol: string;
+  name: string;
 }
 
 export function BuyAndSellNotes() {
@@ -70,7 +70,7 @@ export function BuyAndSellNotes() {
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, share_id, company_name').order('company_name')
+        supabase.from('shares').select('id, symbol, name').order('name')
       ]);
 
       if (notesRes.error) throw notesRes.error;
@@ -284,7 +284,7 @@ export function BuyAndSellNotes() {
                     <td className="px-6 py-4">
                       {details ? (
                         <div>
-                          <div className="text-sm font-medium text-gray-900">{details.share?.company_name || 'N/A'}</div>
+                          <div className="text-sm font-medium text-gray-900">{details.share?.name || 'N/A'}</div>
                           <div className="text-xs text-gray-500">{details.entity?.name || 'N/A'}</div>
                           <div className="text-xs text-gray-500">
                             {details.transaction.no_of_shares} shares @ Rs. {details.transaction.price_per_share.toLocaleString()}
@@ -373,7 +373,7 @@ export function BuyAndSellNotes() {
                     const share = shares.find(s => s.id === transaction.share_id);
                     return (
                       <option key={transaction.id} value={transaction.id}>
-                        {new Date(transaction.transaction_date).toLocaleDateString()} - {transaction.transaction_type} - {share?.company_name || 'N/A'} ({entity?.name || 'N/A'})
+                        {new Date(transaction.transaction_date).toLocaleDateString()} - {transaction.transaction_type} - {share?.name || 'N/A'} ({entity?.name || 'N/A'})
                       </option>
                     );
                   })}

@@ -23,7 +23,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  company_name: string;
+  name: string;
   symbol: string;
 }
 
@@ -48,7 +48,7 @@ export function Transactions() {
       const [transactionsRes, entitiesRes, sharesRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, company_name, symbol').order('company_name')
+        supabase.from('shares').select('id, name, symbol').order('name')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -72,7 +72,7 @@ export function Transactions() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.symbol} - ${share.company_name}` : 'Unknown';
+    return share ? `${share.symbol} - ${share.name}` : 'Unknown';
   }
 
   function toggleSelectTransaction(id: string) {
@@ -358,7 +358,7 @@ export function Transactions() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      transaction.transaction_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      transaction.transaction_type === 'BUY' || transaction.transaction_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
                       {transaction.transaction_type}
                     </span>

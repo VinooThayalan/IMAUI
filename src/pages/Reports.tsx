@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 interface ShareHolding {
   share_id: string;
   symbol: string;
-  company_name: string;
+  name: string;
   total_shares: number;
   avg_cost: number;
   total_cost: number;
@@ -20,7 +20,7 @@ interface PortfolioHolding {
   entity_name: string;
   holdings: {
     symbol: string;
-    company_name: string;
+    name: string;
     shares: number;
     cost_basis: number;
     current_value: number;
@@ -53,7 +53,7 @@ export function Reports() {
           shares (
             id,
             symbol,
-            company_name
+            name
           )
         `);
 
@@ -75,7 +75,7 @@ export function Reports() {
 
       const shareMap = new Map<string, {
         symbol: string;
-        company_name: string;
+        name: string;
         total_shares: number;
         total_cost: number;
         transactions: { type: string; shares: number; price: number }[];
@@ -88,7 +88,7 @@ export function Reports() {
         if (!shareMap.has(shareId)) {
           shareMap.set(shareId, {
             symbol: tx.shares.symbol,
-            company_name: tx.shares.company_name,
+            name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
             transactions: []
@@ -96,10 +96,10 @@ export function Reports() {
         }
 
         const share = shareMap.get(shareId)!;
-        if (tx.transaction_type === 'Buy') {
+        if (tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy') {
           share.total_shares += Number(tx.no_of_shares);
           share.total_cost += Number(tx.total_amount);
-        } else if (tx.transaction_type === 'Sell') {
+        } else if (tx.transaction_type === 'SELL' || tx.transaction_type === 'Sell') {
           share.total_shares -= Number(tx.no_of_shares);
           share.total_cost -= Number(tx.total_amount);
         }
@@ -116,7 +116,7 @@ export function Reports() {
           return {
             share_id: shareId,
             symbol: data.symbol,
-            company_name: data.company_name,
+            name: data.name,
             total_shares: data.total_shares,
             avg_cost: avgCost,
             total_cost: data.total_cost,
@@ -159,7 +159,7 @@ export function Reports() {
           shares (
             id,
             symbol,
-            company_name
+            name
           )
         `);
 
@@ -183,7 +183,7 @@ export function Reports() {
         entity_name: string;
         shares: Map<string, {
           symbol: string;
-          company_name: string;
+          name: string;
           total_shares: number;
           total_cost: number;
           avg_price: number;
@@ -207,7 +207,7 @@ export function Reports() {
         if (!entity.shares.has(shareId)) {
           entity.shares.set(shareId, {
             symbol: tx.shares.symbol,
-            company_name: tx.shares.company_name,
+            name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
             avg_price: 0
@@ -215,10 +215,10 @@ export function Reports() {
         }
 
         const share = entity.shares.get(shareId)!;
-        if (tx.transaction_type === 'Buy') {
+        if (tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy') {
           share.total_shares += Number(tx.no_of_shares);
           share.total_cost += Number(tx.total_amount);
-        } else if (tx.transaction_type === 'Sell') {
+        } else if (tx.transaction_type === 'SELL' || tx.transaction_type === 'Sell') {
           share.total_shares -= Number(tx.no_of_shares);
           share.total_cost -= Number(tx.total_amount);
         }
@@ -234,7 +234,7 @@ export function Reports() {
 
               return {
                 symbol: share.symbol,
-                company_name: share.company_name,
+                name: share.name,
                 shares: share.total_shares,
                 cost_basis: share.total_cost,
                 current_value: currentValue
@@ -329,7 +329,7 @@ export function Reports() {
               {shareData.map((share) => (
                 <tr key={share.share_id}>
                   <td className="px-4 py-3 text-sm font-bold text-gray-900">{share.symbol}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900">{share.company_name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900">{share.name}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 text-right">
                     {share.total_shares.toLocaleString()}
                   </td>
@@ -446,7 +446,7 @@ export function Reports() {
                   {entity.holdings.map((holding) => (
                     <tr key={`${entity.entity_id}-${holding.symbol}`}>
                       <td className="px-4 py-3 text-sm font-bold text-gray-900">{holding.symbol}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{holding.company_name}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{holding.name}</td>
                       <td className="px-4 py-3 text-sm text-gray-900 text-right">
                         {holding.shares.toLocaleString()}
                       </td>
