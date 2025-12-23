@@ -56,8 +56,20 @@ export function CashBalance() {
 
       if (transactionsError) throw transactionsError;
 
-      setEntities(entitiesData || []);
-      setTransactions(transactionsData || []);
+      const parsedEntities = (entitiesData || []).map(entity => ({
+        ...entity,
+        current_balance: Number(entity.current_balance) || 0,
+        od_limit: Number(entity.od_limit) || 0
+      }));
+
+      const parsedTransactions = (transactionsData || []).map(txn => ({
+        ...txn,
+        amount: Number(txn.amount) || 0,
+        running_balance: Number(txn.running_balance) || 0
+      }));
+
+      setEntities(parsedEntities);
+      setTransactions(parsedTransactions);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
