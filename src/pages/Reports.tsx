@@ -68,13 +68,31 @@ interface DetailedShareTransaction {
   annual_equivalent_rate: number;
 }
 
-type ReportType = 'share' | 'portfolio' | 'detailed' | null;
+interface CashbookEntry {
+  date: string;
+  description: string;
+  code: string;
+  amount: number;
+  type: 'in' | 'out';
+}
+
+interface CashbookReport {
+  entries_in: CashbookEntry[];
+  entries_out: CashbookEntry[];
+  total_in: number;
+  total_out: number;
+  opening_balance: number;
+  closing_balance: number;
+}
+
+type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | null;
 
 export function Reports() {
   const [activeReport, setActiveReport] = useState<ReportType>(null);
   const [shareData, setShareData] = useState<ShareHolding[]>([]);
   const [portfolioData, setPortfolioData] = useState<PortfolioHolding[]>([]);
   const [detailedData, setDetailedData] = useState<DetailedShareTransaction[]>([]);
+  const [cashbookData, setCashbookData] = useState<CashbookReport | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function generateShareReport() {
@@ -494,6 +512,73 @@ export function Reports() {
     }
   }
 
+  async function generateCashbookReport() {
+    try {
+      setLoading(true);
+
+      const { data: ledger, error } = await supabase
+        .from('cash_balance_ledger')
+        .select('*')
+        .order('date', { ascending: true });
+
+      if (error) throw error;
+
+      const entriesIn: CashbookEntry[] = [];
+      const entriesOut: CashbookEntry[] = [];
+      let openingBalance = 0;
+
+      ledger?.forEach((entry: any, index: number) => {
+        const entryData: CashbookEntry = {
+          date: new Date(entry.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }),
+          description: entry.description || '',
+          code: entry.code || (entry.type === 'Addition' ? '001' : '002'),
+          amount: Number(entry.amount),
+          type: entry.type === 'Addition' ? 'in' : 'out'
+        };
+
+        if (index === 0 && entry.type === 'Addition') {
+          openingBalance = Number(entry.amount);
+          entryData.description = `Balance b/f ${entryData.description}`;
+        }
+
+        if (entry.type === 'Addition') {
+          entriesIn.push(entryData);
+        } else {
+          entriesOut.push(entryData);
+        }
+      });
+
+      const totalIn = entriesIn.reduce((sum, e) => sum + e.amount, 0);
+      const totalOut = entriesOut.reduce((sum, e) => sum + e.amount, 0);
+      const closingBalance = totalIn - totalOut;
+
+      if (closingBalance !== 0) {
+        entriesOut.push({
+          date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }),
+          description: 'Balance carried forward',
+          code: '',
+          amount: closingBalance,
+          type: 'out'
+        });
+      }
+
+      setCashbookData({
+        entries_in: entriesIn,
+        entries_out: entriesOut,
+        total_in: totalIn,
+        total_out: totalIn,
+        opening_balance: openingBalance,
+        closing_balance: closingBalance
+      });
+      setActiveReport('cashbook');
+    } catch (error) {
+      console.error('Error generating cashbook report:', error);
+      alert('Failed to generate cashbook report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handlePrint() {
     window.print();
   }
@@ -752,6 +837,110 @@ export function Reports() {
               </span>
             </p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeReport === 'cashbook') {
+    return (
+      <div className="p-8">
+        <style>
+          {`
+            @media print {
+              .no-print { display: none !important; }
+              body { background: white; }
+            }
+          `}
+        </style>
+
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button
+            onClick={closeReport}
+            className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+          >
+            <X className="w-5 h-5" />
+            <span>Close</span>
+          </button>
+          <button
+            onClick={handlePrint}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Printer className="w-5 h-5" />
+            <span>Print</span>
+          </button>
+        </div>
+
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Cash Book</h1>
+            <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+
+          {cashbookData && (
+            <div className="grid grid-cols-2 gap-1 border-2 border-gray-900">
+              <div className="border-r border-gray-900">
+                <table className="w-full">
+                  <thead className="bg-emerald-50 border-b-2 border-gray-900">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-bold text-gray-900 border-r border-gray-300">Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-bold text-gray-900 border-r border-gray-300">Description</th>
+                      <th className="px-3 py-2 text-center text-xs font-bold text-gray-900 border-r border-gray-300">Code</th>
+                      <th className="px-3 py-2 text-right text-xs font-bold text-gray-900">Amount In</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashbookData.entries_in.map((entry, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="px-3 py-2 text-xs text-gray-900 border-r border-gray-200">{entry.date}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900 border-r border-gray-200">{entry.description}</td>
+                        <td className="px-3 py-2 text-xs text-center text-gray-900 border-r border-gray-200">{entry.code}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900 text-right font-medium">{entry.amount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-emerald-50 border-t-2 border-gray-900">
+                      <td colSpan={3} className="px-3 py-3 text-sm font-bold text-gray-900 text-center border-r border-gray-300">Total funds</td>
+                      <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{cashbookData.total_in.toLocaleString()}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <table className="w-full">
+                  <thead className="bg-orange-50 border-b-2 border-gray-900">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-bold text-gray-900 border-r border-gray-300">Date</th>
+                      <th className="px-3 py-2 text-left text-xs font-bold text-gray-900 border-r border-gray-300">Description</th>
+                      <th className="px-3 py-2 text-center text-xs font-bold text-gray-900 border-r border-gray-300">Code</th>
+                      <th className="px-3 py-2 text-right text-xs font-bold text-gray-900">Amounts out</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashbookData.entries_out.map((entry, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="px-3 py-2 text-xs text-gray-900 border-r border-gray-200">{entry.date}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900 border-r border-gray-200">{entry.description}</td>
+                        <td className="px-3 py-2 text-xs text-center text-gray-900 border-r border-gray-200">{entry.code}</td>
+                        <td className="px-3 py-2 text-xs text-gray-900 text-right font-medium">{entry.amount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-orange-50 border-t-2 border-gray-900">
+                      <td colSpan={3} className="px-3 py-3 text-sm font-bold text-gray-900 text-center border-r border-gray-300">Total funds</td>
+                      <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{cashbookData.total_out.toLocaleString()}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!cashbookData && (
+            <div className="text-center py-12">
+              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No cash transactions found</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1035,6 +1224,35 @@ export function Reports() {
               </div>
               <button
                 onClick={generateDetailedShareReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                <FileText className="w-6 h-6 text-emerald-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Cash Book Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Double-entry cashbook showing all cash inflows and outflows with running balances
+            </p>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">
+                Updated: Today
+              </div>
+              <button
+                onClick={generateCashbookReport}
                 disabled={loading}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
