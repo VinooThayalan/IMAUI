@@ -449,7 +449,7 @@ export function BuyAndSellNotes() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Document URL
+                  Upload Buy/Sell Note
                 </label>
                 <div className="flex items-center space-x-2">
                   <Upload className="w-5 h-5 text-gray-400" />
@@ -458,10 +458,23 @@ export function BuyAndSellNotes() {
                     value={formData.file_url}
                     onChange={(e) => setFormData({ ...formData, file_url: e.target.value })}
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="https://example.com/document.pdf"
+                    placeholder="https://example.com/buy-sell-note.pdf"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Enter the URL of the uploaded document</p>
+                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm font-semibold text-blue-900 mb-1">Document URL</p>
+                  <p className="text-xs text-blue-700">
+                    Enter the URL where your buy/sell note document is stored. This can be a link to:
+                  </p>
+                  <ul className="text-xs text-blue-700 mt-1 ml-4 list-disc space-y-0.5">
+                    <li>Cloud storage (Google Drive, Dropbox, OneDrive)</li>
+                    <li>Document management system</li>
+                    <li>File hosting service</li>
+                  </ul>
+                  <p className="text-xs text-blue-700 mt-1">
+                    Make sure the URL is publicly accessible or shared with appropriate permissions.
+                  </p>
+                </div>
               </div>
 
               <div>
