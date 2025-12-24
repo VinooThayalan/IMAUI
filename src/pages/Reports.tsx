@@ -94,6 +94,27 @@ export function Reports() {
   const [detailedData, setDetailedData] = useState<DetailedShareTransaction[]>([]);
   const [cashbookData, setCashbookData] = useState<CashbookReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedEntity, setSelectedEntity] = useState<string>('all');
+  const [selectedEntityName, setSelectedEntityName] = useState<string>('All Entities');
+
+  useEffect(() => {
+    fetchEntities();
+  }, []);
+
+  async function fetchEntities() {
+    try {
+      const { data, error } = await supabase
+        .from('entities')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+      setEntities(data || []);
+    } catch (error) {
+      console.error('Error fetching entities:', error);
+    }
+  }
 
   async function generateShareReport() {
     try {
@@ -516,10 +537,16 @@ export function Reports() {
     try {
       setLoading(true);
 
-      const { data: ledger, error } = await supabase
+      let query = supabase
         .from('cash_balance_ledger')
         .select('*')
         .order('date', { ascending: true });
+
+      if (selectedEntity !== 'all') {
+        query = query.eq('entity_id', selectedEntity);
+      }
+
+      const { data: ledger, error } = await query;
 
       if (error) throw error;
 
@@ -875,6 +902,7 @@ export function Reports() {
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Cash Book</h1>
             <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            <p className="text-sm text-gray-500 mt-1">Entity: {selectedEntityName}</p>
           </div>
 
           {cashbookData && (
@@ -1247,6 +1275,30 @@ export function Reports() {
             <p className="text-sm text-gray-500 mb-4">
               Double-entry cashbook showing all cash inflows and outflows with running balances
             </p>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-700 mb-2">Select Entity</label>
+              <select
+                value={selectedEntity}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedEntity(value);
+                  if (value === 'all') {
+                    setSelectedEntityName('All Entities');
+                  } else {
+                    const entity = entities.find(ent => ent.id === value);
+                    setSelectedEntityName(entity?.name || 'Unknown');
+                  }
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Entities</option>
+                {entities.map((entity) => (
+                  <option key={entity.id} value={entity.id}>
+                    {entity.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center justify-between pt-4 border-t border-gray-200">
               <div className="text-xs text-gray-500">
                 Updated: Today
