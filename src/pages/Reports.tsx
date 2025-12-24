@@ -18,15 +18,26 @@ interface ShareHolding {
 interface PortfolioHolding {
   entity_id: string;
   entity_name: string;
+  cds_account: string;
   holdings: {
+    sector: string;
     symbol: string;
     name: string;
-    shares: number;
-    cost_basis: number;
-    current_value: number;
+    balance: number;
+    cost: number;
+    cost_per_share: number;
+    market_price_per_share: number;
+    market_value_net: number;
+    dividends: number;
+    cash_dps_net: number;
+    total_returns: number;
+    aer: number;
+    remarks: string;
   }[];
   total_cost: number;
   total_value: number;
+  total_dividends: number;
+  total_returns: number;
   gain_loss: number;
 }
 
@@ -171,54 +182,79 @@ export function Reports() {
     try {
       setLoading(true);
 
-      const { data: transactions, error: txError } = await supabase
-        .from('transactions')
-        .select(`
-          entity_id,
-          share_id,
-          transaction_type,
-          no_of_shares,
-          price_per_share,
-          total_amount,
-          entities (
-            id,
-            name
-          ),
-          shares (
-            id,
-            symbol,
-            name
-          )
-        `);
+      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select(`
+            entity_id,
+            share_id,
+            transaction_type,
+            transaction_date,
+            no_of_shares,
+            price_per_share,
+            total_amount,
+            entities (
+              id,
+              name,
+              entity_id
+            ),
+            shares (
+              id,
+              symbol,
+              name,
+              sector
+            )
+          `)
+          .order('transaction_date', { ascending: true }),
+        supabase
+          .from('dividends')
+          .select('entity_id, share_id, payment_date, amount_net, amount_gross')
+          .order('payment_date', { ascending: false }),
+        supabase
+          .from('daily_share_prices')
+          .select('share_id, share_price, effective_date')
+          .order('effective_date', { ascending: false }),
+        supabase.from('entities').select('id, name, entity_id')
+      ]);
 
-      if (txError) throw txError;
-
-      const { data: prices, error: priceError } = await supabase
-        .from('daily_share_prices')
-        .select('share_id, share_price, effective_date')
-        .order('effective_date', { ascending: false });
-
-      if (priceError) throw priceError;
+      if (transactionsRes.error) throw transactionsRes.error;
+      if (dividendsRes.error) throw dividendsRes.error;
+      if (pricesRes.error) throw pricesRes.error;
+      if (entitiesRes.error) throw entitiesRes.error;
 
       const latestPrices = new Map<string, number>();
-      prices?.forEach(p => {
+      pricesRes.data?.forEach(p => {
         if (!latestPrices.has(p.share_id)) {
           latestPrices.set(p.share_id, p.share_price);
         }
       });
 
+      const dividendMap = new Map<string, { total: number; count: number; lastFY: number }>();
+      dividendsRes.data?.forEach(d => {
+        const key = `${d.entity_id}-${d.share_id}`;
+        const current = dividendMap.get(key) || { total: 0, count: 0, lastFY: 0 };
+        current.total += Number(d.amount_net);
+        current.count += 1;
+        if (current.count === 1) {
+          current.lastFY = Number(d.amount_net);
+        }
+        dividendMap.set(key, current);
+      });
+
       const entityMap = new Map<string, {
         entity_name: string;
+        cds_account: string;
         shares: Map<string, {
+          sector: string;
           symbol: string;
           name: string;
           total_shares: number;
           total_cost: number;
-          avg_price: number;
+          first_tx_date: string;
         }>;
       }>();
 
-      transactions?.forEach((tx: any) => {
+      transactionsRes.data?.forEach((tx: any) => {
         if (!tx.entities || !tx.shares) return;
 
         const entityId = tx.entity_id;
@@ -227,6 +263,7 @@ export function Reports() {
         if (!entityMap.has(entityId)) {
           entityMap.set(entityId, {
             entity_name: tx.entities.name,
+            cds_account: tx.entities.entity_id || '',
             shares: new Map()
           });
         }
@@ -234,11 +271,12 @@ export function Reports() {
         const entity = entityMap.get(entityId)!;
         if (!entity.shares.has(shareId)) {
           entity.shares.set(shareId, {
+            sector: tx.shares.sector || 'N/A',
             symbol: tx.shares.symbol,
             name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
-            avg_price: 0
+            first_tx_date: tx.transaction_date
           });
         }
 
@@ -250,36 +288,59 @@ export function Reports() {
           share.total_shares -= Number(tx.no_of_shares);
           share.total_cost -= Number(tx.total_amount);
         }
-        share.avg_price = share.total_shares > 0 ? share.total_cost / share.total_shares : 0;
       });
 
       const portfolioHoldings: PortfolioHolding[] = Array.from(entityMap.entries())
         .map(([entityId, data]) => {
           const holdings = Array.from(data.shares.entries())
             .map(([shareId, share]) => {
-              const currentPrice = latestPrices.get(share.symbol) || share.avg_price;
-              const currentValue = share.total_shares * currentPrice;
+              const marketPrice = latestPrices.get(shareId) || 0;
+              const costPerShare = share.total_shares > 0 ? share.total_cost / share.total_shares : 0;
+              const marketValueNet = share.total_shares * marketPrice;
+
+              const divKey = `${entityId}-${shareId}`;
+              const divData = dividendMap.get(divKey) || { total: 0, count: 0, lastFY: 0 };
+              const totalDividends = divData.total;
+              const cashDpsNet = share.total_shares > 0 ? divData.lastFY / share.total_shares : 0;
+
+              const totalReturns = (marketValueNet - share.total_cost) + totalDividends;
+
+              const daysSinceFirst = Math.max(1, Math.floor((new Date().getTime() - new Date(share.first_tx_date).getTime()) / (1000 * 60 * 60 * 24)));
+              const aer = share.total_cost > 0 ? (totalReturns / share.total_cost) * (365 / daysSinceFirst) * 100 : 0;
 
               return {
+                sector: share.sector,
                 symbol: share.symbol,
                 name: share.name,
-                shares: share.total_shares,
-                cost_basis: share.total_cost,
-                current_value: currentValue
+                balance: share.total_shares,
+                cost: share.total_cost,
+                cost_per_share: costPerShare,
+                market_price_per_share: marketPrice,
+                market_value_net: marketValueNet,
+                dividends: totalDividends,
+                cash_dps_net: cashDpsNet,
+                total_returns: totalReturns,
+                aer: aer,
+                remarks: ''
               };
             })
-            .filter(h => h.shares > 0);
+            .filter(h => h.balance > 0);
 
-          const totalCost = holdings.reduce((sum, h) => sum + h.cost_basis, 0);
-          const totalValue = holdings.reduce((sum, h) => sum + h.current_value, 0);
+          const totalCost = holdings.reduce((sum, h) => sum + h.cost, 0);
+          const totalValue = holdings.reduce((sum, h) => sum + h.market_value_net, 0);
+          const totalDividends = holdings.reduce((sum, h) => sum + h.dividends, 0);
+          const totalReturns = holdings.reduce((sum, h) => sum + h.total_returns, 0);
           const gainLoss = totalValue - totalCost;
 
           return {
             entity_id: entityId,
             entity_name: data.entity_name,
+            cds_account: data.cds_account,
             holdings,
             total_cost: totalCost,
             total_value: totalValue,
+            total_dividends: totalDividends,
+            total_returns: totalReturns,
             gain_loss: gainLoss
           };
         })
@@ -733,66 +794,100 @@ export function Reports() {
 
           {portfolioData.map((entity, idx) => (
             <div key={entity.entity_id} className={idx > 0 ? 'mt-8 pt-8 border-t-2 border-gray-300' : ''}>
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">{entity.entity_name}</h2>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-900">{entity.entity_name}</h2>
+                <div className="text-sm text-gray-600">CDS Account: <span className="font-semibold">{entity.cds_account}</span></div>
+              </div>
 
-              <table className="w-full mb-6">
-                <thead className="border-b-2 border-gray-700">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">Symbol</th>
-                    <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">Company</th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Shares</th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Cost Basis</th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Current Value</th>
-                    <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Gain/Loss</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {entity.holdings.map((holding) => (
-                    <tr key={`${entity.entity_id}-${holding.symbol}`}>
-                      <td className="px-4 py-3 text-sm font-bold text-gray-900">{holding.symbol}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{holding.name}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                        {holding.shares.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                        Rs. {holding.cost_basis.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right font-semibold">
-                        Rs. {holding.current_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className={`px-4 py-3 text-sm text-right font-semibold ${
-                        (holding.current_value - holding.cost_basis) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        Rs. {(holding.current_value - holding.cost_basis).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full mb-6 text-sm">
+                  <thead className="bg-gray-50 border-b-2 border-gray-700">
+                    <tr>
+                      <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Sector</th>
+                      <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Share</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Balance</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cost</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cost/Share</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Mkt Price</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Mkt Value</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Div</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Total Returns</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">AER %</th>
+                      <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">DPS (FY)</th>
+                      <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Remarks</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot className="border-t-2 border-gray-700">
-                  <tr>
-                    <td colSpan={3} className="px-4 py-3 text-sm font-bold text-gray-900 text-right">
-                      Entity Total:
-                    </td>
-                    <td className="px-4 py-3 text-sm font-bold text-gray-900 text-right">
-                      Rs. {entity.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-bold text-gray-900 text-right">
-                      Rs. {entity.total_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className={`px-4 py-3 text-sm font-bold text-right ${
-                      entity.gain_loss >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      Rs. {entity.gain_loss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {entity.holdings.map((holding) => (
+                      <tr key={`${entity.entity_id}-${holding.symbol}`} className="hover:bg-gray-50">
+                        <td className="px-2 py-2 text-xs text-gray-900">{holding.sector}</td>
+                        <td className="px-2 py-2 text-xs font-bold text-gray-900">{holding.symbol}</td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.balance.toLocaleString()}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.cost_per_share.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.market_price_per_share.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">
+                          {holding.market_value_net.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.dividends > 0 ? holding.dividends.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                        </td>
+                        <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                          holding.total_returns >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {holding.total_returns.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                          holding.aer >= 0 ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {holding.aer.toFixed(2)}%
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                          {holding.cash_dps_net > 0 ? holding.cash_dps_net.toFixed(2) : '-'}
+                        </td>
+                        <td className="px-2 py-2 text-xs text-gray-500">{holding.remarks || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-gray-700 bg-gray-50">
+                    <tr>
+                      <td colSpan={3} className="px-2 py-3 text-xs font-bold text-gray-900 text-right">
+                        Entity Total:
+                      </td>
+                      <td className="px-2 py-3 text-xs font-bold text-gray-900 text-right">
+                        {entity.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td colSpan={2} className="px-2 py-3"></td>
+                      <td className="px-2 py-3 text-xs font-bold text-gray-900 text-right">
+                        {entity.total_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-2 py-3 text-xs font-bold text-gray-900 text-right">
+                        {entity.total_dividends.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className={`px-2 py-3 text-xs font-bold text-right ${
+                        entity.total_returns >= 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {entity.total_returns.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </td>
+                      <td colSpan={3} className="px-2 py-3"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
           ))}
 
           <div className="mt-8 pt-8 border-t-2 border-gray-900">
             <h3 className="text-xl font-bold text-gray-900 mb-4">Portfolio Summary</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
                 <p className="text-sm text-gray-500">Total Cost Basis</p>
                 <p className="text-2xl font-bold text-gray-900">
@@ -800,13 +895,27 @@ export function Reports() {
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Total Current Value</p>
+                <p className="text-sm text-gray-500">Total Market Value</p>
                 <p className="text-2xl font-bold text-gray-900">
                   Rs. {portfolioData.reduce((sum, p) => sum + p.total_value, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Total Gain/Loss</p>
+                <p className="text-sm text-gray-500">Total Dividends</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  Rs. {portfolioData.reduce((sum, p) => sum + p.total_dividends, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Total Returns</p>
+                <p className={`text-2xl font-bold ${
+                  portfolioData.reduce((sum, p) => sum + p.total_returns, 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  Rs. {portfolioData.reduce((sum, p) => sum + p.total_returns, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Capital Gain/Loss</p>
                 <p className={`text-2xl font-bold ${
                   portfolioData.reduce((sum, p) => sum + p.gain_loss, 0) >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
@@ -814,7 +923,7 @@ export function Reports() {
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-500">Overall Return</p>
+                <p className="text-sm text-gray-500">Overall Return %</p>
                 <p className={`text-2xl font-bold ${
                   portfolioData.reduce((sum, p) => sum + p.gain_loss, 0) >= 0 ? 'text-green-600' : 'text-red-600'
                 }`}>
