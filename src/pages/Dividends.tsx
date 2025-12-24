@@ -52,32 +52,8 @@ const dividends = [
   },
 ];
 
-const corporateActions = [
-  {
-    id: 1,
-    entity: 'Fernando Family Trust',
-    share: 'JKH',
-    type: 'Stock Split',
-    ratio: '4:1',
-    effectiveDate: '2024-03-01',
-    status: 'Upcoming',
-    description: '4-for-1 stock split'
-  },
-  {
-    id: 2,
-    entity: 'Perera Holdings',
-    share: 'NDB',
-    type: 'Rights Issue',
-    ratio: '1:2',
-    effectiveDate: '2024-04-15',
-    status: 'Pending Approval',
-    description: 'Rights issue at Rs. 150 per share'
-  },
-];
-
 export function Dividends() {
   const [showModal, setShowModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dividends' | 'actions'>('dividends');
 
   const totalDividends = dividends
     .filter(d => d.status === 'Paid')
@@ -87,8 +63,8 @@ export function Dividends() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dividends & Corporate Actions</h1>
-          <p className="text-gray-500 mt-1">Track dividend payments and corporate actions</p>
+          <h1 className="text-3xl font-bold text-gray-900">Dividends</h1>
+          <p className="text-gray-500 mt-1">Track dividend payments</p>
         </div>
         <button
           onClick={() => setShowModal(true)}
@@ -99,7 +75,7 @@ export function Dividends() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -129,46 +105,16 @@ export function Dividends() {
             </div>
           </div>
         </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Corporate Actions</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{corporateActions.length}</p>
-              <p className="text-sm text-gray-500 mt-2">Pending or upcoming</p>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setActiveTab('dividends')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  activeTab === 'dividends' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                Dividends
-              </button>
-              <button
-                onClick={() => setActiveTab('actions')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  activeTab === 'actions' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                Corporate Actions
-              </button>
-            </div>
-          </div>
           <div className="flex items-center space-x-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
-                placeholder={`Search ${activeTab}...`}
+                placeholder="Search dividends..."
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -179,8 +125,7 @@ export function Dividends() {
           </div>
         </div>
 
-        {activeTab === 'dividends' ? (
-          <div className="overflow-x-auto">
+        <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -229,53 +174,7 @@ export function Dividends() {
                 ))}
               </tbody>
             </table>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Details</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Effective Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {corporateActions.map((action) => (
-                  <tr key={action.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-gray-900">{action.entity}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">{action.share}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                        {action.type}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div>
-                        <div className="text-sm text-gray-900">{action.description}</div>
-                        <div className="text-xs text-gray-500">Ratio: {action.ratio}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{action.effectiveDate}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        action.status === 'Upcoming' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        {action.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        </div>
       </div>
 
       {showModal && (
