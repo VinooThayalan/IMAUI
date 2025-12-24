@@ -1,4 +1,4 @@
-import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X } from 'lucide-react';
+import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, TrendingUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -30,12 +30,40 @@ interface PortfolioHolding {
   gain_loss: number;
 }
 
-type ReportType = 'share' | 'portfolio' | null;
+interface DetailedShareTransaction {
+  entity_name: string;
+  share_symbol: string;
+  share_name: string;
+  date: string;
+  status: string;
+  unit_price: number;
+  no_of_shares: number;
+  share_cum_balance: number;
+  purchase_cost: number;
+  sales_value: number;
+  avg_cost: number;
+  avg_price: number;
+  dividend: number;
+  market_value: number;
+  cash_flow: number;
+  total_surplus: number;
+  cum_surplus: number;
+  cds_account: string;
+  cost_per_share: number;
+  market_price: number;
+  market_price_after_brokerage: number;
+  sale_value: number;
+  purchase_value: number;
+  annual_equivalent_rate: number;
+}
+
+type ReportType = 'share' | 'portfolio' | 'detailed' | null;
 
 export function Reports() {
   const [activeReport, setActiveReport] = useState<ReportType>(null);
   const [shareData, setShareData] = useState<ShareHolding[]>([]);
   const [portfolioData, setPortfolioData] = useState<PortfolioHolding[]>([]);
+  const [detailedData, setDetailedData] = useState<DetailedShareTransaction[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function generateShareReport() {
@@ -268,6 +296,143 @@ export function Reports() {
     }
   }
 
+  async function generateDetailedShareReport() {
+    try {
+      setLoading(true);
+
+      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select(`
+            id,
+            entity_id,
+            share_id,
+            transaction_type,
+            transaction_date,
+            no_of_shares,
+            price_per_share,
+            total_amount,
+            fees,
+            entities (
+              id,
+              name,
+              entity_id
+            ),
+            shares (
+              id,
+              symbol,
+              name
+            )
+          `)
+          .order('transaction_date', { ascending: true }),
+        supabase
+          .from('dividends')
+          .select('entity_id, share_id, payment_date, amount_net')
+          .order('payment_date', { ascending: true }),
+        supabase
+          .from('daily_share_prices')
+          .select('share_id, share_price, effective_date')
+          .order('effective_date', { ascending: false }),
+        supabase.from('entities').select('id, name, entity_id')
+      ]);
+
+      if (transactionsRes.error) throw transactionsRes.error;
+      if (dividendsRes.error) throw dividendsRes.error;
+      if (pricesRes.error) throw pricesRes.error;
+      if (entitiesRes.error) throw entitiesRes.error;
+
+      const latestPrices = new Map<string, number>();
+      pricesRes.data?.forEach(p => {
+        if (!latestPrices.has(p.share_id)) {
+          latestPrices.set(p.share_id, p.share_price);
+        }
+      });
+
+      const dividendMap = new Map<string, number>();
+      dividendsRes.data?.forEach(d => {
+        const key = `${d.entity_id}-${d.share_id}`;
+        dividendMap.set(key, (dividendMap.get(key) || 0) + Number(d.amount_net));
+      });
+
+      const balanceTracker = new Map<string, number>();
+      const costTracker = new Map<string, number>();
+      let cumulativeSurplus = 0;
+
+      const detailedTransactions: DetailedShareTransaction[] = [];
+
+      transactionsRes.data?.forEach((tx: any) => {
+        if (!tx.entities || !tx.shares) return;
+
+        const key = `${tx.entity_id}-${tx.share_id}`;
+        const currentBalance = balanceTracker.get(key) || 0;
+        const currentCost = costTracker.get(key) || 0;
+
+        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        const shares = Number(tx.no_of_shares);
+        const price = Number(tx.price_per_share);
+        const totalAmount = Number(tx.total_amount);
+        const fees = Number(tx.fees) || 0;
+
+        const newBalance = isBuy ? currentBalance + shares : currentBalance - shares;
+        const newCost = isBuy ? currentCost + totalAmount : currentCost - (currentBalance > 0 ? (currentCost / currentBalance) * shares : 0);
+
+        balanceTracker.set(key, newBalance);
+        costTracker.set(key, newCost);
+
+        const avgCost = newBalance > 0 ? newCost / newBalance : 0;
+        const marketPrice = latestPrices.get(tx.share_id) || price;
+        const brokerageRate = 0.003;
+        const marketPriceAfterBrokerage = isBuy
+          ? marketPrice * (1 + brokerageRate)
+          : marketPrice * (1 - brokerageRate);
+
+        const marketValue = newBalance * marketPrice;
+        const cashFlow = isBuy ? -totalAmount : totalAmount;
+        const totalSurplus = marketValue - newCost;
+        cumulativeSurplus += (isBuy ? 0 : totalAmount - (avgCost * shares));
+
+        const dividend = dividendMap.get(key) || 0;
+        const daysSinceStart = Math.max(1, Math.floor((new Date().getTime() - new Date(tx.transaction_date).getTime()) / (1000 * 60 * 60 * 24)));
+        const annualEquivalentRate = newCost > 0 ? (totalSurplus / newCost) * (365 / daysSinceStart) * 100 : 0;
+
+        detailedTransactions.push({
+          entity_name: tx.entities.name,
+          share_symbol: tx.shares.symbol,
+          share_name: tx.shares.name,
+          date: tx.transaction_date,
+          status: tx.transaction_type,
+          unit_price: price,
+          no_of_shares: shares,
+          share_cum_balance: newBalance,
+          purchase_cost: isBuy ? totalAmount : 0,
+          sales_value: isBuy ? 0 : totalAmount,
+          avg_cost: avgCost,
+          avg_price: avgCost,
+          dividend: dividend,
+          market_value: marketValue,
+          cash_flow: cashFlow,
+          total_surplus: totalSurplus,
+          cum_surplus: cumulativeSurplus,
+          cds_account: tx.entities.entity_id || '',
+          cost_per_share: avgCost,
+          market_price: marketPrice,
+          market_price_after_brokerage: marketPriceAfterBrokerage,
+          sale_value: isBuy ? 0 : totalAmount,
+          purchase_value: isBuy ? totalAmount : 0,
+          annual_equivalent_rate: annualEquivalentRate
+        });
+      });
+
+      setDetailedData(detailedTransactions);
+      setActiveReport('detailed');
+    } catch (error) {
+      console.error('Error generating detailed share report:', error);
+      alert('Failed to generate detailed share report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function handlePrint() {
     window.print();
   }
@@ -384,6 +549,145 @@ export function Reports() {
                 shareData.reduce((sum, s) => sum + s.gain_loss, 0) >= 0 ? 'text-green-600' : 'text-red-600'
               }`}>
                 {((shareData.reduce((sum, s) => sum + s.gain_loss, 0) / shareData.reduce((sum, s) => sum + s.total_cost, 0)) * 100).toFixed(2)}%
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeReport === 'detailed') {
+    return (
+      <div className="p-8">
+        <style>
+          {`
+            @media print {
+              .no-print { display: none !important; }
+              body { background: white; }
+            }
+          `}
+        </style>
+
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button
+            onClick={closeReport}
+            className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+          >
+            <X className="w-5 h-5" />
+            <span>Close</span>
+          </button>
+          <button
+            onClick={handlePrint}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Printer className="w-5 h-5" />
+            <span>Print</span>
+          </button>
+        </div>
+
+        <div className="bg-white p-8 rounded-lg border border-gray-200 overflow-x-auto">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Detailed Share Report</h1>
+            <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b-2 border-gray-900">
+              <tr>
+                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Entity</th>
+                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Share</th>
+                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Date</th>
+                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Status</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Unit Price</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Shares</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cum Bal</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Purchase Cost</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Sales Value</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Avg Cost</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Dividend</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Market Value</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cash Flow</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Total Surplus</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cum Surplus</th>
+                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">CDS</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Market Price</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Price + Brok.</th>
+                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">AER %</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {detailedData.map((row, idx) => (
+                <tr key={idx} className="hover:bg-gray-50">
+                  <td className="px-2 py-2 text-xs text-gray-900">{row.entity_name}</td>
+                  <td className="px-2 py-2 text-xs font-medium text-gray-900">{row.share_symbol}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900">{new Date(row.date).toLocaleDateString()}</td>
+                  <td className="px-2 py-2">
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
+                      row.status === 'BUY' || row.status === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {row.status}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.unit_price.toFixed(2)}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.no_of_shares.toLocaleString()}</td>
+                  <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">{row.share_cum_balance.toLocaleString()}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                    {row.purchase_cost > 0 ? row.purchase_cost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                  </td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                    {row.sales_value > 0 ? row.sales_value.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                  </td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.avg_cost.toFixed(2)}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
+                    {row.dividend > 0 ? row.dividend.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
+                  </td>
+                  <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">
+                    {row.market_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                    row.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {row.cash_flow.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                    row.total_surplus >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {row.total_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                    row.cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {row.cum_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-2 py-2 text-xs text-gray-900">{row.cds_account}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.market_price.toFixed(2)}</td>
+                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.market_price_after_brokerage.toFixed(2)}</td>
+                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
+                    row.annual_equivalent_rate >= 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {row.annual_equivalent_rate.toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {detailedData.length === 0 && (
+            <div className="text-center py-12">
+              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-500">No transactions found</p>
+            </div>
+          )}
+
+          <div className="mt-8 pt-8 border-t border-gray-300 text-sm text-gray-600">
+            <p>Total Transactions: {detailedData.length}</p>
+            <p className="mt-2">
+              Final Cumulative Surplus:
+              <span className={`ml-2 font-semibold text-lg ${
+                detailedData.length > 0 && detailedData[detailedData.length - 1].cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+                Rs. {detailedData.length > 0 ? detailedData[detailedData.length - 1].cum_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
               </span>
             </p>
           </div>
@@ -543,7 +847,7 @@ export function Reports() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -593,6 +897,35 @@ export function Reports() {
               </div>
               <button
                 onClick={generatePortfolioReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-orange-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-orange-50 text-orange-700 rounded">
+                Detailed
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Detailed Share Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Transaction-level analysis with cumulative balances, surplus calculations, and annual equivalent rates
+            </p>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">
+                Updated: Today
+              </div>
+              <button
+                onClick={generateDetailedShareReport}
                 disabled={loading}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
