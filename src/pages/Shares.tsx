@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, Edit, Eye, MoreVertical } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Eye, MoreVertical } from 'lucide-react';
 import { useState } from 'react';
 
 const shares = [
@@ -7,12 +7,9 @@ const shares = [
     symbol: 'JKH',
     name: 'John Keells Holdings',
     currentPrice: 'Rs. 175.00',
-    change: '+2.4%',
-    isPositive: true,
     totalShares: 2850,
     totalValue: 'Rs. 498,750',
     avgCost: 'Rs. 165.50',
-    gainLoss: '+Rs. 27,075',
     sector: 'Conglomerate'
   },
   {
@@ -20,12 +17,9 @@ const shares = [
     symbol: 'NDB',
     name: 'National Development Bank',
     currentPrice: 'Rs. 134.00',
-    change: '+1.8%',
-    isPositive: true,
     totalShares: 1950,
     totalValue: 'Rs. 261,300',
     avgCost: 'Rs. 128.75',
-    gainLoss: '+Rs. 10,237',
     sector: 'Banking'
   },
   {
@@ -33,12 +27,9 @@ const shares = [
     symbol: 'Sampath',
     name: 'Sampath Bank',
     currentPrice: 'Rs. 375.00',
-    change: '+3.2%',
-    isPositive: true,
     totalShares: 1230,
     totalValue: 'Rs. 461,250',
     avgCost: 'Rs. 352.00',
-    gainLoss: '+Rs. 28,290',
     sector: 'Banking'
   },
   {
@@ -46,12 +37,9 @@ const shares = [
     symbol: 'Dialog',
     name: 'Dialog Axiata',
     currentPrice: 'Rs. 250.00',
-    change: '-0.5%',
-    isPositive: false,
     totalShares: 780,
     totalValue: 'Rs. 195,000',
     avgCost: 'Rs. 265.50',
-    gainLoss: '-Rs. 12,090',
     sector: 'Telecommunications'
   },
   {
@@ -59,12 +47,9 @@ const shares = [
     symbol: 'ADL',
     name: 'Aitken Spence',
     currentPrice: 'Rs. 148.50',
-    change: '+1.2%',
-    isPositive: true,
     totalShares: 1650,
     totalValue: 'Rs. 245,025',
     avgCost: 'Rs. 142.00',
-    gainLoss: '+Rs. 10,725',
     sector: 'Diversified'
   },
   {
@@ -72,12 +57,9 @@ const shares = [
     symbol: 'COMB',
     name: 'Commercial Bank',
     currentPrice: 'Rs. 182.00',
-    change: '+1.5%',
-    isPositive: true,
     totalShares: 1420,
     totalValue: 'Rs. 258,440',
     avgCost: 'Rs. 175.50',
-    gainLoss: '+Rs. 9,230',
     sector: 'Banking'
   },
 ];
@@ -107,11 +89,7 @@ export function Shares() {
             <div>
               <p className="text-sm font-medium text-gray-500">Total Portfolio Value</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">Rs. 1,661,325</p>
-              <div className="flex items-center mt-2">
-                <TrendingUp className="w-4 h-4 text-green-600" />
-                <span className="text-sm font-medium text-green-600 ml-1">+Rs. 64,237</span>
-                <span className="text-sm text-gray-500 ml-1">Total Gain</span>
-              </div>
+              <p className="text-sm text-gray-500 mt-2">Current market value</p>
             </div>
           </div>
         </div>
@@ -129,9 +107,9 @@ export function Shares() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-500">Average Return</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">+4.03%</p>
-              <p className="text-sm text-gray-500 mt-2">Weighted average across portfolio</p>
+              <p className="text-sm font-medium text-gray-500">Unique Securities</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">6</p>
+              <p className="text-sm text-gray-500 mt-2">Different shares tracked</p>
             </div>
           </div>
         </div>
@@ -161,11 +139,9 @@ export function Shares() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Current Price</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Change</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Shares</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Value</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg Cost</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Gain/Loss</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -179,26 +155,9 @@ export function Shares() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{share.currentPrice}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      {share.isPositive ? (
-                        <TrendingUp className="w-4 h-4 text-green-600 mr-1" />
-                      ) : (
-                        <TrendingDown className="w-4 h-4 text-red-600 mr-1" />
-                      )}
-                      <span className={`text-sm font-medium ${share.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                        {share.change}
-                      </span>
-                    </div>
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{share.totalShares.toLocaleString()}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{share.totalValue}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{share.avgCost}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`text-sm font-semibold ${share.gainLoss.startsWith('+') ? 'text-green-600' : 'text-red-600'}`}>
-                      {share.gainLoss}
-                    </span>
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <div className="flex items-center space-x-2">
                       <button className="p-1 hover:bg-gray-100 rounded transition-colors" title="View">
