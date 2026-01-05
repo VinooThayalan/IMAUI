@@ -36,6 +36,17 @@ export function Transactions() {
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const [formData, setFormData] = useState({
+    entity_id: '',
+    share_id: '',
+    transaction_type: 'BUY',
+    transaction_date: new Date().toISOString().split('T')[0],
+    no_of_shares: '',
+    price_per_share: '',
+    fees: ''
+  });
 
   useEffect(() => {
     loadData();
@@ -98,6 +109,63 @@ export function Transactions() {
       setSelectedTransactions(new Set());
     } else {
       setSelectedTransactions(new Set(filteredTransactions.map(t => t.id)));
+    }
+  }
+
+  function resetForm() {
+    setFormData({
+      entity_id: '',
+      share_id: '',
+      transaction_type: 'BUY',
+      transaction_date: new Date().toISOString().split('T')[0],
+      no_of_shares: '',
+      price_per_share: '',
+      fees: ''
+    });
+  }
+
+  function calculateTotalAmount() {
+    const shares = parseFloat(formData.no_of_shares) || 0;
+    const price = parseFloat(formData.price_per_share) || 0;
+    const fees = parseFloat(formData.fees) || 0;
+    return (shares * price) + fees;
+  }
+
+  async function handleCreateTransaction(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!formData.entity_id || !formData.share_id || !formData.no_of_shares || !formData.price_per_share) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const totalAmount = calculateTotalAmount();
+
+      const { error } = await supabase.from('transactions').insert({
+        entity_id: formData.entity_id,
+        share_id: formData.share_id,
+        transaction_type: formData.transaction_type,
+        transaction_date: formData.transaction_date,
+        no_of_shares: parseFloat(formData.no_of_shares),
+        price_per_share: parseFloat(formData.price_per_share),
+        total_amount: totalAmount,
+        fees: parseFloat(formData.fees) || 0
+      });
+
+      if (error) throw error;
+
+      alert('Transaction created successfully');
+      setShowModal(false);
+      resetForm();
+      loadData();
+    } catch (error) {
+      console.error('Error creating transaction:', error);
+      alert('Failed to create transaction');
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -401,23 +469,151 @@ export function Transactions() {
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
               <h2 className="text-xl font-bold text-gray-900">New Transaction</h2>
             </div>
-            <div className="p-6">
-              <p className="text-gray-600">Transaction creation form will be implemented here.</p>
-            </div>
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Create Transaction
-              </button>
-            </div>
+            <form onSubmit={handleCreateTransaction}>
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Entity <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      value={formData.entity_id}
+                      onChange={(e) => setFormData({ ...formData, entity_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Entity</option>
+                      {entities.map(entity => (
+                        <option key={entity.id} value={entity.id}>{entity.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Transaction Type <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      value={formData.transaction_type}
+                      onChange={(e) => setFormData({ ...formData, transaction_type: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="BUY">BUY</option>
+                      <option value="SELL">SELL</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Transaction Date <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.transaction_date}
+                      onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Share <span className="text-red-600">*</span>
+                    </label>
+                    <select
+                      value={formData.share_id}
+                      onChange={(e) => setFormData({ ...formData, share_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="">Select Share</option>
+                      {shares.map(share => (
+                        <option key={share.id} value={share.id}>
+                          {share.symbol} - {share.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Number of Shares <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={formData.no_of_shares}
+                      onChange={(e) => setFormData({ ...formData, no_of_shares: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 100"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Price per Share (Rs.) <span className="text-red-600">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={formData.price_per_share}
+                      onChange={(e) => setFormData({ ...formData, price_per_share: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 150.50"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Fees (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.fees}
+                      onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 50.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Total Amount (Rs.)
+                    </label>
+                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                      {calculateTotalAmount().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    resetForm();
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Creating...' : 'Create Transaction'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
