@@ -201,6 +201,14 @@ export function Entities() {
                     placeholder="XXX-XX-XXXX"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter NIC or Company ID"
+                  />
+                </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Manager</label>
                   <input
@@ -231,6 +239,14 @@ export function Entities() {
                     type="tel"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="(555) 123-4567"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number</label>
+                  <input
+                    type="tel"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="+94 77 123 4567"
                   />
                 </div>
                 <div className="col-span-2">
