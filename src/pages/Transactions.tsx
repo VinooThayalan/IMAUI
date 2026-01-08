@@ -276,7 +276,7 @@ export function Transactions() {
                 <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">Type</th>
                 <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">Share</th>
                 <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Quantity</th>
-                <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Price</th>
+                <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Price Net</th>
                 <th className="px-4 py-3 text-right text-sm font-bold text-gray-900">Total</th>
               </tr>
             </thead>
@@ -398,7 +398,7 @@ export function Transactions() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Price</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Price Net</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Value</th>
               </tr>
             </thead>
@@ -554,7 +554,7 @@ export function Transactions() {
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Price per Share (Rs.) <span className="text-red-600">*</span>
+                      Price Net per Share (Rs.) <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="number"
@@ -570,7 +570,7 @@ export function Transactions() {
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Fees (Rs.)
+                      Brokerage Fee (Rs.)
                     </label>
                     <input
                       type="number"
