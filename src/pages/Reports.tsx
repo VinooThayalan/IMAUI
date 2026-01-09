@@ -97,6 +97,8 @@ export function Reports() {
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
   const [selectedEntityName, setSelectedEntityName] = useState<string>('All Entities');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     fetchEntities();
@@ -120,7 +122,7 @@ export function Reports() {
     try {
       setLoading(true);
 
-      const { data: transactions, error: txError } = await supabase
+      let query = supabase
         .from('transactions')
         .select(`
           share_id,
@@ -128,12 +130,22 @@ export function Reports() {
           no_of_shares,
           price_per_share,
           total_amount,
+          transaction_date,
           shares (
             id,
             ticker,
             name
           )
         `);
+
+      if (fromDate) {
+        query = query.gte('transaction_date', fromDate);
+      }
+      if (toDate) {
+        query = query.lte('transaction_date', toDate);
+      }
+
+      const { data: transactions, error: txError } = await query;
 
       if (txError) throw txError;
 
@@ -221,34 +233,52 @@ export function Reports() {
     try {
       setLoading(true);
 
+      let transactionsQuery = supabase
+        .from('transactions')
+        .select(`
+          entity_id,
+          share_id,
+          transaction_type,
+          transaction_date,
+          no_of_shares,
+          price_per_share,
+          total_amount,
+          entities (
+            id,
+            name,
+            entity_id
+          ),
+          shares (
+            id,
+            ticker,
+            name,
+            sector
+          )
+        `)
+        .order('transaction_date', { ascending: true });
+
+      if (fromDate) {
+        transactionsQuery = transactionsQuery.gte('transaction_date', fromDate);
+      }
+      if (toDate) {
+        transactionsQuery = transactionsQuery.lte('transaction_date', toDate);
+      }
+
+      let dividendsQuery = supabase
+        .from('dividends')
+        .select('entity_id, share_id, payment_date, amount_net, amount_gross')
+        .order('payment_date', { ascending: false });
+
+      if (fromDate) {
+        dividendsQuery = dividendsQuery.gte('payment_date', fromDate);
+      }
+      if (toDate) {
+        dividendsQuery = dividendsQuery.lte('payment_date', toDate);
+      }
+
       const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
-        supabase
-          .from('transactions')
-          .select(`
-            entity_id,
-            share_id,
-            transaction_type,
-            transaction_date,
-            no_of_shares,
-            price_per_share,
-            total_amount,
-            entities (
-              id,
-              name,
-              entity_id
-            ),
-            shares (
-              id,
-              ticker,
-              name,
-              sector
-            )
-          `)
-          .order('transaction_date', { ascending: true }),
-        supabase
-          .from('dividends')
-          .select('entity_id, share_id, payment_date, amount_net, amount_gross')
-          .order('payment_date', { ascending: false }),
+        transactionsQuery,
+        dividendsQuery,
         supabase
           .from('daily_share_prices')
           .select('share_id, share_price, effective_date')
@@ -400,35 +430,53 @@ export function Reports() {
     try {
       setLoading(true);
 
-      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
-        supabase
-          .from('transactions')
-          .select(`
+      let transactionsQuery = supabase
+        .from('transactions')
+        .select(`
+          id,
+          entity_id,
+          share_id,
+          transaction_type,
+          transaction_date,
+          no_of_shares,
+          price_per_share,
+          total_amount,
+          fees,
+          entities (
             id,
-            entity_id,
-            share_id,
-            transaction_type,
-            transaction_date,
-            no_of_shares,
-            price_per_share,
-            total_amount,
-            fees,
-            entities (
-              id,
-              name,
-              entity_id
-            ),
-            shares (
-              id,
-              symbol,
-              name
-            )
-          `)
-          .order('transaction_date', { ascending: true }),
-        supabase
-          .from('dividends')
-          .select('entity_id, share_id, payment_date, amount_net')
-          .order('payment_date', { ascending: true }),
+            name,
+            entity_id
+          ),
+          shares (
+            id,
+            ticker,
+            name
+          )
+        `)
+        .order('transaction_date', { ascending: true });
+
+      if (fromDate) {
+        transactionsQuery = transactionsQuery.gte('transaction_date', fromDate);
+      }
+      if (toDate) {
+        transactionsQuery = transactionsQuery.lte('transaction_date', toDate);
+      }
+
+      let dividendsQuery = supabase
+        .from('dividends')
+        .select('entity_id, share_id, payment_date, amount_net')
+        .order('payment_date', { ascending: true });
+
+      if (fromDate) {
+        dividendsQuery = dividendsQuery.gte('payment_date', fromDate);
+      }
+      if (toDate) {
+        dividendsQuery = dividendsQuery.lte('payment_date', toDate);
+      }
+
+      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
+        transactionsQuery,
+        dividendsQuery,
         supabase
           .from('daily_share_prices')
           .select('share_id, share_price, effective_date')
@@ -546,6 +594,13 @@ export function Reports() {
         query = query.eq('entity_id', selectedEntity);
       }
 
+      if (fromDate) {
+        query = query.gte('date', fromDate);
+      }
+      if (toDate) {
+        query = query.lte('date', toDate);
+      }
+
       const { data: ledger, error } = await query;
 
       if (error) throw error;
@@ -634,19 +689,46 @@ export function Reports() {
             <X className="w-5 h-5" />
             <span>Close</span>
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Printer className="w-5 h-5" />
-            <span>Print</span>
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">To:</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={generateShareReport}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Apply
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Printer className="w-5 h-5" />
+              <span>Print</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-8 rounded-lg border border-gray-200">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Share Holdings Report</h1>
             <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
           </div>
 
           <table className="w-full mb-8">
@@ -750,19 +832,46 @@ export function Reports() {
             <X className="w-5 h-5" />
             <span>Close</span>
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Printer className="w-5 h-5" />
-            <span>Print</span>
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">To:</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={generateDetailedShareReport}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Apply
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Printer className="w-5 h-5" />
+              <span>Print</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-8 rounded-lg border border-gray-200 overflow-x-auto">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Detailed Share Report</h1>
             <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
           </div>
 
           <table className="w-full text-sm">
@@ -889,13 +998,39 @@ export function Reports() {
             <X className="w-5 h-5" />
             <span>Close</span>
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Printer className="w-5 h-5" />
-            <span>Print</span>
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">To:</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={generateCashbookReport}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Apply
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Printer className="w-5 h-5" />
+              <span>Print</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-8 rounded-lg border border-gray-200">
@@ -903,6 +1038,7 @@ export function Reports() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Cash Book</h1>
             <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
             <p className="text-sm text-gray-500 mt-1">Entity: {selectedEntityName}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
           </div>
 
           {cashbookData && (
@@ -994,19 +1130,46 @@ export function Reports() {
             <X className="w-5 h-5" />
             <span>Close</span>
           </button>
-          <button
-            onClick={handlePrint}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Printer className="w-5 h-5" />
-            <span>Print</span>
-          </button>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <label className="text-sm font-medium text-gray-700">To:</label>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              onClick={generatePortfolioReport}
+              className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Apply
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Printer className="w-5 h-5" />
+              <span>Print</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-8 rounded-lg border border-gray-200">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Portfolio Holdings Report</h1>
             <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
           </div>
 
           {portfolioData.map((entity, idx) => (
