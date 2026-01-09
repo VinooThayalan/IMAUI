@@ -27,12 +27,20 @@ interface Share {
   ticker: string;
 }
 
+interface BrokerageFeeType {
+  id: string;
+  name: string;
+  rate: number;
+  description?: string;
+}
+
 export function Transactions() {
   const [showModal, setShowModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,7 +53,9 @@ export function Transactions() {
     transaction_date: new Date().toISOString().split('T')[0],
     no_of_shares: '',
     price_per_share: '',
-    fees: ''
+    brokerage_fee_type_id: '',
+    fees: '',
+    negotiated_amount: ''
   });
 
   useEffect(() => {
@@ -56,15 +66,17 @@ export function Transactions() {
     try {
       setLoading(true);
 
-      const [transactionsRes, entitiesRes, sharesRes] = await Promise.all([
+      const [transactionsRes, entitiesRes, sharesRes, brokerageRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name')
+        supabase.from('shares').select('id, name, ticker').order('name'),
+        supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('name')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
+      if (brokerageRes.error) throw brokerageRes.error;
 
       const parsedTransactions = (transactionsRes.data || []).map(txn => ({
         ...txn,
@@ -77,6 +89,7 @@ export function Transactions() {
       setTransactions(parsedTransactions);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
+      setBrokerageFeeTypes(brokerageRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -120,7 +133,9 @@ export function Transactions() {
       transaction_date: new Date().toISOString().split('T')[0],
       no_of_shares: '',
       price_per_share: '',
-      fees: ''
+      brokerage_fee_type_id: '',
+      fees: '',
+      negotiated_amount: ''
     });
   }
 
@@ -554,7 +569,7 @@ export function Transactions() {
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Price Net per Share (Rs.) <span className="text-red-600">*</span>
+                      Price Gross per Share (Rs.) <span className="text-red-600">*</span>
                     </label>
                     <input
                       type="number"
@@ -570,6 +585,24 @@ export function Transactions() {
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Brokerage Fee Type
+                    </label>
+                    <select
+                      value={formData.brokerage_fee_type_id}
+                      onChange={(e) => setFormData({ ...formData, brokerage_fee_type_id: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select Brokerage Type</option>
+                      {brokerageFeeTypes.map(type => (
+                        <option key={type.id} value={type.id}>
+                          {type.name} ({type.rate}%)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
                       Brokerage Fee (Rs.)
                     </label>
                     <input
@@ -580,6 +613,21 @@ export function Transactions() {
                       onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="e.g., 50.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Negotiated Amount (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={formData.negotiated_amount}
+                      onChange={(e) => setFormData({ ...formData, negotiated_amount: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 100.00"
                     />
                   </div>
 
