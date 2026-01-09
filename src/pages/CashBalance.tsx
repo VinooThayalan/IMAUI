@@ -11,16 +11,27 @@ interface Entity {
   od_limit: number;
 }
 
+interface Bank {
+  id: string;
+  entity_id: string;
+  name: string;
+  account_number: string;
+  branch: string;
+  balance: number;
+}
+
 export function CashBalance() {
   const [showModal, setShowModal] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
   const [cashBookEntity, setCashBookEntity] = useState<string>('');
   const [transactionType, setTransactionType] = useState<'Addition' | 'Deduction'>('Addition');
   const [entities, setEntities] = useState<Entity[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
     entityId: '',
+    bankId: '',
     code: '',
     amount: '',
     description: '',
@@ -49,6 +60,13 @@ export function CashBalance() {
 
       if (entitiesError) throw entitiesError;
 
+      const { data: banksData, error: banksError } = await supabase
+        .from('banks')
+        .select('*')
+        .order('name');
+
+      if (banksError) throw banksError;
+
       const { data: transactionsData, error: transactionsError } = await supabase
         .from('cash_balance_ledger')
         .select('*')
@@ -62,6 +80,11 @@ export function CashBalance() {
         od_limit: Number(entity.od_limit) || 0
       }));
 
+      const parsedBanks = (banksData || []).map(bank => ({
+        ...bank,
+        balance: Number(bank.balance) || 0
+      }));
+
       const parsedTransactions = (transactionsData || []).map(txn => ({
         ...txn,
         amount: Number(txn.amount) || 0,
@@ -69,6 +92,7 @@ export function CashBalance() {
       }));
 
       setEntities(parsedEntities);
+      setBanks(parsedBanks);
       setTransactions(parsedTransactions);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -112,6 +136,7 @@ export function CashBalance() {
           date: formData.date,
           running_balance: newBalance,
           entity_id: formData.entityId,
+          bank_id: formData.bankId || null,
           created_by: formData.createdBy
         });
 
@@ -127,6 +152,7 @@ export function CashBalance() {
       setShowModal(false);
       setFormData({
         entityId: '',
+        bankId: '',
         code: '',
         amount: '',
         description: '',
@@ -375,7 +401,7 @@ export function CashBalance() {
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Entity *</label>
                   <select
                     value={formData.entityId}
-                    onChange={(e) => setFormData({ ...formData, entityId: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, entityId: e.target.value, bankId: '' })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -385,6 +411,28 @@ export function CashBalance() {
                         {entity.entity_id} - {entity.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account</label>
+                  <select
+                    value={formData.bankId}
+                    onChange={(e) => setFormData({ ...formData, bankId: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!formData.entityId}
+                  >
+                    <option value="">Select bank account (optional)</option>
+                    {banks
+                      .filter((bank) => {
+                        if (!formData.entityId) return false;
+                        const selectedEntity = entities.find(e => e.entity_id === formData.entityId);
+                        return selectedEntity && bank.entity_id === selectedEntity.id;
+                      })
+                      .map((bank) => (
+                        <option key={bank.id} value={bank.id}>
+                          {bank.name} - {bank.account_number} ({bank.branch})
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div className="col-span-2">
