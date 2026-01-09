@@ -1,5 +1,5 @@
 import { TrendingUp, TrendingDown, Wallet, Building2, Users, PieChart } from 'lucide-react';
-import { SectorAnalytics } from '../components/SectorAnalytics';
+import { MainContributors } from '../components/MainContributors';
 
 const stats = [
   {
@@ -164,7 +164,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <SectorAnalytics />
+      <MainContributors />
     </div>
   );
 }
