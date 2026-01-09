@@ -25,18 +25,18 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '#dashboard' },
-  { icon: Building2, label: 'Entities', href: '#entities' },
-  { icon: TrendingUp, label: 'Shares', href: '#shares' },
-  { icon: Landmark, label: 'Banks', href: '#banks' },
-  { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
   { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
   { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
-  { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
   { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes' },
+  { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
+  { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
   { icon: DollarSign, label: 'Dividends', href: '#dividends' },
   { icon: Calendar, label: 'Daily Prices', href: '#daily-prices' },
   { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics' },
   { icon: PieChart, label: 'Portfolio', href: '#portfolio' },
+  { icon: Building2, label: 'Entities', href: '#entities' },
+  { icon: TrendingUp, label: 'Shares', href: '#shares' },
+  { icon: Landmark, label: 'Banks', href: '#banks' },
   { icon: FileText, label: 'Reports', href: '#reports' },
   { icon: Settings, label: 'Settings', href: '#settings' },
 ];
