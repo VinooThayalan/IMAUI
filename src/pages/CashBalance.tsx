@@ -390,12 +390,13 @@ export function CashBalance() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-2xl font-bold text-gray-900">Add Cash Transaction</h2>
             </div>
-            <form onSubmit={handleAddTransaction} className="p-6 space-y-6">
+            <form onSubmit={handleAddTransaction} className="flex flex-col flex-1 min-h-0">
+              <div className="p-6 space-y-6 overflow-y-auto">
               <div className="grid grid-cols-2 gap-6">
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Entity *</label>
@@ -519,7 +520,8 @@ export function CashBalance() {
                   />
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              </div>
+              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4 bg-white">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
