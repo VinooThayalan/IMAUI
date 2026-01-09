@@ -16,6 +16,7 @@ import { Settings } from './pages/Settings';
 import { DailyPrices } from './pages/DailyPrices';
 import { CashBalance } from './pages/CashBalance';
 import { ShareAnalytics } from './pages/ShareAnalytics';
+import { BrokerageFeeTypes } from './pages/BrokerageFeeTypes';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -60,6 +61,8 @@ function App() {
         return <CashBalance />;
       case 'share-analytics':
         return <ShareAnalytics />;
+      case 'brokerage-fee-types':
+        return <BrokerageFeeTypes />;
       case 'reports':
         return <Reports />;
       case 'settings':

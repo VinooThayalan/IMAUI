@@ -8,6 +8,7 @@ interface BuyAndSellNote {
   note_type: 'Buy' | 'Sell';
   note_number: string;
   broker: string;
+  brokerage_fee_type_id?: string;
   settlement_date: string;
   file_url?: string;
   remarks?: string;
@@ -38,6 +39,13 @@ interface Share {
   name: string;
 }
 
+interface BrokerageFeeType {
+  id: string;
+  name: string;
+  rate: number;
+  is_active: boolean;
+}
+
 export function BuyAndSellNotes() {
   const [showModal, setShowModal] = useState(false);
   const [editingNote, setEditingNote] = useState<BuyAndSellNote | null>(null);
@@ -45,6 +53,7 @@ export function BuyAndSellNotes() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'Buy' | 'Sell'>('all');
@@ -53,6 +62,7 @@ export function BuyAndSellNotes() {
     note_type: 'Buy' as 'Buy' | 'Sell',
     note_number: '',
     broker: '',
+    brokerage_fee_type_id: '',
     settlement_date: new Date().toISOString().split('T')[0],
     file_url: '',
     remarks: ''
@@ -66,22 +76,25 @@ export function BuyAndSellNotes() {
     try {
       setLoading(true);
 
-      const [notesRes, transactionsRes, entitiesRes, sharesRes] = await Promise.all([
+      const [notesRes, transactionsRes, entitiesRes, sharesRes, feeTypesRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('name')
+        supabase.from('shares').select('id, ticker, name').order('name'),
+        supabase.from('brokerage_fee_types').select('id, name, rate, is_active').eq('is_active', true).order('name')
       ]);
 
       if (notesRes.error) throw notesRes.error;
       if (transactionsRes.error) throw transactionsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
+      if (feeTypesRes.error) throw feeTypesRes.error;
 
       setNotes(notesRes.data || []);
       setTransactions(transactionsRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
+      setBrokerageFeeTypes(feeTypesRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -107,6 +120,7 @@ export function BuyAndSellNotes() {
             note_type: formData.note_type,
             note_number: formData.note_number,
             broker: formData.broker,
+            brokerage_fee_type_id: formData.brokerage_fee_type_id || null,
             settlement_date: formData.settlement_date,
             file_url: formData.file_url || null,
             remarks: formData.remarks || null
@@ -122,6 +136,7 @@ export function BuyAndSellNotes() {
             note_type: formData.note_type,
             note_number: formData.note_number,
             broker: formData.broker,
+            brokerage_fee_type_id: formData.brokerage_fee_type_id || null,
             settlement_date: formData.settlement_date,
             file_url: formData.file_url || null,
             remarks: formData.remarks || null
@@ -162,6 +177,7 @@ export function BuyAndSellNotes() {
       note_type: note.note_type,
       note_number: note.note_number,
       broker: note.broker,
+      brokerage_fee_type_id: note.brokerage_fee_type_id || '',
       settlement_date: note.settlement_date,
       file_url: note.file_url || '',
       remarks: note.remarks || ''
@@ -177,6 +193,7 @@ export function BuyAndSellNotes() {
       note_type: 'Buy',
       note_number: '',
       broker: '',
+      brokerage_fee_type_id: '',
       settlement_date: new Date().toISOString().split('T')[0],
       file_url: '',
       remarks: ''
@@ -261,6 +278,7 @@ export function BuyAndSellNotes() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Transaction Details</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Broker</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Brokerage Fee</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Settlement Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Document</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -269,6 +287,7 @@ export function BuyAndSellNotes() {
             <tbody className="divide-y divide-gray-200">
               {filteredNotes.map((note) => {
                 const details = getTransactionDetails(note.transaction_id);
+                const feeType = brokerageFeeTypes.find(ft => ft.id === note.brokerage_fee_type_id);
                 return (
                   <tr key={note.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -296,6 +315,16 @@ export function BuyAndSellNotes() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{note.broker}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {feeType ? (
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{feeType.name}</div>
+                          <div className="text-xs text-gray-500">{feeType.rate}%</div>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-gray-400">Not set</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
@@ -432,6 +461,24 @@ export function BuyAndSellNotes() {
                   placeholder="e.g., ABC Securities"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Brokerage Fee Type
+                </label>
+                <select
+                  value={formData.brokerage_fee_type_id}
+                  onChange={(e) => setFormData({ ...formData, brokerage_fee_type_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select fee type (optional)</option>
+                  {brokerageFeeTypes.map((feeType) => (
+                    <option key={feeType.id} value={feeType.id}>
+                      {feeType.name} ({feeType.rate}%)
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

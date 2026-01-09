@@ -14,7 +14,8 @@ import {
   CheckSquare,
   FileEdit,
   FileUp,
-  ClipboardCheck
+  ClipboardCheck,
+  Percent
 } from 'lucide-react';
 
 interface NavItem {
@@ -39,6 +40,7 @@ const navItems: NavItem[] = [
   { icon: Building2, label: 'Entities', href: '#entities' },
   { icon: TrendingUp, label: 'Shares', href: '#shares' },
   { icon: Landmark, label: 'Banks', href: '#banks' },
+  { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types' },
   { icon: FileText, label: 'Reports', href: '#reports' },
   { icon: Settings, label: 'Settings', href: '#settings' },
 ];
