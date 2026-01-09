@@ -1,5 +1,6 @@
 import { Plus, Search, Filter, Wallet, TrendingUp, Calendar } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const dividends = [
   {
@@ -54,6 +55,25 @@ const dividends = [
 
 export function Dividends() {
   const [showModal, setShowModal] = useState(false);
+  const [shares, setShares] = useState<{ id: string; ticker: string; name: string }[]>([]);
+
+  useEffect(() => {
+    fetchShares();
+  }, []);
+
+  async function fetchShares() {
+    try {
+      const { data, error } = await supabase
+        .from('shares')
+        .select('id, ticker, name')
+        .order('ticker');
+
+      if (error) throw error;
+      setShares(data || []);
+    } catch (error) {
+      console.error('Error fetching shares:', error);
+    }
+  }
 
   const totalDividends = dividends
     .filter(d => d.status === 'Paid')
@@ -194,12 +214,15 @@ export function Dividends() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Share Symbol</label>
-                  <input
-                    type="text"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., JKH"
-                  />
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Ticker</label>
+                  <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Select a ticker</option>
+                    {shares.map((share) => (
+                      <option key={share.id} value={share.id}>
+                        {share.ticker} - {share.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Dividend per Share</label>
