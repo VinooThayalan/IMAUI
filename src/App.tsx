@@ -8,6 +8,7 @@ import { Transactions } from './pages/Transactions';
 import { TransactionApprovals } from './pages/TransactionApprovals';
 import { ScripEntry } from './pages/ScripEntry';
 import { BuyAndSellNotes } from './pages/BuyAndSellNotes';
+import { BuyAndSellApprovals } from './pages/BuyAndSellApprovals';
 import { Dividends } from './pages/Dividends';
 import { Portfolio } from './pages/Portfolio';
 import { Reports } from './pages/Reports';
@@ -47,6 +48,8 @@ function App() {
         return <ScripEntry />;
       case 'buy-sell-notes':
         return <BuyAndSellNotes />;
+      case 'buy-sell-approvals':
+        return <BuyAndSellApprovals />;
       case 'dividends':
         return <Dividends />;
       case 'portfolio':

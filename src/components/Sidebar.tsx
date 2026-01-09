@@ -13,7 +13,8 @@ import {
   BarChart3,
   CheckSquare,
   FileEdit,
-  FileUp
+  FileUp,
+  ClipboardCheck
 } from 'lucide-react';
 
 interface NavItem {
@@ -28,6 +29,7 @@ const navItems: NavItem[] = [
   { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
   { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
   { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes' },
+  { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals' },
   { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
   { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
   { icon: DollarSign, label: 'Dividends', href: '#dividends' },
