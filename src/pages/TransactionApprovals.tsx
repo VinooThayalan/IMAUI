@@ -85,7 +85,8 @@ export function TransactionApprovals() {
     notes: '',
     rejection_reason: '',
     hold_duration_type: 'minutes',
-    hold_duration_value: ''
+    hold_duration_value: '',
+    email: ''
   });
 
   useEffect(() => {
@@ -255,7 +256,8 @@ export function TransactionApprovals() {
       notes: '',
       rejection_reason: '',
       hold_duration_type: 'minutes',
-      hold_duration_value: ''
+      hold_duration_value: '',
+      email: ''
     });
 
     setShowActionModal(true);
@@ -290,6 +292,17 @@ export function TransactionApprovals() {
       }
 
       if (actionType === 'APPROVE') {
+        if (!actionFormData.email.trim()) {
+          alert('Please provide an email address to send the approved transaction');
+          return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(actionFormData.email)) {
+          alert('Please provide a valid email address');
+          return;
+        }
+
         updateData.status = 'APPROVED';
         updateData.approved_by = 'Current User';
         updateData.approval_date = new Date().toISOString();
@@ -328,7 +341,11 @@ export function TransactionApprovals() {
 
       if (error) throw error;
 
-      alert(`Transaction ${actionType.toLowerCase()}ed successfully`);
+      if (actionType === 'APPROVE' && actionFormData.email) {
+        alert(`Transaction approved successfully. A PDF will be sent to ${actionFormData.email}`);
+      } else {
+        alert(`Transaction ${actionType.toLowerCase()}ed successfully`);
+      }
       setShowActionModal(false);
       loadData();
     } catch (error) {
@@ -768,6 +785,25 @@ export function TransactionApprovals() {
                       Cancel Editing
                     </button>
                   </div>
+                </div>
+              )}
+
+              {actionType === 'APPROVE' && !isEditing && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Email Address <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={actionFormData.email}
+                    onChange={(e) => setActionFormData({ ...actionFormData, email: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter email to send approved transaction PDF"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    The approved transaction PDF will be sent to this email address
+                  </p>
                 </div>
               )}
 
