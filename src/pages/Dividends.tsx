@@ -150,11 +150,13 @@ export function Dividends() {
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ticker</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Per Share</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Amount</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross/Share</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Net/Share</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">W. Tax</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Net</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
@@ -169,15 +171,19 @@ export function Dividends() {
                         )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">{dividend.share}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">{dividend.share}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{dividend.quantity.toLocaleString()}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{dividend.dividendPerShare}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Rs. 0.00</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Rs. 0.00</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{dividend.totalAmount}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div>
-                        <div className="text-sm text-gray-900">{dividend.paymentDate || 'N/A'}</div>
+                        {dividend.paymentDate && (
+                          <div className="text-xs text-gray-500">Pay: {dividend.paymentDate}</div>
+                        )}
                         {dividend.exDate && (
-                          <div className="text-xs text-gray-500">Ex-Date: {dividend.exDate}</div>
+                          <div className="text-xs text-gray-500">Ex: {dividend.exDate}</div>
                         )}
                       </div>
                     </td>
@@ -225,12 +231,46 @@ export function Dividends() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Dividend per Share</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Quantity</label>
+                  <input
+                    type="number"
+                    step="1"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Gross Dividend per Share</label>
                   <input
                     type="number"
                     step="0.01"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Net Dividend per Share</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Withholding Tax</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Announcement Date</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 <div>
