@@ -4,11 +4,11 @@ import { useState } from 'react';
 type AnalyticsTab = '52week' | 'earnings' | 'values' | 'dividends';
 
 const mockShares = [
-  { id: '1', name: 'National Development Bank', symbol: 'NDB' },
-  { id: '2', name: 'John Keells Holdings', symbol: 'JKH' },
-  { id: '3', name: 'Aitken Spence', symbol: 'ADL' },
-  { id: '4', name: 'Sampath Bank', symbol: 'Sampath' },
-  { id: '5', name: 'Commercial Bank', symbol: 'COMB' },
+  { id: '1', name: 'National Development Bank', ticker: 'NDB' },
+  { id: '2', name: 'John Keells Holdings', ticker: 'JKH' },
+  { id: '3', name: 'Aitken Spence', ticker: 'ADL' },
+  { id: '4', name: 'Sampath Bank', ticker: 'Sampath' },
+  { id: '5', name: 'Commercial Bank', ticker: 'COMB' },
 ];
 
 const mockEntities = [

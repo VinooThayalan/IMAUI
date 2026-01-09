@@ -33,7 +33,7 @@ interface Entity {
 interface Share {
   id: string;
   name: string;
-  symbol: string;
+  ticker: string;
 }
 
 const statusConfig = {
@@ -93,7 +93,7 @@ export function TransactionApprovals() {
       const [requestsRes, entitiesRes, sharesRes] = await Promise.all([
         supabase.from('transaction_requests').select('*').order('request_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, symbol').order('name')
+        supabase.from('shares').select('id, name, ticker').order('name')
       ]);
 
       if (requestsRes.error) throw requestsRes.error;
@@ -150,7 +150,7 @@ export function TransactionApprovals() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? { symbol: share.symbol, name: share.name } : { symbol: 'Unknown', name: '' };
+    return share ? { ticker: share.ticker, name: share.name } : { ticker: 'Unknown', name: '' };
   }
 
   function openActionModal(request: TransactionRequest, action: 'APPROVE' | 'REJECT' | 'HOLD') {
@@ -357,7 +357,7 @@ export function TransactionApprovals() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-gray-900">{shareInfo.symbol}</div>
+                      <div className="text-sm font-bold text-gray-900">{shareInfo.ticker}</div>
                       <div className="text-xs text-gray-500">{shareInfo.name}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -446,7 +446,7 @@ export function TransactionApprovals() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium text-gray-500">Share:</span>
                     <span className="text-sm font-bold text-gray-900">
-                      {getShareInfo(selectedRequest.share_id).symbol} - {getShareInfo(selectedRequest.share_id).name}
+                      {getShareInfo(selectedRequest.share_id).ticker} - {getShareInfo(selectedRequest.share_id).name}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -517,7 +517,7 @@ export function TransactionApprovals() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       {shares.map(share => (
-                        <option key={share.id} value={share.id}>{share.symbol} - {share.name}</option>
+                        <option key={share.id} value={share.id}>{share.ticker} - {share.name}</option>
                       ))}
                     </select>
                   </div>

@@ -4,7 +4,7 @@ import { useState } from 'react';
 const shares = [
   {
     id: 1,
-    symbol: 'JKH',
+    ticker: 'JKH',
     name: 'John Keells Holdings',
     currentPrice: 'Rs. 175.00',
     totalShares: 2850,
@@ -14,7 +14,7 @@ const shares = [
   },
   {
     id: 2,
-    symbol: 'NDB',
+    ticker: 'NDB',
     name: 'National Development Bank',
     currentPrice: 'Rs. 134.00',
     totalShares: 1950,
@@ -24,7 +24,7 @@ const shares = [
   },
   {
     id: 3,
-    symbol: 'Sampath',
+    ticker: 'Sampath',
     name: 'Sampath Bank',
     currentPrice: 'Rs. 375.00',
     totalShares: 1230,
@@ -34,7 +34,7 @@ const shares = [
   },
   {
     id: 4,
-    symbol: 'Dialog',
+    ticker: 'Dialog',
     name: 'Dialog Axiata',
     currentPrice: 'Rs. 250.00',
     totalShares: 780,
@@ -44,7 +44,7 @@ const shares = [
   },
   {
     id: 5,
-    symbol: 'ADL',
+    ticker: 'ADL',
     name: 'Aitken Spence',
     currentPrice: 'Rs. 148.50',
     totalShares: 1650,
@@ -54,7 +54,7 @@ const shares = [
   },
   {
     id: 6,
-    symbol: 'COMB',
+    ticker: 'COMB',
     name: 'Commercial Bank',
     currentPrice: 'Rs. 182.00',
     totalShares: 1420,
@@ -122,7 +122,7 @@ export function Shares() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search shares by symbol or name..."
+                placeholder="Search shares by ticker or name..."
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -150,7 +150,7 @@ export function Shares() {
                 <tr key={share.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div>
-                      <div className="text-sm font-bold text-gray-900">{share.symbol}</div>
+                      <div className="text-sm font-bold text-gray-900">{share.ticker}</div>
                       <div className="text-xs text-gray-500">{share.name}</div>
                     </div>
                   </td>
@@ -187,7 +187,7 @@ export function Shares() {
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Symbol</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Ticker</label>
                   <input
                     type="text"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"

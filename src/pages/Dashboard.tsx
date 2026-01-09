@@ -39,11 +39,11 @@ const recentTransactions = [
 ];
 
 const topHoldings = [
-  { symbol: 'JKH', name: 'John Keells Holdings', value: 'Rs. 5,234,000', percentage: 21.3, change: '+2.4%' },
-  { symbol: 'NDB', name: 'National Development Bank', value: 'Rs. 4,123,500', percentage: 16.8, change: '+1.8%' },
-  { symbol: 'Sampath', name: 'Sampath Bank', value: 'Rs. 3,876,200', percentage: 15.8, change: '+3.2%' },
-  { symbol: 'Dialog', name: 'Dialog Axiata', value: 'Rs. 2,456,800', percentage: 10.0, change: '-0.5%' },
-  { symbol: 'COMB', name: 'Commercial Bank', value: 'Rs. 2,234,100', percentage: 9.1, change: '+1.2%' },
+  { ticker: 'JKH', name: 'John Keells Holdings', value: 'Rs. 5,234,000', percentage: 21.3, change: '+2.4%' },
+  { ticker: 'NDB', name: 'National Development Bank', value: 'Rs. 4,123,500', percentage: 16.8, change: '+1.8%' },
+  { ticker: 'Sampath', name: 'Sampath Bank', value: 'Rs. 3,876,200', percentage: 15.8, change: '+3.2%' },
+  { ticker: 'Dialog', name: 'Dialog Axiata', value: 'Rs. 2,456,800', percentage: 10.0, change: '-0.5%' },
+  { ticker: 'COMB', name: 'Commercial Bank', value: 'Rs. 2,234,100', percentage: 9.1, change: '+1.2%' },
 ];
 
 export function Dashboard() {
@@ -137,10 +137,10 @@ export function Dashboard() {
           </div>
           <div className="p-6 space-y-4">
             {topHoldings.map((holding) => (
-              <div key={holding.symbol} className="space-y-2">
+              <div key={holding.ticker} className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-bold text-gray-900">{holding.symbol}</p>
+                    <p className="text-sm font-bold text-gray-900">{holding.ticker}</p>
                     <p className="text-xs text-gray-500">{holding.name}</p>
                   </div>
                   <div className="text-right">

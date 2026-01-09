@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 
 interface ShareHolding {
   share_id: string;
-  symbol: string;
+  ticker: string;
   name: string;
   total_shares: number;
   avg_cost: number;
@@ -21,7 +21,7 @@ interface PortfolioHolding {
   cds_account: string;
   holdings: {
     sector: string;
-    symbol: string;
+    ticker: string;
     name: string;
     balance: number;
     cost: number;
@@ -43,7 +43,7 @@ interface PortfolioHolding {
 
 interface DetailedShareTransaction {
   entity_name: string;
-  share_symbol: string;
+  share_ticker: string;
   share_name: string;
   date: string;
   status: string;
@@ -130,7 +130,7 @@ export function Reports() {
           total_amount,
           shares (
             id,
-            symbol,
+            ticker,
             name
           )
         `);
@@ -152,7 +152,7 @@ export function Reports() {
       });
 
       const shareMap = new Map<string, {
-        symbol: string;
+        ticker: string;
         name: string;
         total_shares: number;
         total_cost: number;
@@ -165,7 +165,7 @@ export function Reports() {
         const shareId = tx.share_id;
         if (!shareMap.has(shareId)) {
           shareMap.set(shareId, {
-            symbol: tx.shares.symbol,
+            ticker: tx.shares.ticker,
             name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
@@ -186,14 +186,14 @@ export function Reports() {
       const shareHoldings: ShareHolding[] = Array.from(shareMap.entries())
         .map(([shareId, data]) => {
           const avgCost = data.total_shares > 0 ? data.total_cost / data.total_shares : 0;
-          const currentPrice = latestPrices.get(data.symbol) || avgCost;
+          const currentPrice = latestPrices.get(data.ticker) || avgCost;
           const currentValue = data.total_shares * currentPrice;
           const gainLoss = currentValue - data.total_cost;
           const gainLossPercent = data.total_cost > 0 ? (gainLoss / data.total_cost) * 100 : 0;
 
           return {
             share_id: shareId,
-            symbol: data.symbol,
+            ticker: data.ticker,
             name: data.name,
             total_shares: data.total_shares,
             avg_cost: avgCost,
@@ -205,7 +205,7 @@ export function Reports() {
           };
         })
         .filter(h => h.total_shares > 0)
-        .sort((a, b) => a.symbol.localeCompare(b.symbol));
+        .sort((a, b) => a.ticker.localeCompare(b.ticker));
 
       setShareData(shareHoldings);
       setActiveReport('share');
@@ -239,7 +239,7 @@ export function Reports() {
             ),
             shares (
               id,
-              symbol,
+              ticker,
               name,
               sector
             )
@@ -285,7 +285,7 @@ export function Reports() {
         cds_account: string;
         shares: Map<string, {
           sector: string;
-          symbol: string;
+          ticker: string;
           name: string;
           total_shares: number;
           total_cost: number;
@@ -311,7 +311,7 @@ export function Reports() {
         if (!entity.shares.has(shareId)) {
           entity.shares.set(shareId, {
             sector: tx.shares.sector || 'N/A',
-            symbol: tx.shares.symbol,
+            ticker: tx.shares.ticker,
             name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
@@ -349,7 +349,7 @@ export function Reports() {
 
               return {
                 sector: share.sector,
-                symbol: share.symbol,
+                ticker: share.ticker,
                 name: share.name,
                 balance: share.total_shares,
                 cost: share.total_cost,
@@ -497,7 +497,7 @@ export function Reports() {
 
         detailedTransactions.push({
           entity_name: tx.entities.name,
-          share_symbol: tx.shares.symbol,
+          share_ticker: tx.shares.ticker,
           share_name: tx.shares.name,
           date: tx.transaction_date,
           status: tx.transaction_type,
@@ -666,7 +666,7 @@ export function Reports() {
             <tbody className="divide-y divide-gray-200">
               {shareData.map((share) => (
                 <tr key={share.share_id}>
-                  <td className="px-4 py-3 text-sm font-bold text-gray-900">{share.symbol}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-gray-900">{share.ticker}</td>
                   <td className="px-4 py-3 text-sm text-gray-900">{share.name}</td>
                   <td className="px-4 py-3 text-sm text-gray-900 text-right">
                     {share.total_shares.toLocaleString()}
@@ -793,7 +793,7 @@ export function Reports() {
               {detailedData.map((row, idx) => (
                 <tr key={idx} className="hover:bg-gray-50">
                   <td className="px-2 py-2 text-xs text-gray-900">{row.entity_name}</td>
-                  <td className="px-2 py-2 text-xs font-medium text-gray-900">{row.share_symbol}</td>
+                  <td className="px-2 py-2 text-xs font-medium text-gray-900">{row.share_ticker}</td>
                   <td className="px-2 py-2 text-xs text-gray-900">{new Date(row.date).toLocaleDateString()}</td>
                   <td className="px-2 py-2">
                     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
@@ -1036,9 +1036,9 @@ export function Reports() {
                   </thead>
                   <tbody className="divide-y divide-gray-200">
                     {entity.holdings.map((holding) => (
-                      <tr key={`${entity.entity_id}-${holding.symbol}`} className="hover:bg-gray-50">
+                      <tr key={`${entity.entity_id}-${holding.ticker}`} className="hover:bg-gray-50">
                         <td className="px-2 py-2 text-xs text-gray-900">{holding.sector}</td>
-                        <td className="px-2 py-2 text-xs font-bold text-gray-900">{holding.symbol}</td>
+                        <td className="px-2 py-2 text-xs font-bold text-gray-900">{holding.ticker}</td>
                         <td className="px-2 py-2 text-xs text-gray-900 text-right">
                           {holding.balance.toLocaleString()}
                         </td>

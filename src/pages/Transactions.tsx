@@ -24,7 +24,7 @@ interface Entity {
 interface Share {
   id: string;
   name: string;
-  symbol: string;
+  ticker: string;
 }
 
 export function Transactions() {
@@ -59,7 +59,7 @@ export function Transactions() {
       const [transactionsRes, entitiesRes, sharesRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, symbol').order('name')
+        supabase.from('shares').select('id, name, ticker').order('name')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -91,7 +91,7 @@ export function Transactions() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.symbol} - ${share.name}` : 'Unknown';
+    return share ? `${share.ticker} - ${share.name}` : 'Unknown';
   }
 
   function toggleSelectTransaction(id: string) {
@@ -530,7 +530,7 @@ export function Transactions() {
                       <option value="">Select Share</option>
                       {shares.map(share => (
                         <option key={share.id} value={share.id}>
-                          {share.symbol} - {share.name}
+                          {share.ticker} - {share.name}
                         </option>
                       ))}
                     </select>

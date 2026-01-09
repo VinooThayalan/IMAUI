@@ -34,7 +34,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  symbol: string;
+  ticker: string;
   name: string;
 }
 
@@ -70,7 +70,7 @@ export function BuyAndSellNotes() {
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, symbol, name').order('name')
+        supabase.from('shares').select('id, ticker, name').order('name')
       ]);
 
       if (notesRes.error) throw notesRes.error;

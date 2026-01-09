@@ -26,15 +26,15 @@ const entityBreakdown = [
 ];
 
 const topPerformers = [
-  { symbol: 'JKH', name: 'John Keells Holdings', gainLoss: '+Rs. 145,678', percentage: '+67.3%', color: 'text-green-600' },
-  { symbol: 'NDB', name: 'National Development Bank', gainLoss: '+Rs. 89,234', percentage: '+23.4%', color: 'text-green-600' },
-  { symbol: 'Sampath', name: 'Sampath Bank', gainLoss: '+Rs. 67,890', percentage: '+15.7%', color: 'text-green-600' },
+  { ticker: 'JKH', name: 'John Keells Holdings', gainLoss: '+Rs. 145,678', percentage: '+67.3%', color: 'text-green-600' },
+  { ticker: 'NDB', name: 'National Development Bank', gainLoss: '+Rs. 89,234', percentage: '+23.4%', color: 'text-green-600' },
+  { ticker: 'Sampath', name: 'Sampath Bank', gainLoss: '+Rs. 67,890', percentage: '+15.7%', color: 'text-green-600' },
 ];
 
 const bottomPerformers = [
-  { symbol: 'Dialog', name: 'Dialog Axiata', gainLoss: '-Rs. 34,567', percentage: '-12.4%', color: 'text-red-600' },
-  { symbol: 'LOLC', name: 'LOLC Holdings', gainLoss: '-Rs. 23,456', percentage: '-8.9%', color: 'text-red-600' },
-  { symbol: 'Hemas', name: 'Hemas Holdings', gainLoss: '-Rs. 12,345', percentage: '-4.2%', color: 'text-red-600' },
+  { ticker: 'Dialog', name: 'Dialog Axiata', gainLoss: '-Rs. 34,567', percentage: '-12.4%', color: 'text-red-600' },
+  { ticker: 'LOLC', name: 'LOLC Holdings', gainLoss: '-Rs. 23,456', percentage: '-8.9%', color: 'text-red-600' },
+  { ticker: 'Hemas', name: 'Hemas Holdings', gainLoss: '-Rs. 12,345', percentage: '-4.2%', color: 'text-red-600' },
 ];
 
 export function Portfolio() {
@@ -177,13 +177,13 @@ export function Portfolio() {
           </div>
           <div className="p-6 space-y-4">
             {topPerformers.map((stock, index) => (
-              <div key={stock.symbol} className="flex items-center justify-between">
+              <div key={stock.ticker} className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                     <span className="text-xs font-bold text-green-600">{index + 1}</span>
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-gray-900">{stock.symbol}</p>
+                    <p className="text-sm font-bold text-gray-900">{stock.ticker}</p>
                     <p className="text-xs text-gray-500">{stock.name}</p>
                   </div>
                 </div>
@@ -202,13 +202,13 @@ export function Portfolio() {
           </div>
           <div className="p-6 space-y-4">
             {bottomPerformers.map((stock, index) => (
-              <div key={stock.symbol} className="flex items-center justify-between">
+              <div key={stock.ticker} className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
                     <span className="text-xs font-bold text-red-600">{index + 1}</span>
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-gray-900">{stock.symbol}</p>
+                    <p className="text-sm font-bold text-gray-900">{stock.ticker}</p>
                     <p className="text-xs text-gray-500">{stock.name}</p>
                   </div>
                 </div>
