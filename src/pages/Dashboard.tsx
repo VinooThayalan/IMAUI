@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown, Wallet, Building2, Users, PieChart } from 'lucide-react';
+import { SectorAnalytics } from '../components/SectorAnalytics';
 
 const stats = [
   {
@@ -162,6 +163,8 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      <SectorAnalytics />
     </div>
   );
 }
