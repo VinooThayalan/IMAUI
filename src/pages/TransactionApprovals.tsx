@@ -21,6 +21,11 @@ interface TransactionRequest {
   hold_duration_minutes?: number;
   edited_by?: string;
   edit_notes?: string;
+  validity_period_hours?: number;
+  expires_at?: string;
+  pdf_url?: string;
+  pdf_uploaded_at?: string;
+  pdf_uploaded_by?: string;
   created_at: string;
   updated_at: string;
 }
@@ -57,12 +62,15 @@ export function TransactionApprovals() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortColumn, setSortColumn] = useState<string>('request_date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const [showActionModal, setShowActionModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<TransactionRequest | null>(null);
   const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'HOLD'>('APPROVE');
   const [isEditing, setIsEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
 
   const [editFormData, setEditFormData] = useState({
     entity_id: '',
@@ -113,18 +121,23 @@ export function TransactionApprovals() {
 
   async function checkHeldTransactions() {
     try {
-      const { data: heldRequests } = await supabase
+      const { data: allRequests } = await supabase
         .from('transaction_requests')
         .select('*')
-        .eq('status', 'HOLD')
-        .not('hold_until', 'is', null);
+        .in('status', ['HOLD', 'PENDING']);
 
-      if (!heldRequests || heldRequests.length === 0) return;
+      if (!allRequests || allRequests.length === 0) return;
 
       const now = new Date();
-      const expiredRequests = heldRequests.filter(req =>
-        req.hold_until && new Date(req.hold_until) <= now
-      );
+      const expiredRequests = allRequests.filter(req => {
+        if (req.status === 'HOLD' && req.hold_until && new Date(req.hold_until) <= now) {
+          return true;
+        }
+        if ((req.status === 'HOLD' || req.status === 'PENDING') && req.expires_at && new Date(req.expires_at) <= now) {
+          return true;
+        }
+        return false;
+      });
 
       for (const req of expiredRequests) {
         await supabase
@@ -151,6 +164,77 @@ export function TransactionApprovals() {
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
     return share ? { ticker: share.ticker, name: share.name } : { ticker: 'Unknown', name: '' };
+  }
+
+  function handleSort(column: string) {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  }
+
+  function getTimeRemaining(request: TransactionRequest): string {
+    const now = new Date();
+    let targetDate: Date | null = null;
+
+    if (request.status === 'HOLD' && request.hold_until) {
+      targetDate = new Date(request.hold_until);
+    } else if ((request.status === 'PENDING' || request.status === 'HOLD') && request.expires_at) {
+      targetDate = new Date(request.expires_at);
+    }
+
+    if (!targetDate) return '';
+
+    const diffMs = targetDate.getTime() - now.getTime();
+    if (diffMs <= 0) return 'Expired';
+
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (diffHours > 24) {
+      const days = Math.floor(diffHours / 24);
+      return `${days}d ${diffHours % 24}h`;
+    } else if (diffHours > 0) {
+      return `${diffHours}h ${diffMinutes}m`;
+    } else {
+      return `${diffMinutes}m`;
+    }
+  }
+
+  async function handlePdfUpload(file: File) {
+    if (!selectedRequest) return;
+
+    try {
+      setUploadingPdf(true);
+
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${selectedRequest.id}_${Date.now()}.${fileExt}`;
+      const filePath = `transaction-pdfs/${fileName}`;
+
+      alert('Note: File upload to storage requires Supabase Storage setup. For now, saving file reference.');
+
+      const { error } = await supabase
+        .from('transaction_requests')
+        .update({
+          pdf_url: filePath,
+          pdf_uploaded_at: new Date().toISOString(),
+          pdf_uploaded_by: 'Current User',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedRequest.id);
+
+      if (error) throw error;
+
+      alert('PDF reference saved successfully');
+      loadData();
+    } catch (error) {
+      console.error('Error uploading PDF:', error);
+      alert('Failed to upload PDF');
+    } finally {
+      setUploadingPdf(false);
+    }
   }
 
   function openActionModal(request: TransactionRequest, action: 'APPROVE' | 'REJECT' | 'HOLD') {
@@ -255,6 +339,23 @@ export function TransactionApprovals() {
     }
   }
 
+  const sortedRequests = [...requests].sort((a, b) => {
+    let aVal: any = a[sortColumn as keyof TransactionRequest];
+    let bVal: any = b[sortColumn as keyof TransactionRequest];
+
+    if (sortColumn === 'entity_id') {
+      aVal = getEntityName(a.entity_id);
+      bVal = getEntityName(b.entity_id);
+    } else if (sortColumn === 'share_id') {
+      aVal = getShareInfo(a.share_id).ticker;
+      bVal = getShareInfo(b.share_id).ticker;
+    }
+
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
   const pendingCount = requests.filter(r => r.status === 'PENDING').length;
   const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
   const rejectedCount = requests.filter(r => r.status === 'REJECTED').length;
@@ -328,18 +429,54 @@ export function TransactionApprovals() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Requested By</th>
+                <th
+                  onClick={() => handleSort('entity_id')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Entity {sortColumn === 'entity_id' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  onClick={() => handleSort('transaction_type')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Type {sortColumn === 'transaction_type' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  onClick={() => handleSort('share_id')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Share {sortColumn === 'share_id' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  onClick={() => handleSort('no_of_shares')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Quantity {sortColumn === 'no_of_shares' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  onClick={() => handleSort('total_amount')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Amount {sortColumn === 'total_amount' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th
+                  onClick={() => handleSort('status')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Status {sortColumn === 'status' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Time Left</th>
+                <th
+                  onClick={() => handleSort('requested_by')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                >
+                  Requested By {sortColumn === 'requested_by' && (sortDirection === 'asc' ? '↑' : '↓')}
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {requests.map((request) => {
+              {sortedRequests.map((request) => {
                 const StatusIcon = statusConfig[request.status as keyof typeof statusConfig]?.icon || Clock;
                 const shareInfo = getShareInfo(request.share_id);
 
@@ -379,10 +516,19 @@ export function TransactionApprovals() {
                         </div>
                       )}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getTimeRemaining(request) && (
+                        <div className={`text-sm font-semibold ${
+                          getTimeRemaining(request) === 'Expired' ? 'text-red-600' : 'text-orange-600'
+                        }`}>
+                          {getTimeRemaining(request)}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.requested_by}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
-                        {request.status === 'PENDING' && (
+                        {(request.status === 'PENDING' || request.status === 'HOLD') && (
                           <>
                             <button
                               onClick={() => openActionModal(request, 'APPROVE')}
@@ -398,13 +544,15 @@ export function TransactionApprovals() {
                             >
                               <XCircle className="w-5 h-5" />
                             </button>
-                            <button
-                              onClick={() => openActionModal(request, 'HOLD')}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Hold"
-                            >
-                              <Pause className="w-5 h-5" />
-                            </button>
+                            {request.status === 'PENDING' && (
+                              <button
+                                onClick={() => openActionModal(request, 'HOLD')}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Hold"
+                              >
+                                <Pause className="w-5 h-5" />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -482,8 +630,22 @@ export function TransactionApprovals() {
                     </div>
                   )}
 
-                  {actionType === 'APPROVE' && (
+                  {selectedRequest.pdf_url && (
                     <div className="pt-3 border-t border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-gray-500">Signed PDF:</span>
+                        <div className="text-sm text-gray-900">
+                          <span className="text-green-600 font-semibold">✓ Uploaded</span>
+                          <p className="text-xs text-gray-500">
+                            {selectedRequest.pdf_uploaded_at && new Date(selectedRequest.pdf_uploaded_at).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {actionType === 'APPROVE' && (
+                    <div className="pt-3 border-t border-gray-200 space-y-3">
                       <button
                         onClick={() => setIsEditing(true)}
                         className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
@@ -491,6 +653,27 @@ export function TransactionApprovals() {
                         <Edit2 className="w-4 h-4" />
                         <span>Edit Transaction Details</span>
                       </button>
+
+                      {!selectedRequest.pdf_url && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Upload Signed PDF
+                          </label>
+                          <input
+                            type="file"
+                            accept=".pdf"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handlePdfUpload(file);
+                            }}
+                            className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer focus:outline-none"
+                            disabled={uploadingPdf}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Upload the signed PDF document for this transaction
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

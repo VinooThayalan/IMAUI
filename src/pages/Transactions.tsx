@@ -190,21 +190,39 @@ export function Transactions() {
       return;
     }
 
+    const validityHours = prompt('Enter validity period in hours (leave empty for no expiry):', '24');
+    if (validityHours === null) return;
+
     const selectedTxns = transactions.filter(t => selectedTransactions.has(t.id));
 
     try {
-      const requestsToInsert = selectedTxns.map(txn => ({
-        entity_id: txn.entity_id,
-        share_id: txn.share_id,
-        transaction_type: txn.transaction_type,
-        no_of_shares: txn.no_of_shares,
-        price_per_share: txn.price_per_share,
-        total_amount: txn.total_amount,
-        request_date: new Date().toISOString().split('T')[0],
-        status: 'Pending',
-        requested_by: 'Current User',
-        notes: `Approval request for transaction on ${txn.transaction_date}`
-      }));
+      const now = new Date();
+      const requestsToInsert = selectedTxns.map(txn => {
+        const requestData: any = {
+          entity_id: txn.entity_id,
+          share_id: txn.share_id,
+          transaction_type: txn.transaction_type,
+          no_of_shares: txn.no_of_shares,
+          price_per_share: txn.price_per_share,
+          total_amount: txn.total_amount,
+          request_date: new Date().toISOString().split('T')[0],
+          status: 'PENDING',
+          requested_by: 'Current User',
+          notes: `Approval request for transaction on ${txn.transaction_date}`
+        };
+
+        if (validityHours && validityHours.trim() !== '') {
+          const hours = parseInt(validityHours);
+          if (!isNaN(hours) && hours > 0) {
+            requestData.validity_period_hours = hours;
+            const expiresAt = new Date(now);
+            expiresAt.setHours(expiresAt.getHours() + hours);
+            requestData.expires_at = expiresAt.toISOString();
+          }
+        }
+
+        return requestData;
+      });
 
       const { error } = await supabase
         .from('transaction_requests')
@@ -330,6 +348,19 @@ export function Transactions() {
 
           <div className="mt-8 pt-8 border-t border-gray-300 text-sm text-gray-600">
             <p>Total Transactions: {selectedTxnsData.length}</p>
+          </div>
+
+          <div className="mt-16 grid grid-cols-2 gap-16">
+            <div>
+              <div className="border-b-2 border-gray-900 pb-1 mb-2"></div>
+              <p className="text-sm font-semibold text-gray-700">Prepared By</p>
+              <p className="text-xs text-gray-500 mt-1">Date: ________________</p>
+            </div>
+            <div>
+              <div className="border-b-2 border-gray-900 pb-1 mb-2"></div>
+              <p className="text-sm font-semibold text-gray-700">Authorized Signature</p>
+              <p className="text-xs text-gray-500 mt-1">Date: ________________</p>
+            </div>
           </div>
         </div>
       </div>
