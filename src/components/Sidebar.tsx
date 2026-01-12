@@ -20,42 +20,55 @@ import {
   GitMerge,
   ShoppingCart,
   SplitSquareVertical,
-  Rocket
+  Rocket,
+  Users
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface NavItem {
   icon: React.ElementType;
   label: string;
   href: string;
+  menuName: string;
   badge?: string;
+  superAdminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
-  { icon: LayoutDashboard, label: 'Dashboard', href: '#dashboard' },
-  { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
-  { icon: Rocket, label: 'IPO Transactions', href: '#ipo-transactions' },
-  { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
-  { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes' },
-  { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals' },
-  { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
-  { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
-  { icon: DollarSign, label: 'Dividends', href: '#dividends' },
-  { icon: GitBranch, label: 'Rights Issues', href: '#rights-issues' },
-  { icon: GitMerge, label: 'Amalgamations', href: '#amalgamations' },
-  { icon: ShoppingCart, label: 'Share Buybacks', href: '#share-buybacks' },
-  { icon: SplitSquareVertical, label: 'Share Subdivisions', href: '#share-subdivisions' },
-  { icon: Calendar, label: 'Daily Prices', href: '#daily-prices' },
-  { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics' },
-  { icon: PieChart, label: 'Portfolio', href: '#portfolio' },
-  { icon: Building2, label: 'Entities', href: '#entities' },
-  { icon: TrendingUp, label: 'Shares', href: '#shares' },
-  { icon: Landmark, label: 'Banks', href: '#banks' },
-  { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types' },
-  { icon: FileText, label: 'Reports', href: '#reports' },
-  { icon: Settings, label: 'Settings', href: '#settings' },
+  { icon: LayoutDashboard, label: 'Dashboard', href: '#dashboard', menuName: 'dashboard' },
+  { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', menuName: 'transactions', badge: '3' },
+  { icon: Rocket, label: 'IPO Transactions', href: '#ipo-transactions', menuName: 'ipo-transactions' },
+  { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', menuName: 'transaction-approvals', badge: '2' },
+  { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes', menuName: 'buy-sell-notes' },
+  { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals', menuName: 'buy-sell-approvals' },
+  { icon: Wallet, label: 'Cash Balance', href: '#cash-balance', menuName: 'cash-balance' },
+  { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry', menuName: 'scrip-entry' },
+  { icon: DollarSign, label: 'Dividends', href: '#dividends', menuName: 'dividends' },
+  { icon: GitBranch, label: 'Rights Issues', href: '#rights-issues', menuName: 'rights-issues' },
+  { icon: GitMerge, label: 'Amalgamations', href: '#amalgamations', menuName: 'amalgamations' },
+  { icon: ShoppingCart, label: 'Share Buybacks', href: '#share-buybacks', menuName: 'share-buybacks' },
+  { icon: SplitSquareVertical, label: 'Share Subdivisions', href: '#share-subdivisions', menuName: 'share-subdivisions' },
+  { icon: Calendar, label: 'Daily Prices', href: '#daily-prices', menuName: 'daily-prices' },
+  { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics', menuName: 'share-analytics' },
+  { icon: PieChart, label: 'Portfolio', href: '#portfolio', menuName: 'portfolio' },
+  { icon: Building2, label: 'Entities', href: '#entities', menuName: 'entities' },
+  { icon: TrendingUp, label: 'Shares', href: '#shares', menuName: 'shares' },
+  { icon: Landmark, label: 'Banks', href: '#banks', menuName: 'banks' },
+  { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types', menuName: 'brokerage-fee-types' },
+  { icon: FileText, label: 'Reports', href: '#reports', menuName: 'reports' },
+  { icon: Settings, label: 'Settings', href: '#settings', menuName: 'settings' },
+  { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management', superAdminOnly: true },
 ];
 
 export function Sidebar() {
+  const { hasMenuAccess, appUser } = useAuth();
+
+  const visibleItems = navItems.filter(item => {
+    if (item.superAdminOnly && appUser?.role !== 'super_admin') {
+      return false;
+    }
+    return hasMenuAccess(item.menuName);
+  });
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6 border-b border-gray-200">
@@ -68,7 +81,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => (
+        {visibleItems.map((item) => (
           <a
             key={item.href}
             href={item.href}

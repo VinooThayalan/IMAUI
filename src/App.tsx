@@ -22,8 +22,12 @@ import { Amalgamations } from './pages/Amalgamations';
 import { ShareBuybacks } from './pages/ShareBuybacks';
 import { ShareSubdivisions } from './pages/ShareSubdivisions';
 import { IpoTransactions } from './pages/IpoTransactions';
+import { UserManagement } from './pages/UserManagement';
+import { Login } from './pages/Login';
+import { useAuth } from './contexts/AuthContext';
 
 function App() {
+  const { user, appUser, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   useEffect(() => {
@@ -82,10 +86,35 @@ function App() {
         return <Reports />;
       case 'settings':
         return <Settings />;
+      case 'user-management':
+        return <UserManagement />;
       default:
         return <Dashboard />;
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!user || !appUser) {
+    return <Login />;
+  }
+
+  if (!appUser.is_active) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Account Inactive</h1>
+          <p className="text-gray-600">Your account has been deactivated. Please contact your administrator.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Layout>
