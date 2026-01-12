@@ -15,7 +15,12 @@ import {
   FileEdit,
   FileUp,
   ClipboardCheck,
-  Percent
+  Percent,
+  GitBranch,
+  GitMerge,
+  ShoppingCart,
+  SplitSquareVertical,
+  Rocket
 } from 'lucide-react';
 
 interface NavItem {
@@ -28,12 +33,17 @@ interface NavItem {
 const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '#dashboard' },
   { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', badge: '3' },
+  { icon: Rocket, label: 'IPO Transactions', href: '#ipo-transactions' },
   { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', badge: '2' },
   { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes' },
   { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals' },
   { icon: Wallet, label: 'Cash Balance', href: '#cash-balance' },
   { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry' },
   { icon: DollarSign, label: 'Dividends', href: '#dividends' },
+  { icon: GitBranch, label: 'Rights Issues', href: '#rights-issues' },
+  { icon: GitMerge, label: 'Amalgamations', href: '#amalgamations' },
+  { icon: ShoppingCart, label: 'Share Buybacks', href: '#share-buybacks' },
+  { icon: SplitSquareVertical, label: 'Share Subdivisions', href: '#share-subdivisions' },
   { icon: Calendar, label: 'Daily Prices', href: '#daily-prices' },
   { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics' },
   { icon: PieChart, label: 'Portfolio', href: '#portfolio' },

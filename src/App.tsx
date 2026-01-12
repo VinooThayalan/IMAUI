@@ -17,6 +17,11 @@ import { DailyPrices } from './pages/DailyPrices';
 import { CashBalance } from './pages/CashBalance';
 import { ShareAnalytics } from './pages/ShareAnalytics';
 import { BrokerageFeeTypes } from './pages/BrokerageFeeTypes';
+import { RightsIssues } from './pages/RightsIssues';
+import { Amalgamations } from './pages/Amalgamations';
+import { ShareBuybacks } from './pages/ShareBuybacks';
+import { ShareSubdivisions } from './pages/ShareSubdivisions';
+import { IpoTransactions } from './pages/IpoTransactions';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -43,6 +48,8 @@ function App() {
         return <Banks />;
       case 'transactions':
         return <Transactions />;
+      case 'ipo-transactions':
+        return <IpoTransactions />;
       case 'transaction-approvals':
         return <TransactionApprovals />;
       case 'scrip-entry':
@@ -53,6 +60,14 @@ function App() {
         return <BuyAndSellApprovals />;
       case 'dividends':
         return <Dividends />;
+      case 'rights-issues':
+        return <RightsIssues />;
+      case 'amalgamations':
+        return <Amalgamations />;
+      case 'share-buybacks':
+        return <ShareBuybacks />;
+      case 'share-subdivisions':
+        return <ShareSubdivisions />;
       case 'portfolio':
         return <Portfolio />;
       case 'daily-prices':
