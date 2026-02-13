@@ -23,7 +23,6 @@ import {
   Rocket,
   Users
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
 
 interface NavItem {
   icon: React.ElementType;
@@ -31,7 +30,6 @@ interface NavItem {
   href: string;
   menuName: string;
   badge?: string;
-  superAdminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -57,18 +55,10 @@ const navItems: NavItem[] = [
   { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types', menuName: 'brokerage-fee-types' },
   { icon: FileText, label: 'Reports', href: '#reports', menuName: 'reports' },
   { icon: Settings, label: 'Settings', href: '#settings', menuName: 'settings' },
-  { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management', superAdminOnly: true },
+  { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management' },
 ];
 
 export function Sidebar() {
-  const { hasMenuAccess, appUser } = useAuth();
-
-  const visibleItems = navItems.filter(item => {
-    if (item.superAdminOnly && appUser?.role !== 'super_admin') {
-      return false;
-    }
-    return hasMenuAccess(item.menuName);
-  });
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6 border-b border-gray-200">
@@ -81,7 +71,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {visibleItems.map((item) => (
+        {navItems.map((item) => (
           <a
             key={item.href}
             href={item.href}
