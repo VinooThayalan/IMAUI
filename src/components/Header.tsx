@@ -49,8 +49,8 @@ export function Header() {
                 <div className="text-sm font-medium text-gray-900">
                   {appUser?.full_name || 'User'}
                 </div>
-                <div className="text-xs text-gray-500 capitalize">
-                  {appUser?.role.replace('_', ' ')}
+                <div className="text-xs text-gray-500">
+                  {appUser?.email}
                 </div>
               </div>
             </button>
