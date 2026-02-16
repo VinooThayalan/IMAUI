@@ -25,6 +25,8 @@ import { ShareSubdivisions } from './pages/ShareSubdivisions';
 import { IpoTransactions } from './pages/IpoTransactions';
 import { UserManagement } from './pages/UserManagement';
 import { EntityTypes } from './pages/EntityTypes';
+import { IndustryTypes } from './pages/IndustryTypes';
+import { SectorTypes } from './pages/SectorTypes';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 
@@ -88,6 +90,10 @@ function App() {
         return <BrokerageFeeTypes />;
       case 'entity-types':
         return <EntityTypes />;
+      case 'industry-types':
+        return <IndustryTypes />;
+      case 'sector-types':
+        return <SectorTypes />;
       case 'reports':
         return <Reports />;
       case 'settings':

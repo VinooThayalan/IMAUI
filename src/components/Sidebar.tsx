@@ -26,7 +26,9 @@ import {
   ChevronRight,
   Wrench,
   Tag,
-  Briefcase
+  Briefcase,
+  Factory,
+  Layers
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -81,6 +83,8 @@ const navSections: NavSection[] = [
     items: [
       { icon: Tag, label: 'Entity Types', href: '#entity-types', menuName: 'entity-types' },
       { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types', menuName: 'brokerage-fee-types' },
+      { icon: Factory, label: 'Industry Types', href: '#industry-types', menuName: 'industry-types' },
+      { icon: Layers, label: 'Sector Types', href: '#sector-types', menuName: 'sector-types' },
     ]
   },
   {
