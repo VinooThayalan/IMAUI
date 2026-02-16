@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 interface BrokerageFeeType {
   id: string;
   name: string;
+  min_price: number | null;
+  max_price: number | null;
   rate: number;
   description: string;
   is_active: boolean;
@@ -17,6 +19,8 @@ export function BrokerageFeeTypes() {
   const [editingFeeType, setEditingFeeType] = useState<BrokerageFeeType | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    min_price: '',
+    max_price: '',
     rate: '',
     description: '',
     is_active: true
@@ -48,6 +52,8 @@ export function BrokerageFeeTypes() {
         .from('brokerage_fee_types')
         .update({
           name: formData.name,
+          min_price: formData.min_price ? parseFloat(formData.min_price) : null,
+          max_price: formData.max_price ? parseFloat(formData.max_price) : null,
           rate: parseFloat(formData.rate),
           description: formData.description,
           is_active: formData.is_active,
@@ -65,6 +71,8 @@ export function BrokerageFeeTypes() {
         .from('brokerage_fee_types')
         .insert({
           name: formData.name,
+          min_price: formData.min_price ? parseFloat(formData.min_price) : null,
+          max_price: formData.max_price ? parseFloat(formData.max_price) : null,
           rate: parseFloat(formData.rate),
           description: formData.description,
           is_active: formData.is_active
@@ -81,6 +89,8 @@ export function BrokerageFeeTypes() {
     setEditingFeeType(null);
     setFormData({
       name: '',
+      min_price: '',
+      max_price: '',
       rate: '',
       description: '',
       is_active: true
@@ -92,6 +102,8 @@ export function BrokerageFeeTypes() {
     setEditingFeeType(feeType);
     setFormData({
       name: feeType.name,
+      min_price: feeType.min_price ? feeType.min_price.toString() : '',
+      max_price: feeType.max_price ? feeType.max_price.toString() : '',
       rate: feeType.rate.toString(),
       description: feeType.description,
       is_active: feeType.is_active
@@ -153,6 +165,8 @@ export function BrokerageFeeTypes() {
             setEditingFeeType(null);
             setFormData({
               name: '',
+              min_price: '',
+              max_price: '',
               rate: '',
               description: '',
               is_active: true
@@ -210,6 +224,8 @@ export function BrokerageFeeTypes() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Min Price</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Max Price</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rate</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
@@ -221,6 +237,16 @@ export function BrokerageFeeTypes() {
                 <tr key={feeType.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-bold text-gray-900">{feeType.name}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-600">
+                      {feeType.min_price ? `LKR ${feeType.min_price.toLocaleString()}` : '-'}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-600">
+                      {feeType.max_price ? `LKR ${feeType.max_price.toLocaleString()}` : '-'}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-semibold text-blue-600">{feeType.rate}%</div>
@@ -285,6 +311,30 @@ export function BrokerageFeeTypes() {
                     placeholder="e.g., Standard, Premium, VIP"
                     required
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Min Price (LKR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.min_price}
+                      onChange={(e) => setFormData({ ...formData, min_price: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Max Price (LKR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.max_price}
+                      onChange={(e) => setFormData({ ...formData, max_price: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 100000.00"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Rate (%) *</label>
