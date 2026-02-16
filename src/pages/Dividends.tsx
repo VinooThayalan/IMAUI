@@ -17,7 +17,6 @@ interface Dividend {
   payment_date: string;
   payment_method: string | null;
   cds_account: string | null;
-  script_dividend_ratio: string | null;
   notes: string | null;
   status: string;
   created_at: string;
@@ -52,7 +51,6 @@ export function Dividends() {
     payment_date: '',
     payment_method: '',
     cds_account: '',
-    script_dividend_ratio: '',
     notes: '',
     status: 'Pending'
   });
@@ -113,7 +111,6 @@ export function Dividends() {
         payment_date: formData.payment_date,
         payment_method: formData.payment_method || null,
         cds_account: formData.cds_account || null,
-        script_dividend_ratio: formData.script_dividend_ratio || null,
         notes: formData.notes || null,
         status: formData.status
       });
@@ -133,7 +130,6 @@ export function Dividends() {
         payment_date: '',
         payment_method: '',
         cds_account: '',
-        script_dividend_ratio: '',
         notes: '',
         status: 'Pending'
       });
@@ -227,7 +223,6 @@ export function Dividends() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Net/Share</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">W. Tax</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Net</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Script Ratio</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Method</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">CDS Account</th>
@@ -237,7 +232,7 @@ export function Dividends() {
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={12} className="px-6 py-12 text-center">
+                    <td colSpan={11} className="px-6 py-12 text-center">
                       <div className="flex items-center justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                       </div>
@@ -245,7 +240,7 @@ export function Dividends() {
                   </tr>
                 ) : dividends.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={11} className="px-6 py-12 text-center text-gray-500">
                       No dividends found. Add your first dividend to get started.
                     </td>
                   </tr>
@@ -266,7 +261,6 @@ export function Dividends() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Rs. {dividend.net_dividend_per_share?.toFixed(2) || '0.00'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Rs. {dividend.tax_withheld?.toFixed(2) || '0.00'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Rs. {dividend.amount_net?.toFixed(2) || '0.00'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{dividend.script_dividend_ratio || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-xs space-y-1">
                           {dividend.announcement_date && (
@@ -429,17 +423,6 @@ export function Dividends() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="CDS Account Number"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Script Dividend Ratio</label>
-                    <input
-                      type="text"
-                      value={formData.script_dividend_ratio}
-                      onChange={(e) => setFormData({...formData, script_dividend_ratio: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 1:10"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Format: X:Y (e.g., 1:10 means 1 share per 10 held)</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Status *</label>
