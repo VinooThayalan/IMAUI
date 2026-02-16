@@ -1,5 +1,6 @@
 import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const entities = [
   {
@@ -69,8 +70,33 @@ const entities = [
   },
 ];
 
+interface EntityType {
+  id: string;
+  name: string;
+}
+
 export function Entities() {
   const [showModal, setShowModal] = useState(false);
+  const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
+
+  useEffect(() => {
+    fetchEntityTypes();
+  }, []);
+
+  async function fetchEntityTypes() {
+    try {
+      const { data, error } = await supabase
+        .from('entity_types')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name');
+
+      if (error) throw error;
+      setEntityTypes(data || []);
+    } catch (error) {
+      console.error('Error fetching entity types:', error);
+    }
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -113,9 +139,8 @@ export function Entities() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity ID</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity Name</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Manager</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Key Contact</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Value</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">OD Limit</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
@@ -139,7 +164,6 @@ export function Entities() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{entity.manager}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{entity.totalValue}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{entity.odLimit}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                       entity.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
@@ -186,39 +210,40 @@ export function Entities() {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Entity Type</label>
                   <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option>Trust</option>
-                    <option>LLC</option>
-                    <option>Corporation</option>
-                    <option>Partnership</option>
-                    <option>Individual</option>
+                    <option value="">Select entity type</option>
+                    {entityTypes.map((type) => (
+                      <option key={type.id} value={type.id}>
+                        {type.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Tax ID</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Tax Name</label>
                   <input
                     type="text"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="XXX-XX-XXXX"
+                    placeholder="Enter tax name"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / PV Number</label>
                   <input
                     type="text"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter NIC or Company ID"
+                    placeholder="Enter NIC or PV number"
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Manager</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Key Contact Name</label>
                   <input
                     type="text"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter manager name"
+                    placeholder="Enter key contact name"
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Address</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Company / Individual Address</label>
                   <textarea
                     rows={3}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -226,7 +251,7 @@ export function Entities() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Email</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Email (Company / Individual)</label>
                   <input
                     type="email"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -242,19 +267,19 @@ export function Entities() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 1</label>
                   <input
                     type="tel"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="+94 77 123 4567"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">OD Limit (LKR)</label>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 2</label>
                   <input
-                    type="number"
+                    type="tel"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter overdraft limit"
+                    placeholder="+94 77 123 4567"
                   />
                 </div>
               </div>

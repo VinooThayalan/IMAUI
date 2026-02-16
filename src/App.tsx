@@ -23,6 +23,7 @@ import { ShareBuybacks } from './pages/ShareBuybacks';
 import { ShareSubdivisions } from './pages/ShareSubdivisions';
 import { IpoTransactions } from './pages/IpoTransactions';
 import { UserManagement } from './pages/UserManagement';
+import { EntityTypes } from './pages/EntityTypes';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 
@@ -82,6 +83,8 @@ function App() {
         return <ShareAnalytics />;
       case 'brokerage-fee-types':
         return <BrokerageFeeTypes />;
+      case 'entity-types':
+        return <EntityTypes />;
       case 'reports':
         return <Reports />;
       case 'settings':
