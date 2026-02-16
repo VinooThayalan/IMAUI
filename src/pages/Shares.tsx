@@ -7,13 +7,24 @@ interface Share {
   ticker: string;
   share_name: string | null;
   gis_code: string | null;
+  industry_id: string | null;
   sector_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  industry_types?: {
+    industry_name: string;
+  };
   sector_types?: {
     sector_name: string;
   };
+}
+
+interface IndustryType {
+  id: string;
+  industry_id: string;
+  industry_name: string;
+  is_active: boolean;
 }
 
 interface SectorType {
@@ -25,6 +36,7 @@ interface SectorType {
 
 export function Shares() {
   const [shares, setShares] = useState<Share[]>([]);
+  const [industries, setIndustries] = useState<IndustryType[]>([]);
   const [sectors, setSectors] = useState<SectorType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingShare, setEditingShare] = useState<Share | null>(null);
@@ -32,6 +44,7 @@ export function Shares() {
     ticker: '',
     share_name: '',
     gis_code: '',
+    industry_id: '',
     sector_id: '',
     is_active: true
   });
@@ -40,6 +53,7 @@ export function Shares() {
 
   useEffect(() => {
     fetchShares();
+    fetchIndustries();
     fetchSectors();
   }, []);
 
@@ -48,7 +62,7 @@ export function Shares() {
       setLoading(true);
       const { data, error } = await supabase
         .from('shares')
-        .select('*, sector_types(sector_name)')
+        .select('*, industry_types(industry_name), sector_types(sector_name)')
         .order('ticker');
 
       if (error) throw error;
@@ -57,6 +71,21 @@ export function Shares() {
       console.error('Error fetching shares:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchIndustries() {
+    try {
+      const { data, error } = await supabase
+        .from('industry_types')
+        .select('*')
+        .eq('is_active', true)
+        .order('industry_name');
+
+      if (error) throw error;
+      setIndustries(data || []);
+    } catch (error) {
+      console.error('Error fetching industries:', error);
     }
   }
 
@@ -82,6 +111,7 @@ export function Shares() {
         ticker: share.ticker,
         share_name: share.share_name || '',
         gis_code: share.gis_code || '',
+        industry_id: share.industry_id || '',
         sector_id: share.sector_id || '',
         is_active: share.is_active
       });
@@ -91,6 +121,7 @@ export function Shares() {
         ticker: '',
         share_name: '',
         gis_code: '',
+        industry_id: '',
         sector_id: '',
         is_active: true
       });
@@ -105,6 +136,7 @@ export function Shares() {
       ticker: '',
       share_name: '',
       gis_code: '',
+      industry_id: '',
       sector_id: '',
       is_active: true
     });
@@ -118,6 +150,7 @@ export function Shares() {
         ticker: formData.ticker.toUpperCase(),
         share_name: formData.share_name || null,
         gis_code: formData.gis_code || null,
+        industry_id: formData.industry_id || null,
         sector_id: formData.sector_id || null,
         is_active: formData.is_active,
         updated_at: new Date().toISOString()
@@ -208,6 +241,7 @@ export function Shares() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ticker Code</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share Name</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">GIS Code</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Industry</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sector</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -216,7 +250,7 @@ export function Shares() {
               <tbody className="divide-y divide-gray-200">
                 {filteredShares.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                       No shares found
                     </td>
                   </tr>
@@ -231,6 +265,11 @@ export function Shares() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-600">{share.gis_code || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-gray-600">
+                          {share.industry_types?.industry_name || '-'}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm text-gray-600">
@@ -312,6 +351,21 @@ export function Shares() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="e.g., 12345"
                   />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Industry</label>
+                  <select
+                    value={formData.industry_id}
+                    onChange={(e) => setFormData({ ...formData, industry_id: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select an industry (optional)</option>
+                    {industries.map((industry) => (
+                      <option key={industry.id} value={industry.id}>
+                        {industry.industry_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Sector</label>
