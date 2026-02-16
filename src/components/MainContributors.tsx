@@ -50,7 +50,7 @@ export function MainContributors() {
         supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount, price_per_share'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('shares').select('id, ticker'),
-        supabase.from('dividends').select('share_id, dividend_amount')
+        supabase.from('dividends').select('share_id, amount_net')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -96,7 +96,7 @@ export function MainContributors() {
 
       dividendsRes.data?.forEach((div: any) => {
         if (shareMap.has(div.share_id)) {
-          shareMap.get(div.share_id)!.dividends += Number(div.dividend_amount);
+          shareMap.get(div.share_id)!.dividends += Number(div.amount_net);
         }
       });
 

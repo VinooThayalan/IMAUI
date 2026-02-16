@@ -40,7 +40,6 @@ interface Bank {
   name: string;
   account_number: string;
   balance: number;
-  od_limit: number;
 }
 
 interface Broker {
@@ -120,7 +119,7 @@ export function Transactions() {
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
-        supabase.from('banks').select('id, name, account_number, balance, od_limit').order('name'),
+        supabase.from('banks').select('id, name, account_number, balance').order('name'),
         supabase.from('brokers').select('id, name, contact_person').order('name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('name')
       ]);
@@ -237,15 +236,13 @@ export function Transactions() {
   }
 
   function getBankInfo(bankId: string | null) {
-    if (!bankId) return { name: '-', account: '-', balance: 0, limit: 0, available: 0 };
+    if (!bankId) return { name: '-', account: '-', balance: 0 };
     const bank = banks.find(b => b.id === bankId);
-    if (!bank) return { name: '-', account: '-', balance: 0, limit: 0, available: 0 };
+    if (!bank) return { name: '-', account: '-', balance: 0 };
     return {
       name: bank.name,
       account: bank.account_number,
-      balance: bank.balance,
-      limit: bank.od_limit || 0,
-      available: bank.balance + (bank.od_limit || 0)
+      balance: bank.balance
     };
   }
 
@@ -569,18 +566,10 @@ export function Transactions() {
                 </div>
 
                 {selectedBank && (
-                  <div className="bg-gray-50 p-4 rounded-lg grid grid-cols-3 gap-4">
+                  <div className="bg-gray-50 p-4 rounded-lg">
                     <div>
-                      <p className="text-xs text-gray-500">Bank Balance</p>
-                      <p className="text-sm font-semibold text-gray-900">LKR {selectedBank.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">Facility Limit</p>
-                      <p className="text-sm font-semibold text-gray-900">LKR {selectedBank.limit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">Available Balance</p>
-                      <p className="text-sm font-semibold text-green-600">LKR {selectedBank.available.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <p className="text-xs text-gray-500">Account Balance</p>
+                      <p className="text-lg font-semibold text-gray-900">LKR {selectedBank.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                     </div>
                   </div>
                 )}

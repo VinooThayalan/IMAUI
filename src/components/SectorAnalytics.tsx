@@ -48,7 +48,7 @@ export function SectorAnalytics() {
         supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount, price_per_share'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('shares').select('id, sector'),
-        supabase.from('dividends').select('share_id, dividend_amount')
+        supabase.from('dividends').select('share_id, amount_net')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -91,7 +91,7 @@ export function SectorAnalytics() {
       dividendsRes.data?.forEach((div: any) => {
         const sector = shareToSector.get(div.share_id) || 'Other';
         if (sectorMap.has(sector)) {
-          sectorMap.get(sector)!.dividends += Number(div.dividend_amount);
+          sectorMap.get(sector)!.dividends += Number(div.amount_net);
         }
       });
 
@@ -139,7 +139,7 @@ export function SectorAnalytics() {
       dividendsRes.data?.forEach((div: any) => {
         const sector = shareToSector.get(div.share_id) || 'Other';
         if (aggregatedData.has(sector)) {
-          aggregatedData.get(sector)!.totalDividends += Number(div.dividend_amount);
+          aggregatedData.get(sector)!.totalDividends += Number(div.amount_net);
         }
       });
 
