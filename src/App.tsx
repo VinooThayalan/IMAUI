@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Entities } from './pages/Entities';
 import { Shares } from './pages/Shares';
 import { Banks } from './pages/Banks';
+import { Brokers } from './pages/Brokers';
 import { Transactions } from './pages/Transactions';
 import { TransactionApprovals } from './pages/TransactionApprovals';
 import { ScripEntry } from './pages/ScripEntry';
@@ -51,6 +52,8 @@ function App() {
         return <Shares />;
       case 'banks':
         return <Banks />;
+      case 'brokers':
+        return <Brokers />;
       case 'transactions':
         return <Transactions />;
       case 'ipo-transactions':

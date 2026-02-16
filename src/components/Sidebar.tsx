@@ -25,7 +25,8 @@ import {
   ChevronDown,
   ChevronRight,
   Wrench,
-  Tag
+  Tag,
+  Briefcase
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -71,6 +72,7 @@ const navSections: NavSection[] = [
       { icon: Building2, label: 'Entities', href: '#entities', menuName: 'entities' },
       { icon: TrendingUp, label: 'Shares', href: '#shares', menuName: 'shares' },
       { icon: Landmark, label: 'Banks', href: '#banks', menuName: 'banks' },
+      { icon: Briefcase, label: 'Brokers', href: '#brokers', menuName: 'brokers' },
     ]
   },
   {
