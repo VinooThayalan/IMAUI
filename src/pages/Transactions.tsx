@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -20,6 +20,15 @@ interface Transaction {
   fees: number;
   net_price_per_share: number;
   total_amount: number;
+  approval_status: string;
+  submitted_for_approval_at: string | null;
+  approval_validity_hours: number | null;
+  approval_expires_at: string | null;
+  submitted_by: string | null;
+  approved_by: string | null;
+  approval_date: string | null;
+  approval_notes: string | null;
+  rejection_reason: string | null;
   created_at: string;
 }
 
@@ -63,6 +72,8 @@ interface ShareBalance {
 
 export function Transactions() {
   const [showModal, setShowModal] = useState(false);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showApprovalActionModal, setShowApprovalActionModal] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
@@ -73,6 +84,12 @@ export function Transactions() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [approvalAction, setApprovalAction] = useState<'APPROVE' | 'REJECT'>('APPROVE');
+  const [validityHours, setValidityHours] = useState('24');
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -304,7 +321,8 @@ export function Transactions() {
         brokerage_fee_rate: formData.brokerage_fee_rate ? parseFloat(formData.brokerage_fee_rate) : null,
         fees: parseFloat(formData.fees) || 0,
         net_price_per_share: netPricePerShare,
-        total_amount: totalAmountNet
+        total_amount: totalAmountNet,
+        approval_status: 'DRAFT'
       });
 
       if (error) throw error;
@@ -318,6 +336,141 @@ export function Transactions() {
       alert('Failed to create transaction');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function toggleTransactionSelection(transactionId: string) {
+    const newSelected = new Set(selectedTransactions);
+    if (newSelected.has(transactionId)) {
+      newSelected.delete(transactionId);
+    } else {
+      newSelected.add(transactionId);
+    }
+    setSelectedTransactions(newSelected);
+  }
+
+  function toggleAllTransactions() {
+    if (selectedTransactions.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length) {
+      setSelectedTransactions(new Set());
+    } else {
+      const draftIds = filteredTransactions.filter(t => t.approval_status === 'DRAFT').map(t => t.id);
+      setSelectedTransactions(new Set(draftIds));
+    }
+  }
+
+  async function handleSendForApproval() {
+    if (selectedTransactions.size === 0) {
+      alert('Please select at least one transaction');
+      return;
+    }
+
+    if (!validityHours || parseFloat(validityHours) <= 0) {
+      alert('Please enter a valid duration');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const hours = parseFloat(validityHours);
+      const expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + hours);
+
+      const updates = Array.from(selectedTransactions).map(id =>
+        supabase.from('transactions').update({
+          approval_status: 'PENDING_APPROVAL',
+          submitted_for_approval_at: new Date().toISOString(),
+          approval_validity_hours: hours,
+          approval_expires_at: expiresAt.toISOString(),
+          submitted_by: 'Current User',
+          updated_at: new Date().toISOString()
+        }).eq('id', id)
+      );
+
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+
+      if (errors.length > 0) {
+        throw new Error('Some transactions failed to update');
+      }
+
+      alert(`${selectedTransactions.size} transaction(s) sent for approval`);
+      setShowApprovalModal(false);
+      setSelectedTransactions(new Set());
+      setValidityHours('24');
+      loadData();
+    } catch (error) {
+      console.error('Error sending for approval:', error);
+      alert('Failed to send for approval');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleApprovalAction() {
+    if (!selectedTransaction) return;
+
+    if (approvalAction === 'REJECT' && !rejectionReason.trim()) {
+      alert('Please provide a rejection reason');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      const updateData: any = {
+        approval_status: approvalAction === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+        approved_by: 'Approver User',
+        approval_date: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      if (approvalAction === 'APPROVE') {
+        updateData.approval_notes = approvalNotes;
+      } else {
+        updateData.rejection_reason = rejectionReason;
+      }
+
+      const { error } = await supabase
+        .from('transactions')
+        .update(updateData)
+        .eq('id', selectedTransaction.id);
+
+      if (error) throw error;
+
+      alert(`Transaction ${approvalAction === 'APPROVE' ? 'approved' : 'rejected'} successfully`);
+      setShowApprovalActionModal(false);
+      setSelectedTransaction(null);
+      setApprovalNotes('');
+      setRejectionReason('');
+      loadData();
+    } catch (error) {
+      console.error('Error processing approval:', error);
+      alert('Failed to process approval');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function getTimeRemaining(transaction: Transaction): string {
+    if (!transaction.approval_expires_at) return '';
+
+    const now = new Date();
+    const expiresAt = new Date(transaction.approval_expires_at);
+    const diffMs = expiresAt.getTime() - now.getTime();
+
+    if (diffMs <= 0) return 'Expired';
+
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (diffHours > 24) {
+      const days = Math.floor(diffHours / 24);
+      return `${days}d ${diffHours % 24}h`;
+    } else if (diffHours > 0) {
+      return `${diffHours}h ${diffMinutes}m`;
+    } else {
+      return `${diffMinutes}m`;
     }
   }
 
@@ -347,13 +500,24 @@ export function Transactions() {
           <h1 className="text-3xl font-bold text-gray-900">Transactions</h1>
           <p className="text-gray-500 mt-1">Manage buy and sell transactions</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">New Transaction</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          {selectedTransactions.size > 0 && (
+            <button
+              onClick={() => setShowApprovalModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Send className="w-5 h-5" />
+              <span className="font-medium">Send for Approval ({selectedTransactions.size})</span>
+            </button>
+          )}
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">New Transaction</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -433,20 +597,37 @@ export function Transactions() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedTransactions.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length && filteredTransactions.filter(t => t.approval_status === 'DRAFT').length > 0}
+                    onChange={toggleAllTransactions}
+                    className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Broker</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Fee</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net Total</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredTransactions.map((transaction) => (
                 <tr key={transaction.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-4">
+                    {transaction.approval_status === 'DRAFT' && (
+                      <input
+                        type="checkbox"
+                        checked={selectedTransactions.has(transaction.id)}
+                        onChange={() => toggleTransactionSelection(transaction.id)}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      />
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
                       {new Date(transaction.transaction_date).toLocaleDateString()}
@@ -454,9 +635,6 @@ export function Transactions() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-gray-900">{getEntityName(transaction.entity_id)}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-600">{getBrokerName(transaction.broker_id)}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -471,14 +649,55 @@ export function Transactions() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
                     {Number(transaction.no_of_shares).toLocaleString()}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                    LKR {Number(transaction.total_amount_gross || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-right">
-                    LKR {Number(transaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-right">
                     LKR {Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex flex-col space-y-1">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        transaction.approval_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                        transaction.approval_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                        transaction.approval_status === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {transaction.approval_status === 'PENDING_APPROVAL' ? 'PENDING' : transaction.approval_status}
+                      </span>
+                      {transaction.approval_status === 'PENDING_APPROVAL' && getTimeRemaining(transaction) && (
+                        <span className={`text-xs font-medium ${
+                          getTimeRemaining(transaction) === 'Expired' ? 'text-red-600' : 'text-orange-600'
+                        }`}>
+                          {getTimeRemaining(transaction)}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {transaction.approval_status === 'PENDING_APPROVAL' && (
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => {
+                            setSelectedTransaction(transaction);
+                            setApprovalAction('APPROVE');
+                            setShowApprovalActionModal(true);
+                          }}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Approve"
+                        >
+                          <CheckCircle className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedTransaction(transaction);
+                            setApprovalAction('REJECT');
+                            setShowApprovalActionModal(true);
+                          }}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Reject"
+                        >
+                          <XCircle className="w-5 h-5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -797,6 +1016,173 @@ export function Transactions() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showApprovalModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-2xl font-bold text-gray-900">Send for Approval</h2>
+              <p className="text-sm text-gray-500 mt-1">Set validity period for approval</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <p className="text-sm text-gray-600 mb-4">
+                  Sending <span className="font-bold text-gray-900">{selectedTransactions.size}</span> transaction(s) for approval
+                </p>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Validity Period (Hours) <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={validityHours}
+                  onChange={(e) => setValidityHours(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="e.g., 24"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Transaction(s) will expire after this duration if not approved
+                </p>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              <button
+                onClick={() => {
+                  setShowApprovalModal(false);
+                  setValidityHours('24');
+                }}
+                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendForApproval}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:bg-gray-400"
+                disabled={submitting}
+              >
+                {submitting ? 'Sending...' : 'Send for Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApprovalActionModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-2xl font-bold text-gray-900">
+                {approvalAction === 'APPROVE' ? 'Approve Transaction' : 'Reject Transaction'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">Review transaction details</p>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Entity:</span>
+                  <span className="text-sm font-bold text-gray-900">{getEntityName(selectedTransaction.entity_id)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Share:</span>
+                  <span className="text-sm font-bold text-gray-900">{getShareInfo(selectedTransaction.share_id)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Type:</span>
+                  <span className={`text-sm font-bold px-2 py-1 rounded ${
+                    selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {selectedTransaction.transaction_type}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Quantity:</span>
+                  <span className="text-sm font-bold text-gray-900">{Number(selectedTransaction.no_of_shares).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Price per Share:</span>
+                  <span className="text-sm font-bold text-gray-900">
+                    LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Total Amount:</span>
+                  <span className="text-sm font-bold text-gray-900">
+                    LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-500">Submitted By:</span>
+                  <span className="text-sm font-bold text-gray-900">{selectedTransaction.submitted_by || 'N/A'}</span>
+                </div>
+                {selectedTransaction.approval_expires_at && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Expires:</span>
+                    <span className="text-sm font-bold text-orange-600">
+                      {getTimeRemaining(selectedTransaction)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {approvalAction === 'APPROVE' ? (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Approval Notes (Optional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={approvalNotes}
+                    onChange={(e) => setApprovalNotes(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Add any notes about this approval..."
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Rejection Reason <span className="text-red-600">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={rejectionReason}
+                    onChange={(e) => setRejectionReason(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Provide a detailed reason for rejection..."
+                    required
+                  />
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              <button
+                onClick={() => {
+                  setShowApprovalActionModal(false);
+                  setSelectedTransaction(null);
+                  setApprovalNotes('');
+                  setRejectionReason('');
+                }}
+                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApprovalAction}
+                className={`px-6 py-2 rounded-lg font-medium text-white transition-colors disabled:bg-gray-400 ${
+                  approvalAction === 'APPROVE'
+                    ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-red-600 hover:bg-red-700'
+                }`}
+                disabled={submitting}
+              >
+                {submitting ? 'Processing...' : `${approvalAction === 'APPROVE' ? 'Approve' : 'Reject'} Transaction`}
+              </button>
+            </div>
           </div>
         </div>
       )}
