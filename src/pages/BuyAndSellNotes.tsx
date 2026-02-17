@@ -62,6 +62,23 @@ export function BuyAndSellNotes() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'Buy' | 'Sell'>('all');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [showExtractionModal, setShowExtractionModal] = useState(false);
+  const [extractedData, setExtractedData] = useState({
+    noteNumber: '',
+    broker: '',
+    transactionDate: '',
+    settlementDate: '',
+    shareCode: '',
+    shareName: '',
+    noOfShares: '',
+    pricePerShare: '',
+    totalAmount: '',
+    brokerageFee: '',
+    brokerageFeeRate: '',
+    netAmount: '',
+    entity: ''
+  });
+  const [isExtracting, setIsExtracting] = useState(false);
   const [validationData, setValidationData] = useState({
     uploadedBrokerageFee: '',
     uploadedAmount: '',
@@ -118,8 +135,48 @@ export function BuyAndSellNotes() {
     const file = e.target.files?.[0];
     if (file) {
       setUploadedFile(file);
-      setShowValidationModal(true);
+      simulateDataExtraction();
     }
+  }
+
+  function simulateDataExtraction() {
+    setIsExtracting(true);
+    setShowExtractionModal(true);
+
+    setTimeout(() => {
+      const dummyData = {
+        noteNumber: 'CN' + Math.floor(Math.random() * 900000 + 100000),
+        broker: 'ABC Securities Ltd',
+        transactionDate: new Date().toISOString().split('T')[0],
+        settlementDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        shareCode: 'ABC.N0000',
+        shareName: 'ABC Company PLC',
+        noOfShares: '1000',
+        pricePerShare: '125.50',
+        totalAmount: '125500.00',
+        brokerageFee: '878.50',
+        brokerageFeeRate: '0.70',
+        netAmount: '126378.50',
+        entity: 'John Doe'
+      };
+
+      setExtractedData(dummyData);
+      setIsExtracting(false);
+    }, 2000);
+  }
+
+  function handleConfirmExtractedData() {
+    setFormData({
+      ...formData,
+      note_number: extractedData.noteNumber,
+      broker: extractedData.broker,
+      transaction_date: extractedData.transactionDate,
+      settlement_date: extractedData.settlementDate,
+      file_url: uploadedFile?.name || ''
+    });
+
+    setShowExtractionModal(false);
+    alert('Data extracted successfully! Please review and complete any remaining fields.');
   }
 
   function handleValidationSubmit() {
@@ -640,6 +697,266 @@ export function BuyAndSellNotes() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showExtractionModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+              <h2 className="text-xl font-bold text-white">Document Data Extraction</h2>
+              <p className="text-sm text-blue-100 mt-1">
+                {isExtracting ? 'Analyzing document...' : 'Review and edit extracted data'}
+              </p>
+            </div>
+
+            {isExtracting ? (
+              <div className="p-12 flex flex-col items-center justify-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
+                <p className="text-gray-600 mb-2">Extracting data from document...</p>
+                <p className="text-sm text-gray-500">This may take a few moments</p>
+              </div>
+            ) : (
+              <>
+                <div className="p-6">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                    <div className="flex items-start">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-green-800">Extraction Complete</h3>
+                        <p className="text-sm text-green-700 mt-1">
+                          Data has been successfully extracted. Please review and edit if needed.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide border-b pb-2">
+                        Document Information
+                      </h3>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Note Number
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.noteNumber}
+                          onChange={(e) => setExtractedData({ ...extractedData, noteNumber: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Broker
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.broker}
+                          onChange={(e) => setExtractedData({ ...extractedData, broker: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Entity/Client Name
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.entity}
+                          onChange={(e) => setExtractedData({ ...extractedData, entity: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Transaction Date
+                        </label>
+                        <input
+                          type="date"
+                          value={extractedData.transactionDate}
+                          onChange={(e) => setExtractedData({ ...extractedData, transactionDate: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Settlement Date
+                        </label>
+                        <input
+                          type="date"
+                          value={extractedData.settlementDate}
+                          onChange={(e) => setExtractedData({ ...extractedData, settlementDate: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide border-b pb-2">
+                        Transaction Details
+                      </h3>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Share Code
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.shareCode}
+                          onChange={(e) => setExtractedData({ ...extractedData, shareCode: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Share Name
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.shareName}
+                          onChange={(e) => setExtractedData({ ...extractedData, shareName: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Number of Shares
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.noOfShares}
+                          onChange={(e) => setExtractedData({ ...extractedData, noOfShares: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Price per Share (Rs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.pricePerShare}
+                          onChange={(e) => setExtractedData({ ...extractedData, pricePerShare: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Total Amount (Rs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.totalAmount}
+                          onChange={(e) => setExtractedData({ ...extractedData, totalAmount: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide mb-4">
+                      Fee Information
+                    </h3>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Brokerage Fee (Rs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.brokerageFee}
+                          onChange={(e) => setExtractedData({ ...extractedData, brokerageFee: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Brokerage Rate (%)
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.brokerageFeeRate}
+                          onChange={(e) => setExtractedData({ ...extractedData, brokerageFeeRate: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Net Amount (Rs.)
+                        </label>
+                        <input
+                          type="text"
+                          value={extractedData.netAmount}
+                          onChange={(e) => setExtractedData({ ...extractedData, netAmount: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      <span className="font-semibold">Note:</span> Fields with yellow background contain extracted data.
+                      Review all fields carefully and make corrections if needed before confirming.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowExtractionModal(false);
+                      setUploadedFile(null);
+                      setExtractedData({
+                        noteNumber: '',
+                        broker: '',
+                        transactionDate: '',
+                        settlementDate: '',
+                        shareCode: '',
+                        shareName: '',
+                        noOfShares: '',
+                        pricePerShare: '',
+                        totalAmount: '',
+                        brokerageFee: '',
+                        brokerageFeeRate: '',
+                        netAmount: '',
+                        entity: ''
+                      });
+                    }}
+                    className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmExtractedData}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  >
+                    Confirm & Use Data
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
