@@ -44,8 +44,7 @@ interface Bank {
 
 interface Broker {
   id: string;
-  name: string;
-  contact_person: string;
+  broker_name: string;
 }
 
 interface BrokerageFeeType {
@@ -120,7 +119,7 @@ export function Transactions() {
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
         supabase.from('banks').select('id, name, account_number, balance').order('name'),
-        supabase.from('brokers').select('id, name, contact_person').order('name'),
+        supabase.from('brokers').select('id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('name')
       ]);
 
@@ -248,7 +247,7 @@ export function Transactions() {
 
   function getBrokerName(brokerId: string | null) {
     if (!brokerId) return '-';
-    return brokers.find(b => b.id === brokerId)?.name || 'Unknown';
+    return brokers.find(b => b.id === brokerId)?.broker_name || 'Unknown';
   }
 
   function getShareInfo(shareId: string) {
@@ -530,7 +529,7 @@ export function Transactions() {
                     >
                       <option value="">Select Broker</option>
                       {brokers.map(broker => (
-                        <option key={broker.id} value={broker.id}>{broker.name}</option>
+                        <option key={broker.id} value={broker.id}>{broker.broker_name}</option>
                       ))}
                     </select>
                   </div>
