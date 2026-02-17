@@ -1,4 +1,4 @@
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -11,19 +11,46 @@ interface Broker {
   updated_at: string;
 }
 
+interface Entity {
+  id: string;
+  entity_id: string;
+  name: string;
+}
+
+interface BrokerEntity {
+  id: string;
+  entity_id: string;
+  relationship_type: string;
+  is_active: boolean;
+  assigned_date: string;
+  entities: Entity;
+}
+
 export function Brokers() {
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [showModal, setShowModal] = useState(false);
+  const [showEntityModal, setShowEntityModal] = useState(false);
   const [editingBroker, setEditingBroker] = useState<Broker | null>(null);
+  const [selectedBrokerId, setSelectedBrokerId] = useState<string | null>(null);
+  const [selectedBrokerName, setSelectedBrokerName] = useState<string>('');
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [brokerEntities, setBrokerEntities] = useState<BrokerEntity[]>([]);
   const [formData, setFormData] = useState({
     broker_name: '',
     is_active: true
+  });
+  const [entityFormData, setEntityFormData] = useState({
+    entity_id: '',
+    relationship_type: 'Primary Broker',
+    assigned_date: new Date().toISOString().split('T')[0],
+    notes: ''
   });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     fetchBrokers();
+    fetchEntities();
   }, []);
 
   async function fetchBrokers() {
@@ -40,6 +67,42 @@ export function Brokers() {
       console.error('Error fetching brokers:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchEntities() {
+    try {
+      const { data, error } = await supabase
+        .from('entities')
+        .select('id, entity_id, name')
+        .order('name');
+
+      if (error) throw error;
+      setEntities(data || []);
+    } catch (error) {
+      console.error('Error fetching entities:', error);
+    }
+  }
+
+  async function fetchBrokerEntities(brokerId: string) {
+    try {
+      const { data, error } = await supabase
+        .from('entity_brokers')
+        .select(`
+          *,
+          entities (
+            id,
+            entity_id,
+            name
+          )
+        `)
+        .eq('broker_id', brokerId)
+        .eq('is_active', true);
+
+      if (error) throw error;
+      setBrokerEntities(data || []);
+    } catch (error) {
+      console.error('Error fetching broker entities:', error);
     }
   }
 
@@ -117,6 +180,81 @@ export function Brokers() {
     }
   }
 
+  function handleOpenEntityModal(brokerId: string, brokerName: string) {
+    setSelectedBrokerId(brokerId);
+    setSelectedBrokerName(brokerName);
+    fetchBrokerEntities(brokerId);
+    setShowEntityModal(true);
+  }
+
+  function handleCloseEntityModal() {
+    setShowEntityModal(false);
+    setSelectedBrokerId(null);
+    setSelectedBrokerName('');
+    setBrokerEntities([]);
+    setEntityFormData({
+      entity_id: '',
+      relationship_type: 'Primary Broker',
+      assigned_date: new Date().toISOString().split('T')[0],
+      notes: ''
+    });
+  }
+
+  async function handleAssignEntity(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedBrokerId) return;
+
+    try {
+      const { error } = await supabase.from('entity_brokers').insert({
+        broker_id: selectedBrokerId,
+        entity_id: entityFormData.entity_id,
+        relationship_type: entityFormData.relationship_type,
+        assigned_date: entityFormData.assigned_date,
+        notes: entityFormData.notes || null,
+        is_active: true
+      });
+
+      if (error) throw error;
+
+      await fetchBrokerEntities(selectedBrokerId);
+      setEntityFormData({
+        entity_id: '',
+        relationship_type: 'Primary Broker',
+        assigned_date: new Date().toISOString().split('T')[0],
+        notes: ''
+      });
+      alert('Entity assigned successfully!');
+    } catch (error: any) {
+      console.error('Error assigning entity:', error);
+      if (error.code === '23505') {
+        alert('This entity is already assigned to this broker.');
+      } else {
+        alert('Failed to assign entity. Please try again.');
+      }
+    }
+  }
+
+  async function handleRemoveEntity(relationshipId: string) {
+    if (!confirm('Are you sure you want to remove this entity relationship?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('entity_brokers')
+        .delete()
+        .eq('id', relationshipId);
+
+      if (error) throw error;
+
+      if (selectedBrokerId) {
+        await fetchBrokerEntities(selectedBrokerId);
+      }
+      alert('Entity relationship removed successfully!');
+    } catch (error) {
+      console.error('Error removing entity:', error);
+      alert('Failed to remove entity relationship.');
+    }
+  }
+
   const filteredBrokers = brokers.filter(broker =>
     broker.broker_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
     broker.broker_name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -190,6 +328,13 @@ export function Brokers() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleOpenEntityModal(broker.id, broker.broker_name)}
+                            className="p-1 hover:bg-blue-50 rounded transition-colors"
+                            title="Manage Entities"
+                          >
+                            <Users className="w-4 h-4 text-blue-600" />
+                          </button>
                           <button
                             onClick={() => handleOpenModal(broker)}
                             className="p-1 hover:bg-gray-100 rounded transition-colors"
@@ -277,6 +422,143 @@ export function Brokers() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showEntityModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Manage Entities</h2>
+                  <p className="text-sm text-gray-500 mt-1">{selectedBrokerName}</p>
+                </div>
+                <button
+                  onClick={handleCloseEntityModal}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <form onSubmit={handleAssignEntity} className="space-y-4 p-4 bg-gray-50 rounded-lg">
+                <h3 className="text-lg font-semibold text-gray-900">Assign New Entity</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entity *</label>
+                    <select
+                      required
+                      value={entityFormData.entity_id}
+                      onChange={(e) => setEntityFormData({...entityFormData, entity_id: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select an entity</option>
+                      {entities.map((entity) => (
+                        <option key={entity.id} value={entity.id}>
+                          {entity.name} {entity.entity_id && `(${entity.entity_id})`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Relationship Type *</label>
+                    <select
+                      required
+                      value={entityFormData.relationship_type}
+                      onChange={(e) => setEntityFormData({...entityFormData, relationship_type: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="Primary Broker">Primary Broker</option>
+                      <option value="Secondary Broker">Secondary Broker</option>
+                      <option value="Custodian">Custodian</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Assigned Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={entityFormData.assigned_date}
+                      onChange={(e) => setEntityFormData({...entityFormData, assigned_date: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Notes</label>
+                    <input
+                      type="text"
+                      value={entityFormData.notes}
+                      onChange={(e) => setEntityFormData({...entityFormData, notes: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Optional notes"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Assign Entity</span>
+                  </button>
+                </div>
+              </form>
+
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Assigned Entities</h3>
+                {brokerEntities.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No entities assigned yet
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {brokerEntities.map((be) => (
+                      <div key={be.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3">
+                            <Users className="w-5 h-5 text-blue-600" />
+                            <div>
+                              <div className="font-semibold text-gray-900">{be.entities.name}</div>
+                              <div className="text-sm text-gray-500">ID: {be.entities.entity_id || 'N/A'}</div>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center space-x-4 text-sm text-gray-600">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                              {be.relationship_type}
+                            </span>
+                            <span>Assigned: {be.assigned_date}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveEntity(be.id)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Remove"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-gray-200 flex justify-end sticky bottom-0 bg-white">
+              <button
+                onClick={handleCloseEntityModal}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
