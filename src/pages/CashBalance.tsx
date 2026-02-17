@@ -38,6 +38,7 @@ export function CashBalance() {
     bankId: '',
     code: '',
     amount: '',
+    onHoldAmount: '0',
     description: '',
     date: new Date().toISOString().split('T')[0],
     createdBy: ''
@@ -130,6 +131,8 @@ export function CashBalance() {
         ? lastBalance + amount
         : lastBalance - amount;
 
+      const onHoldAmount = parseFloat(formData.onHoldAmount) || 0;
+
       const { error } = await supabase
         .from('cash_balance_ledger')
         .insert({
@@ -139,6 +142,7 @@ export function CashBalance() {
           amount: amount,
           date: formData.date,
           running_balance: newBalance,
+          on_hold_amount: onHoldAmount,
           entity_id: formData.entityId,
           bank_id: formData.bankId || null,
           created_by: formData.createdBy
@@ -159,6 +163,7 @@ export function CashBalance() {
         bankId: '',
         code: '',
         amount: '',
+        onHoldAmount: '0',
         description: '',
         date: new Date().toISOString().split('T')[0],
         createdBy: ''
@@ -514,8 +519,9 @@ export function CashBalance() {
                     ))}
                   </select>
                 </div>
+
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Bank</label>
                   <select
                     value={formData.bankId}
                     onChange={(e) => setFormData({ ...formData, bankId: e.target.value })}
@@ -531,13 +537,69 @@ export function CashBalance() {
                       })
                       .map((bank) => (
                         <option key={bank.id} value={bank.id}>
-                          {bank.name} - {bank.account_number} ({bank.branch})
+                          {bank.name} - {bank.branch}
                         </option>
                       ))}
                   </select>
                 </div>
+
+                {formData.bankId && (() => {
+                  const selectedBank = banks.find(b => b.id === formData.bankId);
+                  return selectedBank ? (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Account Number</label>
+                      <input
+                        type="text"
+                        value={selectedBank.account_number}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                        disabled
+                      />
+                    </div>
+                  ) : null;
+                })()}
+
+                {formData.entityId && (() => {
+                  const selectedEntity = entities.find(e => e.entity_id === formData.entityId);
+                  return selectedEntity ? (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit (OD Limit)</label>
+                      <input
+                        type="text"
+                        value={`Rs. ${selectedEntity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
+                        disabled
+                      />
+                    </div>
+                  ) : null;
+                })()}
+
+                {formData.entityId && (() => {
+                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  if (!entity) return null;
+
+                  const entityTransactions = transactions
+                    .filter(t => t.entity_id === formData.entityId)
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                  const openingBalance = entityTransactions.length > 0
+                    ? entityTransactions[entityTransactions.length - 1].running_balance
+                    : 0;
+
+                  return (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Opening Balance</label>
+                      <input
+                        type="text"
+                        value={`Rs. ${openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
+                        disabled
+                      />
+                    </div>
+                  );
+                })()}
+
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Type</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Type *</label>
                   <div className="flex space-x-4">
                     <button
                       type="button"
@@ -549,7 +611,7 @@ export function CashBalance() {
                       }`}
                     >
                       <TrendingUp className="w-5 h-5 mx-auto mb-1" />
-                      Addition
+                      Cash Add / Sell
                     </button>
                     <button
                       type="button"
@@ -561,10 +623,11 @@ export function CashBalance() {
                       }`}
                     >
                       <TrendingDown className="w-5 h-5 mx-auto mb-1" />
-                      Deduction
+                      Buy
                     </button>
                   </div>
                 </div>
+
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Transaction Code</label>
                   <input
@@ -587,6 +650,86 @@ export function CashBalance() {
                     required
                   />
                 </div>
+
+                {formData.entityId && formData.amount && (() => {
+                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  if (!entity) return null;
+
+                  const entityTransactions = transactions
+                    .filter(t => t.entity_id === formData.entityId)
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                  const lastBalance = entityTransactions.length > 0
+                    ? entityTransactions[entityTransactions.length - 1].running_balance
+                    : 0;
+
+                  const amount = parseFloat(formData.amount) || 0;
+                  const closingBalance = transactionType === 'Addition'
+                    ? lastBalance + amount
+                    : lastBalance - amount;
+
+                  return (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Current]</label>
+                      <input
+                        type="text"
+                        value={`Rs. ${closingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-bold"
+                        disabled
+                      />
+                    </div>
+                  );
+                })()}
+
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">On Hold Amount (LKR)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.onHoldAmount}
+                    onChange={(e) => setFormData({ ...formData, onHoldAmount: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                {formData.entityId && formData.amount && (() => {
+                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  if (!entity) return null;
+
+                  const entityTransactions = transactions
+                    .filter(t => t.entity_id === formData.entityId)
+                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+                  const lastBalance = entityTransactions.length > 0
+                    ? entityTransactions[entityTransactions.length - 1].running_balance
+                    : 0;
+
+                  const amount = parseFloat(formData.amount) || 0;
+                  const closingBalance = transactionType === 'Addition'
+                    ? lastBalance + amount
+                    : lastBalance - amount;
+
+                  const onHoldAmount = parseFloat(formData.onHoldAmount) || 0;
+                  const availableBalance = closingBalance + entity.od_limit - onHoldAmount;
+
+                  return (
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Available]</label>
+                      <input
+                        type="text"
+                        value={`Rs. ${availableBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        className={`w-full px-4 py-2 border rounded-lg font-bold ${
+                          availableBalance >= 0
+                            ? 'border-green-300 bg-green-50 text-green-700'
+                            : 'border-red-300 bg-red-50 text-red-700'
+                        }`}
+                        disabled
+                      />
+                    </div>
+                  );
+                })()}
+
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Description *</label>
                   <input

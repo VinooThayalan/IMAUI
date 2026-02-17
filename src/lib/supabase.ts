@@ -18,7 +18,9 @@ export interface CashTransaction {
   date: string;
   timestamp: string;
   running_balance: number;
+  on_hold_amount: number;
   entity_id?: string;
+  bank_id?: string;
   reference_id?: string;
   created_by: string;
   notes?: string;

@@ -322,7 +322,9 @@ export function BuyAndSellNotes() {
             amount: netAmount,
             date: formData.transaction_date,
             running_balance: newBalance,
+            on_hold_amount: 0,
             entity_id: entity.entity_id,
+            bank_id: null,
             reference_id: insertedNote?.id || null,
             created_by: 'System',
             notes: formData.remarks || null
