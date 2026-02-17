@@ -82,13 +82,28 @@ interface Broker {
   is_active: boolean;
 }
 
+interface Bank {
+  id: string;
+  bank_name: string;
+  bank_code: string;
+}
+
 interface EntityBroker {
   id: string;
   broker_id: string;
   relationship_type: string;
   is_active: boolean;
   assigned_date: string;
+  custodian_account_number?: string;
+  custodian_account_name?: string;
+  broker_account_number?: string;
+  bank_account_number?: string;
+  currency?: string;
+  facility_limit?: number;
+  broker_text?: string;
   brokers: Broker;
+  banks?: Bank;
+  broker_name?: Broker;
 }
 
 export function Entities() {
@@ -98,17 +113,28 @@ export function Entities() {
   const [selectedEntityName, setSelectedEntityName] = useState<string>('');
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [brokerFormData, setBrokerFormData] = useState({
     broker_id: '',
-    relationship_type: 'Primary Broker',
+    relationship_type: 'Custodian',
     assigned_date: new Date().toISOString().split('T')[0],
-    notes: ''
+    notes: '',
+    custodian_account_number: '',
+    custodian_account_name: '',
+    broker_account_number: '',
+    bank_id: '',
+    currency: 'LKR',
+    bank_account_number: '',
+    facility_limit: '',
+    broker_name_id: '',
+    broker_text: ''
   });
 
   useEffect(() => {
     fetchEntityTypes();
     fetchBrokers();
+    fetchBanks();
   }, []);
 
   async function fetchEntityTypes() {
@@ -141,6 +167,20 @@ export function Entities() {
     }
   }
 
+  async function fetchBanks() {
+    try {
+      const { data, error } = await supabase
+        .from('banks')
+        .select('id, bank_name, bank_code')
+        .order('bank_name');
+
+      if (error) throw error;
+      setBanks(data || []);
+    } catch (error) {
+      console.error('Error fetching banks:', error);
+    }
+  }
+
   async function fetchEntityBrokers(entityId: number) {
     try {
       const { data, error } = await supabase
@@ -152,6 +192,16 @@ export function Entities() {
             broker_id,
             broker_name,
             is_active
+          ),
+          banks (
+            id,
+            bank_name,
+            bank_code
+          ),
+          broker_name:broker_name_id (
+            id,
+            broker_id,
+            broker_name
           )
         `)
         .eq('entity_id', entityId)
@@ -178,9 +228,18 @@ export function Entities() {
     setEntityBrokers([]);
     setBrokerFormData({
       broker_id: '',
-      relationship_type: 'Primary Broker',
+      relationship_type: 'Custodian',
       assigned_date: new Date().toISOString().split('T')[0],
-      notes: ''
+      notes: '',
+      custodian_account_number: '',
+      custodian_account_name: '',
+      broker_account_number: '',
+      bank_id: '',
+      currency: 'LKR',
+      bank_account_number: '',
+      facility_limit: '',
+      broker_name_id: '',
+      broker_text: ''
     });
   }
 
@@ -189,25 +248,49 @@ export function Entities() {
     if (!selectedEntityId) return;
 
     try {
-      const { error } = await supabase.from('entity_brokers').insert({
+      const insertData: any = {
         entity_id: selectedEntityId,
         broker_id: brokerFormData.broker_id,
         relationship_type: brokerFormData.relationship_type,
         assigned_date: brokerFormData.assigned_date,
         notes: brokerFormData.notes || null,
+        bank_id: brokerFormData.bank_id || null,
+        currency: brokerFormData.currency,
+        bank_account_number: brokerFormData.bank_account_number || null,
+        facility_limit: brokerFormData.facility_limit ? parseFloat(brokerFormData.facility_limit) : null,
         is_active: true
-      });
+      };
+
+      if (brokerFormData.relationship_type === 'Custodian') {
+        insertData.custodian_account_number = brokerFormData.custodian_account_number || null;
+        insertData.custodian_account_name = brokerFormData.custodian_account_name || null;
+        insertData.broker_name_id = brokerFormData.broker_name_id || null;
+      } else {
+        insertData.broker_account_number = brokerFormData.broker_account_number || null;
+        insertData.broker_text = brokerFormData.broker_text || null;
+      }
+
+      const { error } = await supabase.from('entity_brokers').insert(insertData);
 
       if (error) throw error;
 
       await fetchEntityBrokers(selectedEntityId);
       setBrokerFormData({
         broker_id: '',
-        relationship_type: 'Primary Broker',
+        relationship_type: 'Custodian',
         assigned_date: new Date().toISOString().split('T')[0],
-        notes: ''
+        notes: '',
+        custodian_account_number: '',
+        custodian_account_name: '',
+        broker_account_number: '',
+        bank_id: '',
+        currency: 'LKR',
+        bank_account_number: '',
+        facility_limit: '',
+        broker_name_id: '',
+        broker_text: ''
       });
-      alert('Broker assigned successfully!');
+      alert('Broker/Custodian assigned successfully!');
     } catch (error: any) {
       console.error('Error assigning broker:', error);
       if (error.code === '23505') {
@@ -219,7 +302,7 @@ export function Entities() {
   }
 
   async function handleRemoveBroker(relationshipId: string) {
-    if (!confirm('Are you sure you want to remove this broker relationship?')) return;
+    if (!confirm('Are you sure you want to remove this relationship?')) return;
 
     try {
       const { error } = await supabase
@@ -232,12 +315,14 @@ export function Entities() {
       if (selectedEntityId) {
         await fetchEntityBrokers(selectedEntityId);
       }
-      alert('Broker relationship removed successfully!');
+      alert('Relationship removed successfully!');
     } catch (error) {
       console.error('Error removing broker:', error);
-      alert('Failed to remove broker relationship.');
+      alert('Failed to remove relationship.');
     }
   }
+
+  const isCustodian = brokerFormData.relationship_type === 'Custodian';
 
   return (
     <div className="p-6 space-y-6">
@@ -449,11 +534,11 @@ export function Entities() {
 
       {showBrokerModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Manage Brokers</h2>
+                  <h2 className="text-2xl font-bold text-gray-900">Manage Brokers & Custodians</h2>
                   <p className="text-sm text-gray-500 mt-1">{selectedEntityName}</p>
                 </div>
                 <button
@@ -469,38 +554,179 @@ export function Entities() {
 
             <div className="p-6 space-y-6">
               <form onSubmit={handleAssignBroker} className="space-y-4 p-4 bg-gray-50 rounded-lg">
-                <h3 className="text-lg font-semibold text-gray-900">Assign New Broker</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <h3 className="text-lg font-semibold text-gray-900">Assign New {isCustodian ? 'Custodian' : 'Broker'} Account</h3>
+
+                <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Broker *</label>
-                    <select
-                      required
-                      value={brokerFormData.broker_id}
-                      onChange={(e) => setBrokerFormData({...brokerFormData, broker_id: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select a broker</option>
-                      {brokers.map((broker) => (
-                        <option key={broker.id} value={broker.id}>
-                          {broker.broker_name} ({broker.broker_id})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Relationship Type *</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Account Type *</label>
                     <select
                       required
                       value={brokerFormData.relationship_type}
                       onChange={(e) => setBrokerFormData({...brokerFormData, relationship_type: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="Primary Broker">Primary Broker</option>
-                      <option value="Secondary Broker">Secondary Broker</option>
-                      <option value="Custodian">Custodian</option>
-                      <option value="Other">Other</option>
+                      <option value="Custodian">Custodian Account</option>
+                      <option value="Primary Broker">Broker Account</option>
                     </select>
                   </div>
+
+                  {isCustodian && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian *</label>
+                        <select
+                          required
+                          value={brokerFormData.broker_id}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, broker_id: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">Select custodian</option>
+                          {brokers.map((broker) => (
+                            <option key={broker.id} value={broker.id}>
+                              {broker.broker_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Number *</label>
+                        <input
+                          type="text"
+                          required
+                          value={brokerFormData.custodian_account_number}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_number: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter account number"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Name *</label>
+                        <input
+                          type="text"
+                          required
+                          value={brokerFormData.custodian_account_name}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_name: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter account name"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {!isCustodian && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Broker Name *</label>
+                        <select
+                          required
+                          value={brokerFormData.broker_id}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, broker_id: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">Select broker</option>
+                          {brokers.map((broker) => (
+                            <option key={broker.id} value={broker.id}>
+                              {broker.broker_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Broker Account Number *</label>
+                        <input
+                          type="text"
+                          required
+                          value={brokerFormData.broker_account_number}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, broker_account_number: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter broker account number"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Name *</label>
+                    <select
+                      required
+                      value={brokerFormData.bank_id}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_id: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select bank</option>
+                      {banks.map((bank) => (
+                        <option key={bank.id} value={bank.id}>
+                          {bank.bank_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Currency *</label>
+                    <input
+                      type="text"
+                      required
+                      value={brokerFormData.currency}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, currency: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="LKR"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account Number *</label>
+                    <input
+                      type="text"
+                      required
+                      value={brokerFormData.bank_account_number}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_account_number: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter bank account number"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={brokerFormData.facility_limit}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, facility_limit: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter facility limit"
+                    />
+                  </div>
+
+                  {isCustodian ? (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Broker Name</label>
+                      <select
+                        value={brokerFormData.broker_name_id}
+                        onChange={(e) => setBrokerFormData({...brokerFormData, broker_name_id: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select broker</option>
+                        {brokers.map((broker) => (
+                          <option key={broker.id} value={broker.id}>
+                            {broker.broker_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Broker</label>
+                      <input
+                        type="text"
+                        value={brokerFormData.broker_text}
+                        onChange={(e) => setBrokerFormData({...brokerFormData, broker_text: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter broker details"
+                      />
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Assigned Date *</label>
                     <input
@@ -511,7 +737,8 @@ export function Entities() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                  <div>
+
+                  <div className="col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Notes</label>
                     <input
                       type="text"
@@ -522,49 +749,64 @@ export function Entities() {
                     />
                   </div>
                 </div>
+
                 <div className="flex justify-end">
                   <button
                     type="submit"
                     className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
                     <UserPlus className="w-4 h-4" />
-                    <span>Assign Broker</span>
+                    <span>Assign {isCustodian ? 'Custodian' : 'Broker'}</span>
                   </button>
                 </div>
               </form>
 
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Assigned Brokers</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Assigned Accounts</h3>
                 {entityBrokers.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    No brokers assigned yet
+                    No accounts assigned yet
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {entityBrokers.map((eb) => (
-                      <div key={eb.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-3">
-                            <Building2 className="w-5 h-5 text-blue-600" />
-                            <div>
-                              <div className="font-semibold text-gray-900">{eb.brokers.broker_name}</div>
-                              <div className="text-sm text-gray-500">ID: {eb.brokers.broker_id}</div>
+                      <div key={eb.id} className="p-4 bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-3 mb-2">
+                              <Building2 className="w-5 h-5 text-blue-600" />
+                              <div>
+                                <div className="font-semibold text-gray-900">{eb.brokers.broker_name}</div>
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                                  {eb.relationship_type}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600 ml-8">
+                              {eb.relationship_type === 'Custodian' && (
+                                <>
+                                  <div><span className="font-medium">Account Number:</span> {eb.custodian_account_number}</div>
+                                  <div><span className="font-medium">Account Name:</span> {eb.custodian_account_name}</div>
+                                </>
+                              )}
+                              {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
+                                <div><span className="font-medium">Broker Account:</span> {eb.broker_account_number}</div>
+                              )}
+                              {eb.banks && <div><span className="font-medium">Bank:</span> {eb.banks.bank_name}</div>}
+                              {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
+                              {eb.currency && <div><span className="font-medium">Currency:</span> {eb.currency}</div>}
+                              {eb.facility_limit && <div><span className="font-medium">Facility Limit:</span> Rs. {eb.facility_limit.toLocaleString()}</div>}
+                              <div><span className="font-medium">Assigned:</span> {eb.assigned_date}</div>
                             </div>
                           </div>
-                          <div className="mt-2 flex items-center space-x-4 text-sm text-gray-600">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
-                              {eb.relationship_type}
-                            </span>
-                            <span>Assigned: {eb.assigned_date}</span>
-                          </div>
+                          <button
+                            onClick={() => handleRemoveBroker(eb.id)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleRemoveBroker(eb.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Remove"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
                       </div>
                     ))}
                   </div>
