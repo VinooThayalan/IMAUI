@@ -11,6 +11,9 @@ interface IpoTransaction {
   price_per_share: number;
   total_amount: number;
   fees?: number;
+  broker_id?: string;
+  cds_account_id?: string;
+  bank_id?: string;
   created_at: string;
 }
 
@@ -25,24 +28,56 @@ interface Share {
   ticker: string;
 }
 
+interface EntityBroker {
+  id: string;
+  entity_id: string;
+  broker_id: string;
+  relationship_type: string;
+  custodian_account_number?: string;
+  custodian_account_name?: string;
+  broker_account_number?: string;
+  broker_text?: string;
+  bank_id?: string;
+  bank_account_number?: string;
+  facility_limit?: number;
+  broker_name_id?: string;
+}
+
+interface Broker {
+  id: string;
+  broker_name: string;
+}
+
+interface Bank {
+  id: string;
+  name: string;
+  account_number?: string;
+  balance?: number;
+}
+
 export function IpoTransactions() {
   const [showForm, setShowForm] = useState(false);
   const [transactions, setTransactions] = useState<IpoTransaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
+  const [brokers, setBrokers] = useState<Broker[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
     entity_id: '',
+    relationship_type: 'Broker' as 'Broker' | 'Custodian',
+    entity_broker_id: '',
     share_id: '',
+    announcement_date: '',
+    allotment_date: '',
     transaction_date: new Date().toISOString().split('T')[0],
     no_of_shares: '',
     price_per_share: '',
     fees: '',
-    application_date: '',
-    allotment_date: '',
     notes: ''
   });
 
@@ -54,19 +89,25 @@ export function IpoTransactions() {
     try {
       setLoading(true);
 
-      const [transactionsRes, entitiesRes, sharesRes] = await Promise.all([
+      const [transactionsRes, entitiesRes, sharesRes, entityBrokersRes, brokersRes, banksRes] = await Promise.all([
         supabase
           .from('transactions')
           .select('*')
           .eq('transaction_type', 'IPO')
           .order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name')
+        supabase.from('shares').select('id, name, ticker').order('name'),
+        supabase.from('entity_brokers').select('*'),
+        supabase.from('brokers').select('id, broker_name').order('broker_name'),
+        supabase.from('banks').select('id, name, account_number, balance').order('name')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
+      if (entityBrokersRes.error) throw entityBrokersRes.error;
+      if (brokersRes.error) throw brokersRes.error;
+      if (banksRes.error) throw banksRes.error;
 
       const parsedTransactions = (transactionsRes.data || []).map(txn => ({
         ...txn,
@@ -79,6 +120,9 @@ export function IpoTransactions() {
       setTransactions(parsedTransactions);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
+      setEntityBrokers(entityBrokersRes.data || []);
+      setBrokers(brokersRes.data || []);
+      setBanks(banksRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -96,16 +140,27 @@ export function IpoTransactions() {
     return share ? `${share.ticker} - ${share.name}` : 'Unknown';
   }
 
+  const filteredEntityBrokers = entityBrokers.filter(
+    eb => eb.entity_id === formData.entity_id &&
+    (formData.relationship_type === 'Custodian' ? eb.relationship_type === 'Custodian' : eb.relationship_type !== 'Custodian')
+  );
+
+  const selectedEntityBroker = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
+  const selectedBank = selectedEntityBroker?.bank_id ? banks.find(b => b.id === selectedEntityBroker.bank_id) : null;
+  const selectedBrokerName = selectedEntityBroker?.broker_name_id ? brokers.find(b => b.id === selectedEntityBroker.broker_name_id) : null;
+
   function resetForm() {
     setFormData({
       entity_id: '',
+      relationship_type: 'Broker',
+      entity_broker_id: '',
       share_id: '',
+      announcement_date: '',
+      allotment_date: '',
       transaction_date: new Date().toISOString().split('T')[0],
       no_of_shares: '',
       price_per_share: '',
       fees: '',
-      application_date: '',
-      allotment_date: '',
       notes: ''
     });
   }
@@ -120,7 +175,7 @@ export function IpoTransactions() {
   async function handleCreateTransaction(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!formData.entity_id || !formData.share_id || !formData.no_of_shares || !formData.price_per_share) {
+    if (!formData.entity_id || !formData.share_id || !formData.no_of_shares || !formData.price_per_share || !formData.entity_broker_id) {
       alert('Please fill in all required fields');
       return;
     }
@@ -129,6 +184,7 @@ export function IpoTransactions() {
       setSubmitting(true);
 
       const totalAmount = calculateTotalAmount();
+      const selectedEB = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
 
       const { error } = await supabase.from('transactions').insert({
         entity_id: formData.entity_id,
@@ -138,7 +194,10 @@ export function IpoTransactions() {
         no_of_shares: parseFloat(formData.no_of_shares),
         price_per_share: parseFloat(formData.price_per_share),
         total_amount: totalAmount,
-        fees: parseFloat(formData.fees) || 0
+        fees: parseFloat(formData.fees) || 0,
+        broker_id: selectedEB?.broker_id,
+        cds_account_id: formData.relationship_type === 'Custodian' ? selectedEB?.custodian_account_number : selectedEB?.broker_account_number,
+        bank_id: selectedEB?.bank_id
       });
 
       if (error) throw error;
@@ -213,7 +272,7 @@ export function IpoTransactions() {
                 </label>
                 <select
                   value={formData.entity_id}
-                  onChange={(e) => setFormData({ ...formData, entity_id: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, entity_id: e.target.value, entity_broker_id: '' })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
                 >
@@ -222,6 +281,112 @@ export function IpoTransactions() {
                     <option key={entity.id} value={entity.id}>{entity.name}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Broker/Custodian <span className="text-red-600">*</span>
+                </label>
+                <div className="flex space-x-4">
+                  <label className="inline-flex items-center">
+                    <input
+                      type="radio"
+                      value="Broker"
+                      checked={formData.relationship_type === 'Broker'}
+                      onChange={(e) => setFormData({ ...formData, relationship_type: e.target.value as 'Broker' | 'Custodian', entity_broker_id: '' })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">Broker</span>
+                  </label>
+                  <label className="inline-flex items-center">
+                    <input
+                      type="radio"
+                      value="Custodian"
+                      checked={formData.relationship_type === 'Custodian'}
+                      onChange={(e) => setFormData({ ...formData, relationship_type: e.target.value as 'Broker' | 'Custodian', entity_broker_id: '' })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-700">Custodian</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {formData.relationship_type === 'Custodian' ? 'CDS Account ID' : 'Broker Account ID'} <span className="text-red-600">*</span>
+                </label>
+                <select
+                  value={formData.entity_broker_id}
+                  onChange={(e) => setFormData({ ...formData, entity_broker_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  required
+                  disabled={!formData.entity_id}
+                >
+                  <option value="">Select Account</option>
+                  {filteredEntityBrokers.map(eb => (
+                    <option key={eb.id} value={eb.id}>
+                      {formData.relationship_type === 'Custodian' ? eb.custodian_account_number : eb.broker_account_number}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Broker Name
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                  {selectedBrokerName?.broker_name || selectedEntityBroker?.broker_text || '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Bank Name
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                  {selectedBank?.name || '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Account Number
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                  {selectedEntityBroker?.bank_account_number || '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Facility Limit
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                  {selectedEntityBroker?.facility_limit ? `Rs. ${Number(selectedEntityBroker.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Available Balance
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                  {selectedBank?.balance !== undefined ? `Rs. ${Number(selectedBank.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                </div>
+              </div>
+
+              <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Transaction Details</h3>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Transaction Type
+                </label>
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
+                  IPO
+                </div>
               </div>
 
               <div>
@@ -245,20 +410,31 @@ export function IpoTransactions() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Transaction Date <span className="text-red-600">*</span>
+                  Date of Announcement
                 </label>
                 <input
                   type="date"
-                  value={formData.transaction_date}
-                  onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
+                  value={formData.announcement_date}
+                  onChange={(e) => setFormData({ ...formData, announcement_date: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Number of Shares <span className="text-red-600">*</span>
+                  Date of Allotment
+                </label>
+                <input
+                  type="date"
+                  value={formData.allotment_date}
+                  onChange={(e) => setFormData({ ...formData, allotment_date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  No. of Shares <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="number"
@@ -274,7 +450,7 @@ export function IpoTransactions() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  IPO Price per Share (Rs.) <span className="text-red-600">*</span>
+                  Price Per Share (Rs.) <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="number"
@@ -288,65 +464,13 @@ export function IpoTransactions() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Application Fees (Rs.)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.fees}
-                  onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="e.g., 50.00"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Application Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.application_date}
-                  onChange={(e) => setFormData({ ...formData, application_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Allotment Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.allotment_date}
-                  onChange={(e) => setFormData({ ...formData, allotment_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Total Amount (Rs.)
                 </label>
-                <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-blue-50 text-blue-900 font-bold text-lg">
                   Rs. {calculateTotalAmount().toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
-              </div>
-
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  rows={3}
-                  placeholder="Additional notes about this IPO..."
-                />
               </div>
             </div>
 
