@@ -350,17 +350,27 @@ export function Transactions() {
   }
 
   function toggleAllTransactions() {
-    if (selectedTransactions.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length) {
+    if (selectedTransactions.size === filteredTransactions.length) {
       setSelectedTransactions(new Set());
     } else {
-      const draftIds = filteredTransactions.filter(t => t.approval_status === 'DRAFT').map(t => t.id);
-      setSelectedTransactions(new Set(draftIds));
+      const allIds = filteredTransactions.map(t => t.id);
+      setSelectedTransactions(new Set(allIds));
     }
   }
 
   async function handleSendForApproval() {
     if (selectedTransactions.size === 0) {
       alert('Please select at least one transaction');
+      return;
+    }
+
+    const draftTransactions = Array.from(selectedTransactions).filter(id => {
+      const txn = transactions.find(t => t.id === id);
+      return txn?.approval_status === 'DRAFT';
+    });
+
+    if (draftTransactions.length === 0) {
+      alert('Please select at least one DRAFT transaction to send for approval');
       return;
     }
 
@@ -376,7 +386,7 @@ export function Transactions() {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + hours);
 
-      const updates = Array.from(selectedTransactions).map(id =>
+      const updates = draftTransactions.map(id =>
         supabase.from('transactions').update({
           approval_status: 'PENDING_APPROVAL',
           submitted_for_approval_at: new Date().toISOString(),
@@ -394,7 +404,7 @@ export function Transactions() {
         throw new Error('Some transactions failed to update');
       }
 
-      alert(`${selectedTransactions.size} transaction(s) sent for approval`);
+      alert(`${draftTransactions.length} transaction(s) sent for approval`);
       setShowApprovalModal(false);
       setSelectedTransactions(new Set());
       setValidityHours('24');
@@ -600,7 +610,7 @@ export function Transactions() {
                 <th className="px-4 py-3">
                   <input
                     type="checkbox"
-                    checked={selectedTransactions.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length && filteredTransactions.filter(t => t.approval_status === 'DRAFT').length > 0}
+                    checked={selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0}
                     onChange={toggleAllTransactions}
                     className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
                   />
@@ -619,14 +629,12 @@ export function Transactions() {
               {filteredTransactions.map((transaction) => (
                 <tr key={transaction.id} className="hover:bg-gray-50">
                   <td className="px-4 py-4">
-                    {transaction.approval_status === 'DRAFT' && (
-                      <input
-                        type="checkbox"
-                        checked={selectedTransactions.has(transaction.id)}
-                        onChange={() => toggleTransactionSelection(transaction.id)}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={selectedTransactions.has(transaction.id)}
+                      onChange={() => toggleTransactionSelection(transaction.id)}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
@@ -1030,7 +1038,22 @@ export function Transactions() {
             <div className="p-6 space-y-4">
               <div>
                 <p className="text-sm text-gray-600 mb-4">
-                  Sending <span className="font-bold text-gray-900">{selectedTransactions.size}</span> transaction(s) for approval
+                  {(() => {
+                    const draftCount = Array.from(selectedTransactions).filter(id => {
+                      const txn = transactions.find(t => t.id === id);
+                      return txn?.approval_status === 'DRAFT';
+                    }).length;
+                    return (
+                      <>
+                        Sending <span className="font-bold text-green-700">{draftCount}</span> DRAFT transaction(s) for approval
+                        {selectedTransactions.size > draftCount && (
+                          <span className="block mt-2 text-yellow-600 text-xs">
+                            ({selectedTransactions.size - draftCount} non-DRAFT transaction(s) will be ignored)
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </p>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Validity Period (Hours) <span className="text-red-600">*</span>
