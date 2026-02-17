@@ -236,6 +236,18 @@ export function BuyAndSellNotes() {
     }
 
     try {
+      const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
+      if (!selectedTransaction) {
+        alert('Selected transaction not found');
+        return;
+      }
+
+      const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+      if (!entity) {
+        alert('Entity not found for this transaction');
+        return;
+      }
+
       if (editingNote) {
         const { error } = await supabase
           .from('buy_sell_notes')
@@ -254,7 +266,7 @@ export function BuyAndSellNotes() {
 
         if (error) throw error;
       } else {
-        const { error } = await supabase
+        const { data: insertedNote, error: insertError } = await supabase
           .from('buy_sell_notes')
           .insert({
             transaction_id: formData.transaction_id,
@@ -266,13 +278,69 @@ export function BuyAndSellNotes() {
             settlement_date: formData.settlement_date,
             file_url: formData.file_url || null,
             remarks: formData.remarks || null
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+
+        let brokerageFee = 0;
+        if (formData.brokerage_fee_type_id) {
+          const feeType = brokerageFeeTypes.find(f => f.id === formData.brokerage_fee_type_id);
+          if (feeType) {
+            brokerageFee = selectedTransaction.total_amount * (feeType.rate / 100);
+          }
+        }
+
+        const netAmount = formData.note_type === 'Buy'
+          ? selectedTransaction.total_amount + brokerageFee
+          : selectedTransaction.total_amount - brokerageFee;
+
+        const transactionType = formData.note_type === 'Buy' ? 'Deduction' : 'Addition';
+
+        const { data: existingTransactions } = await supabase
+          .from('cash_balance_ledger')
+          .select('running_balance')
+          .eq('entity_id', entity.entity_id)
+          .order('timestamp', { ascending: false })
+          .limit(1);
+
+        const lastBalance = existingTransactions && existingTransactions.length > 0
+          ? Number(existingTransactions[0].running_balance)
+          : Number(entity.current_balance) || 0;
+
+        const newBalance = transactionType === 'Addition'
+          ? lastBalance + netAmount
+          : lastBalance - netAmount;
+
+        const { error: ledgerError } = await supabase
+          .from('cash_balance_ledger')
+          .insert({
+            type: transactionType,
+            description: `${formData.note_type} - ${formData.note_number} (${formData.broker})`,
+            code: formData.note_number,
+            amount: netAmount,
+            date: formData.transaction_date,
+            running_balance: newBalance,
+            entity_id: entity.entity_id,
+            reference_id: insertedNote?.id || null,
+            created_by: 'System',
+            notes: formData.remarks || null
           });
 
-        if (error) throw error;
+        if (ledgerError) throw ledgerError;
+
+        const { error: entityError } = await supabase
+          .from('entities')
+          .update({ current_balance: newBalance })
+          .eq('entity_id', entity.entity_id);
+
+        if (entityError) throw entityError;
       }
 
       await loadData();
       handleCloseModal();
+      alert(`${formData.note_type} note ${editingNote ? 'updated' : 'added'} successfully!${!editingNote ? ' Cash balance has been updated.' : ''}`);
     } catch (error) {
       console.error('Error saving note:', error);
       alert('Failed to save note');
@@ -680,6 +748,77 @@ export function BuyAndSellNotes() {
                   placeholder="Additional notes..."
                 />
               </div>
+
+              {formData.transaction_id && !editingNote && (() => {
+                const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
+                const entity = selectedTransaction ? entities.find(e => e.id === selectedTransaction.entity_id) : null;
+
+                if (!selectedTransaction || !entity) return null;
+
+                let brokerageFee = 0;
+                if (formData.brokerage_fee_type_id) {
+                  const feeType = brokerageFeeTypes.find(f => f.id === formData.brokerage_fee_type_id);
+                  if (feeType) {
+                    brokerageFee = selectedTransaction.total_amount * (feeType.rate / 100);
+                  }
+                }
+
+                const netAmount = formData.note_type === 'Buy'
+                  ? selectedTransaction.total_amount + brokerageFee
+                  : selectedTransaction.total_amount - brokerageFee;
+
+                const currentBalance = Number(entity.current_balance) || 0;
+                const newBalance = formData.note_type === 'Buy'
+                  ? currentBalance - netAmount
+                  : currentBalance + netAmount;
+
+                return (
+                  <div className={`p-4 rounded-lg border-2 ${formData.note_type === 'Buy' ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+                    <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
+                      <svg className="w-5 h-5 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Cash Balance Impact
+                    </h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Entity:</span>
+                        <span className="font-semibold text-gray-900">{entity.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Transaction Amount:</span>
+                        <span className="font-semibold text-gray-900">Rs. {selectedTransaction.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      {brokerageFee > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Brokerage Fee:</span>
+                          <span className="font-semibold text-gray-900">Rs. {brokerageFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between pt-2 border-t border-gray-300">
+                        <span className="text-gray-600">Net Amount:</span>
+                        <span className="font-bold text-gray-900">Rs. {netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Current Balance:</span>
+                        <span className="font-semibold text-gray-900">Rs. {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Cash Movement:</span>
+                        <span className={`font-bold ${formData.note_type === 'Buy' ? 'text-red-600' : 'text-green-600'}`}>
+                          {formData.note_type === 'Buy' ? '-' : '+'}Rs. {netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t border-gray-300">
+                        <span className="text-gray-600 font-semibold">New Balance:</span>
+                        <span className={`font-bold text-lg ${newBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          Rs. {newBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                 <button
