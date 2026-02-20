@@ -1,4 +1,4 @@
-import { Plus, Search, FileText, Upload, Edit, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, FileText, Upload, Edit, Trash2, Eye, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -8,6 +8,8 @@ interface BuyAndSellNote {
   note_type: 'Buy' | 'Sell';
   note_number: string;
   broker: string;
+  broker_id?: string;
+  dealer_name?: string;
   brokerage_fee_type_id?: string;
   transaction_date?: string;
   settlement_date: string;
@@ -40,6 +42,12 @@ interface Share {
   name: string;
 }
 
+interface Broker {
+  id: string;
+  broker_id: string;
+  broker_name: string;
+}
+
 interface BrokerageFeeType {
   id: string;
   name: string;
@@ -57,10 +65,12 @@ export function BuyAndSellNotes() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [brokers, setBrokers] = useState<Broker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'Buy' | 'Sell'>('all');
+  const [filterDate, setFilterDate] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [showExtractionModal, setShowExtractionModal] = useState(false);
   const [extractedData, setExtractedData] = useState({
@@ -88,7 +98,8 @@ export function BuyAndSellNotes() {
     transaction_id: '',
     note_type: 'Buy' as 'Buy' | 'Sell',
     note_number: '',
-    broker: '',
+    broker_id: '',
+    dealer_name: '',
     brokerage_fee_type_id: '',
     transaction_date: new Date().toISOString().split('T')[0],
     settlement_date: new Date().toISOString().split('T')[0],
@@ -104,11 +115,12 @@ export function BuyAndSellNotes() {
     try {
       setLoading(true);
 
-      const [notesRes, transactionsRes, entitiesRes, sharesRes, feeTypesRes] = await Promise.all([
+      const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, feeTypesRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
         supabase.from('shares').select('id, ticker, name').order('name'),
+        supabase.from('brokers').select('id, broker_id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('id, name, rate, is_active').eq('is_active', true).order('name')
       ]);
 
@@ -116,12 +128,14 @@ export function BuyAndSellNotes() {
       if (transactionsRes.error) throw transactionsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
+      if (brokersRes.error) throw brokersRes.error;
       if (feeTypesRes.error) throw feeTypesRes.error;
 
       setNotes(notesRes.data || []);
       setTransactions(transactionsRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
+      setBrokers(brokersRes.data || []);
       setBrokerageFeeTypes(feeTypesRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -169,7 +183,6 @@ export function BuyAndSellNotes() {
     setFormData({
       ...formData,
       note_number: extractedData.noteNumber,
-      broker: extractedData.broker,
       transaction_date: extractedData.transactionDate,
       settlement_date: extractedData.settlementDate,
       file_url: uploadedFile?.name || ''
@@ -230,7 +243,7 @@ export function BuyAndSellNotes() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!formData.transaction_id || !formData.note_number || !formData.broker) {
+    if (!formData.transaction_id || !formData.note_number || !formData.broker_id) {
       alert('Please fill in all required fields');
       return;
     }
@@ -248,6 +261,9 @@ export function BuyAndSellNotes() {
         return;
       }
 
+      const selectedBroker = brokers.find(b => b.id === formData.broker_id);
+      const brokerName = selectedBroker ? selectedBroker.broker_name : '';
+
       if (editingNote) {
         const { error } = await supabase
           .from('buy_sell_notes')
@@ -255,7 +271,9 @@ export function BuyAndSellNotes() {
             transaction_id: formData.transaction_id,
             note_type: formData.note_type,
             note_number: formData.note_number,
-            broker: formData.broker,
+            broker: brokerName,
+            broker_id: formData.broker_id,
+            dealer_name: formData.dealer_name || null,
             brokerage_fee_type_id: formData.brokerage_fee_type_id || null,
             transaction_date: formData.transaction_date,
             settlement_date: formData.settlement_date,
@@ -272,7 +290,9 @@ export function BuyAndSellNotes() {
             transaction_id: formData.transaction_id,
             note_type: formData.note_type,
             note_number: formData.note_number,
-            broker: formData.broker,
+            broker: brokerName,
+            broker_id: formData.broker_id,
+            dealer_name: formData.dealer_name || null,
             brokerage_fee_type_id: formData.brokerage_fee_type_id || null,
             transaction_date: formData.transaction_date,
             settlement_date: formData.settlement_date,
@@ -317,7 +337,7 @@ export function BuyAndSellNotes() {
           .from('cash_balance_ledger')
           .insert({
             type: transactionType,
-            description: `${formData.note_type} - ${formData.note_number} (${formData.broker})`,
+            description: `${formData.note_type} - ${formData.note_number} (${brokerName})`,
             code: formData.note_number,
             amount: netAmount,
             date: formData.transaction_date,
@@ -372,7 +392,8 @@ export function BuyAndSellNotes() {
       transaction_id: note.transaction_id,
       note_type: note.note_type,
       note_number: note.note_number,
-      broker: note.broker,
+      broker_id: note.broker_id || '',
+      dealer_name: note.dealer_name || '',
       brokerage_fee_type_id: note.brokerage_fee_type_id || '',
       transaction_date: note.transaction_date || new Date().toISOString().split('T')[0],
       settlement_date: note.settlement_date,
@@ -394,7 +415,8 @@ export function BuyAndSellNotes() {
       transaction_id: '',
       note_type: 'Buy',
       note_number: '',
-      broker: '',
+      broker_id: '',
+      dealer_name: '',
       brokerage_fee_type_id: '',
       transaction_date: new Date().toISOString().split('T')[0],
       settlement_date: new Date().toISOString().split('T')[0],
@@ -417,11 +439,22 @@ export function BuyAndSellNotes() {
     };
   }
 
+  function getBrokerName(brokerId: string | undefined) {
+    if (!brokerId) return 'N/A';
+    const broker = brokers.find(b => b.id === brokerId);
+    return broker ? broker.broker_name : 'N/A';
+  }
+
   const filteredNotes = notes.filter(note => {
     const matchesSearch = note.note_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          note.broker.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = filterType === 'all' || note.note_type === filterType;
     return matchesSearch && matchesType;
+  });
+
+  const filteredTransactions = transactions.filter(transaction => {
+    if (!filterDate) return true;
+    return transaction.transaction_date === filterDate;
   });
 
   if (loading) {
@@ -481,6 +514,7 @@ export function BuyAndSellNotes() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Transaction Details</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Broker</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dealer</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Brokerage Fee</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Settlement Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Document</th>
@@ -517,7 +551,10 @@ export function BuyAndSellNotes() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{note.broker}</div>
+                      <div className="text-sm text-gray-900">{getBrokerName(note.broker_id)}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{note.dealer_name || '-'}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {feeType ? (
@@ -597,6 +634,39 @@ export function BuyAndSellNotes() {
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    Select Transaction Date
+                  </label>
+                  {filterDate && (
+                    <button
+                      type="button"
+                      onClick={() => setFilterDate('')}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-5 h-5 text-gray-400" />
+                  <input
+                    type="date"
+                    value={filterDate}
+                    onChange={(e) => setFilterDate(e.target.value)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Filter by date"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {filterDate
+                    ? `Showing ${filteredTransactions.length} transaction(s) on ${new Date(filterDate).toLocaleDateString()}`
+                    : 'Select a date to filter transactions'
+                  }
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Transaction <span className="text-red-500">*</span>
                 </label>
@@ -607,7 +677,7 @@ export function BuyAndSellNotes() {
                   required
                 >
                   <option value="">Select transaction</option>
-                  {transactions.map((transaction) => {
+                  {filteredTransactions.map((transaction) => {
                     const entity = entities.find(e => e.id === transaction.entity_id);
                     const share = shares.find(s => s.id === transaction.share_id);
                     return (
@@ -663,13 +733,31 @@ export function BuyAndSellNotes() {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Broker <span className="text-red-500">*</span>
                 </label>
+                <select
+                  value={formData.broker_id}
+                  onChange={(e) => setFormData({ ...formData, broker_id: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                >
+                  <option value="">Select broker</option>
+                  {brokers.map((broker) => (
+                    <option key={broker.id} value={broker.id}>
+                      {broker.broker_name} ({broker.broker_id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Dealer Name
+                </label>
                 <input
                   type="text"
-                  value={formData.broker}
-                  onChange={(e) => setFormData({ ...formData, broker: e.target.value })}
+                  value={formData.dealer_name}
+                  onChange={(e) => setFormData({ ...formData, dealer_name: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., ABC Securities"
-                  required
+                  placeholder="e.g., John Doe"
                 />
               </div>
 
@@ -842,347 +930,6 @@ export function BuyAndSellNotes() {
         </div>
       )}
 
-      {showExtractionModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
-              <h2 className="text-xl font-bold text-white">Document Data Extraction</h2>
-              <p className="text-sm text-blue-100 mt-1">
-                {isExtracting ? 'Analyzing document...' : 'Review and edit extracted data'}
-              </p>
-            </div>
-
-            {isExtracting ? (
-              <div className="p-12 flex flex-col items-center justify-center">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mb-4"></div>
-                <p className="text-gray-600 mb-2">Extracting data from document...</p>
-                <p className="text-sm text-gray-500">This may take a few moments</p>
-              </div>
-            ) : (
-              <>
-                <div className="p-6">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                    <div className="flex items-start">
-                      <div className="flex-shrink-0">
-                        <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                      </div>
-                      <div className="ml-3">
-                        <h3 className="text-sm font-medium text-green-800">Extraction Complete</h3>
-                        <p className="text-sm text-green-700 mt-1">
-                          Data has been successfully extracted. Please review and edit if needed.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide border-b pb-2">
-                        Document Information
-                      </h3>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Note Number
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.noteNumber}
-                          onChange={(e) => setExtractedData({ ...extractedData, noteNumber: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Broker
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.broker}
-                          onChange={(e) => setExtractedData({ ...extractedData, broker: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Entity/Client Name
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.entity}
-                          onChange={(e) => setExtractedData({ ...extractedData, entity: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Transaction Date
-                        </label>
-                        <input
-                          type="date"
-                          value={extractedData.transactionDate}
-                          onChange={(e) => setExtractedData({ ...extractedData, transactionDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Settlement Date
-                        </label>
-                        <input
-                          type="date"
-                          value={extractedData.settlementDate}
-                          onChange={(e) => setExtractedData({ ...extractedData, settlementDate: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide border-b pb-2">
-                        Transaction Details
-                      </h3>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Share Code
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.shareCode}
-                          onChange={(e) => setExtractedData({ ...extractedData, shareCode: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Share Name
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.shareName}
-                          onChange={(e) => setExtractedData({ ...extractedData, shareName: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Number of Shares
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.noOfShares}
-                          onChange={(e) => setExtractedData({ ...extractedData, noOfShares: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Price per Share (Rs.)
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.pricePerShare}
-                          onChange={(e) => setExtractedData({ ...extractedData, pricePerShare: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Total Amount (Rs.)
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.totalAmount}
-                          onChange={(e) => setExtractedData({ ...extractedData, totalAmount: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h3 className="font-semibold text-gray-900 text-sm uppercase tracking-wide mb-4">
-                      Fee Information
-                    </h3>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Brokerage Fee (Rs.)
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.brokerageFee}
-                          onChange={(e) => setExtractedData({ ...extractedData, brokerageFee: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Brokerage Rate (%)
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.brokerageFeeRate}
-                          onChange={(e) => setExtractedData({ ...extractedData, brokerageFeeRate: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Net Amount (Rs.)
-                        </label>
-                        <input
-                          type="text"
-                          value={extractedData.netAmount}
-                          onChange={(e) => setExtractedData({ ...extractedData, netAmount: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-yellow-50"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-sm text-blue-800">
-                      <span className="font-semibold">Note:</span> Fields with yellow background contain extracted data.
-                      Review all fields carefully and make corrections if needed before confirming.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex justify-end space-x-3 px-6 py-4 border-t border-gray-200 bg-gray-50">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowExtractionModal(false);
-                      setUploadedFile(null);
-                      setExtractedData({
-                        noteNumber: '',
-                        broker: '',
-                        transactionDate: '',
-                        settlementDate: '',
-                        shareCode: '',
-                        shareName: '',
-                        noOfShares: '',
-                        pricePerShare: '',
-                        totalAmount: '',
-                        brokerageFee: '',
-                        brokerageFeeRate: '',
-                        netAmount: '',
-                        entity: ''
-                      });
-                    }}
-                    className="px-6 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmExtractedData}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-                  >
-                    Confirm & Use Data
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showValidationModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
-            <div className="bg-white border-b border-gray-200 px-6 py-4">
-              <h2 className="text-xl font-bold text-gray-900">Validate Document Values</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Enter the values from the uploaded document to validate against the transaction
-              </p>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Brokerage Fee (Rs.) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={validationData.uploadedBrokerageFee}
-                  onChange={(e) => setValidationData({ ...validationData, uploadedBrokerageFee: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter brokerage fee from document"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Total Amount (Rs.) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={validationData.uploadedAmount}
-                  onChange={(e) => setValidationData({ ...validationData, uploadedAmount: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter total amount from document"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Number of Shares <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  step="1"
-                  value={validationData.uploadedShares}
-                  onChange={(e) => setValidationData({ ...validationData, uploadedShares: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter number of shares from document"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end space-x-3 px-6 py-4 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowValidationModal(false);
-                  setUploadedFile(null);
-                  setValidationData({ uploadedBrokerageFee: '', uploadedAmount: '', uploadedShares: '' });
-                }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleValidationSubmit}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Validate & Continue
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showViewModal && viewingNote && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1208,8 +955,15 @@ export function BuyAndSellNotes() {
 
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium text-gray-500">Broker:</span>
-                  <span className="text-sm font-bold text-gray-900">{viewingNote.broker}</span>
+                  <span className="text-sm font-bold text-gray-900">{getBrokerName(viewingNote.broker_id)}</span>
                 </div>
+
+                {viewingNote.dealer_name && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Dealer:</span>
+                    <span className="text-sm font-bold text-gray-900">{viewingNote.dealer_name}</span>
+                  </div>
+                )}
 
                 {viewingNote.transaction_date && (
                   <div className="flex justify-between items-center">
