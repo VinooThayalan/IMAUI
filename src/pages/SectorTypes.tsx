@@ -196,7 +196,6 @@ export function SectorTypes() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sector ID</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sector Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Industry</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -204,7 +203,7 @@ export function SectorTypes() {
               <tbody className="divide-y divide-gray-200">
                 {filteredSectors.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
                       No sectors found
                     </td>
                   </tr>
@@ -216,11 +215,6 @@ export function SectorTypes() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm font-bold text-gray-900">{sector.sector_name}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-600">
-                          {sector.industry_types?.industry_name || '-'}
-                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -289,21 +283,6 @@ export function SectorTypes() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter sector name"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Industry</label>
-                <select
-                  value={formData.industry_id}
-                  onChange={(e) => setFormData({ ...formData, industry_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select an industry (optional)</option>
-                  {industries.map((industry) => (
-                    <option key={industry.id} value={industry.id}>
-                      {industry.industry_name}
-                    </option>
-                  ))}
-                </select>
               </div>
               <div className="flex items-center">
                 <input

@@ -180,7 +180,7 @@ export function BrokerageFeeTypes() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -190,19 +190,6 @@ export function BrokerageFeeTypes() {
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <Percent className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Average Rate</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{avgRate.toFixed(2)}%</p>
-              <p className="text-sm text-gray-500 mt-2">Across active types</p>
-            </div>
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <Percent className="w-6 h-6 text-green-600" />
             </div>
           </div>
         </div>
