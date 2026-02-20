@@ -111,11 +111,14 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Building2 className="w-5 h-5 text-white" />
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg flex items-center justify-center shadow-md">
+            <span className="text-lg font-bold text-white">M</span>
           </div>
-          <span className="text-xl font-bold text-gray-900">IMA</span>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-gray-900">IMA - Metro Corp</span>
+            <span className="text-xs text-gray-500">Portfolio Management</span>
+          </div>
         </div>
       </div>
 
