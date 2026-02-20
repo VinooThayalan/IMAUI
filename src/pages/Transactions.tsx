@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, Send, CheckCircle, XCircle, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -70,8 +70,19 @@ interface ShareBalance {
   avg_cost: number;
 }
 
+interface EntityBroker {
+  id: string;
+  entity_id: string;
+  broker_id: string;
+  relationship_type: string;
+  custodian_account_number: string | null;
+  broker_account_number: string | null;
+  broker_name_id: string | null;
+}
+
 export function Transactions() {
   const [showModal, setShowModal] = useState(false);
+  const [showViewModal, setShowViewModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showApprovalActionModal, setShowApprovalActionModal] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -80,6 +91,7 @@ export function Transactions() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [shareBalances, setShareBalances] = useState<Map<string, ShareBalance>>(new Map());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -93,18 +105,19 @@ export function Transactions() {
 
   const [formData, setFormData] = useState({
     entity_id: '',
-    broker_id: '',
-    bank_id: '',
-    cds_account_id: '',
+    relationship_type: 'BROKER',
+    entity_broker_id: '',
+    selected_broker_name_id: '',
     share_id: '',
     transaction_type: 'BUY',
-    order_type: 'MARKET',
+    order_type: 'DAY',
     transaction_date: new Date().toISOString().split('T')[0],
     no_of_shares: '',
     price_per_share: '',
     brokerage_fee_type_id: '',
     brokerage_fee_rate: '',
-    fees: ''
+    fees: '',
+    use_negotiated_fee: false
   });
 
   useEffect(() => {
@@ -118,26 +131,42 @@ export function Transactions() {
   }, [formData.entity_id, formData.share_id]);
 
   useEffect(() => {
-    if (formData.brokerage_fee_type_id) {
-      const feeType = brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id);
-      if (feeType) {
-        setFormData(prev => ({ ...prev, brokerage_fee_rate: feeType.rate.toString() }));
-        calculateFees(feeType.rate);
+    if (formData.no_of_shares && formData.price_per_share) {
+      const totalAmount = parseFloat(formData.no_of_shares) * parseFloat(formData.price_per_share);
+
+      if (!formData.use_negotiated_fee) {
+        const matchingFeeType = brokerageFeeTypes.find(ft => {
+          const minOk = ft.min_price === null || totalAmount >= ft.min_price;
+          const maxOk = ft.max_price === null || totalAmount <= ft.max_price;
+          return minOk && maxOk;
+        });
+
+        if (matchingFeeType) {
+          setFormData(prev => ({
+            ...prev,
+            brokerage_fee_type_id: matchingFeeType.id,
+            brokerage_fee_rate: matchingFeeType.rate.toString()
+          }));
+          calculateFees(matchingFeeType.rate);
+        }
+      } else if (formData.brokerage_fee_rate) {
+        calculateFees(parseFloat(formData.brokerage_fee_rate));
       }
     }
-  }, [formData.brokerage_fee_type_id, formData.no_of_shares, formData.price_per_share]);
+  }, [formData.no_of_shares, formData.price_per_share, formData.use_negotiated_fee, brokerageFeeTypes]);
 
   async function loadData() {
     try {
       setLoading(true);
 
-      const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes] = await Promise.all([
+      const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
         supabase.from('banks').select('id, name, account_number, balance').order('name'),
         supabase.from('brokers').select('id, broker_name').eq('is_active', true).order('broker_name'),
-        supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('name')
+        supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
+        supabase.from('entity_brokers').select('*').eq('is_active', true)
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -146,6 +175,7 @@ export function Transactions() {
       if (banksRes.error) throw banksRes.error;
       if (brokersRes.error) throw brokersRes.error;
       if (brokerageRes.error) throw brokerageRes.error;
+      if (entityBrokersRes.error) throw entityBrokersRes.error;
 
       setTransactions(transactionsRes.data || []);
       setEntities(entitiesRes.data || []);
@@ -153,6 +183,7 @@ export function Transactions() {
       setBanks(banksRes.data || []);
       setBrokers(brokersRes.data || []);
       setBrokerageFeeTypes(brokerageRes.data || []);
+      setEntityBrokers(entityBrokersRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -251,15 +282,20 @@ export function Transactions() {
     return entities.find(e => e.id === entityId)?.name || 'Unknown';
   }
 
-  function getBankInfo(bankId: string | null) {
-    if (!bankId) return { name: '-', account: '-', balance: 0 };
-    const bank = banks.find(b => b.id === bankId);
-    if (!bank) return { name: '-', account: '-', balance: 0 };
-    return {
-      name: bank.name,
-      account: bank.account_number,
-      balance: bank.balance
-    };
+  function getEntityBalance(entityId: string) {
+    return entities.find(e => e.id === entityId)?.current_balance || 0;
+  }
+
+  function getBalanceColor(balance: number, requiredAmount: number) {
+    if (balance >= requiredAmount * 1.5) return 'text-green-600';
+    if (balance >= requiredAmount) return 'text-yellow-600';
+    return 'text-red-600';
+  }
+
+  function getBalanceStatus(balance: number, requiredAmount: number) {
+    if (balance >= requiredAmount * 1.5) return 'Excellent';
+    if (balance >= requiredAmount) return 'Sufficient';
+    return 'Insufficient';
   }
 
   function getBrokerName(brokerId: string | null) {
@@ -275,18 +311,19 @@ export function Transactions() {
   function resetForm() {
     setFormData({
       entity_id: '',
-      broker_id: '',
-      bank_id: '',
-      cds_account_id: '',
+      relationship_type: 'BROKER',
+      entity_broker_id: '',
+      selected_broker_name_id: '',
       share_id: '',
       transaction_type: 'BUY',
-      order_type: 'MARKET',
+      order_type: 'DAY',
       transaction_date: new Date().toISOString().split('T')[0],
       no_of_shares: '',
       price_per_share: '',
       brokerage_fee_type_id: '',
       brokerage_fee_rate: '',
-      fees: ''
+      fees: '',
+      use_negotiated_fee: false
     });
   }
 
@@ -305,11 +342,15 @@ export function Transactions() {
       const netPricePerShare = calculateNetPricePerShare();
       const totalAmountNet = calculateTotalAmountNet();
 
+      const selectedEntityBroker = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
+
       const { error } = await supabase.from('transactions').insert({
         entity_id: formData.entity_id,
-        broker_id: formData.broker_id || null,
-        bank_id: formData.bank_id || null,
-        cds_account_id: formData.cds_account_id || null,
+        broker_id: selectedEntityBroker?.broker_id || null,
+        bank_id: null,
+        cds_account_id: selectedEntityBroker?.relationship_type === 'CUSTODIAN'
+          ? selectedEntityBroker?.custodian_account_number
+          : selectedEntityBroker?.broker_account_number,
         share_id: formData.share_id,
         transaction_type: formData.transaction_type,
         order_type: formData.order_type,
@@ -493,7 +534,19 @@ export function Transactions() {
 
   const key = `${formData.entity_id}-${formData.share_id}`;
   const currentBalance = shareBalances.get(key);
-  const selectedBank = formData.bank_id ? getBankInfo(formData.bank_id) : null;
+  const entityBalance = formData.entity_id ? getEntityBalance(formData.entity_id) : 0;
+  const requiredAmount = calculateTotalAmountNet();
+
+  const availableEntityBrokers = formData.entity_id
+    ? entityBrokers.filter(eb =>
+        eb.entity_id === formData.entity_id &&
+        eb.relationship_type === formData.relationship_type
+      )
+    : [];
+
+  const selectedEntityBroker = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
+
+  const availableBrokerNames = formData.relationship_type === 'CUSTODIAN' ? brokers : [];
 
   if (loading) {
     return (
@@ -680,32 +733,44 @@ export function Transactions() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {transaction.approval_status === 'PENDING_APPROVAL' && (
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedTransaction(transaction);
-                            setApprovalAction('APPROVE');
-                            setShowApprovalActionModal(true);
-                          }}
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                          title="Approve"
-                        >
-                          <CheckCircle className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedTransaction(transaction);
-                            setApprovalAction('REJECT');
-                            setShowApprovalActionModal(true);
-                          }}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Reject"
-                        >
-                          <XCircle className="w-5 h-5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => {
+                          setSelectedTransaction(transaction);
+                          setShowViewModal(true);
+                        }}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="View Details"
+                      >
+                        <Eye className="w-5 h-5" />
+                      </button>
+                      {transaction.approval_status === 'PENDING_APPROVAL' && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setSelectedTransaction(transaction);
+                              setApprovalAction('APPROVE');
+                              setShowApprovalActionModal(true);
+                            }}
+                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                            title="Approve"
+                          >
+                            <CheckCircle className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedTransaction(transaction);
+                              setApprovalAction('REJECT');
+                              setShowApprovalActionModal(true);
+                            }}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reject"
+                          >
+                            <XCircle className="w-5 h-5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -721,20 +786,26 @@ export function Transactions() {
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900">New Transaction</h2>
+          <div className={`rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col transition-colors ${
+            formData.transaction_type === 'BUY' ? 'bg-green-50' : 'bg-red-50'
+          }`}>
+            <div className={`p-6 border-b ${
+              formData.transaction_type === 'BUY' ? 'border-green-200 bg-green-100' : 'border-red-200 bg-red-100'
+            }`}>
+              <h2 className="text-2xl font-bold text-gray-900">
+                New {formData.transaction_type === 'BUY' ? 'Buy' : 'Sell'} Transaction
+              </h2>
             </div>
             <form onSubmit={handleCreateTransaction} className="flex flex-col flex-1 min-h-0">
-              <div className="p-6 space-y-6 overflow-y-auto">
-                <div className="grid grid-cols-3 gap-6">
-                  <div className="col-span-3">
+              <div className="p-6 space-y-6 overflow-y-auto bg-white">
+                <div className="grid grid-cols-1 gap-6">
+                  <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">
                       Entity <span className="text-red-600">*</span>
                     </label>
                     <select
                       value={formData.entity_id}
-                      onChange={(e) => setFormData({ ...formData, entity_id: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, entity_id: e.target.value, entity_broker_id: '' })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     >
@@ -745,260 +816,312 @@ export function Transactions() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Broker/Custodian
-                    </label>
-                    <select
-                      value={formData.broker_id}
-                      onChange={(e) => setFormData({ ...formData, broker_id: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select Broker</option>
-                      {brokers.map(broker => (
-                        <option key={broker.id} value={broker.id}>{broker.broker_name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      CDS Account ID / Broker Account ID
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.cds_account_id}
-                      onChange={(e) => setFormData({ ...formData, cds_account_id: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., CDS12345"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Bank
-                    </label>
-                    <select
-                      value={formData.bank_id}
-                      onChange={(e) => setFormData({ ...formData, bank_id: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select Bank</option>
-                      {banks.map(bank => (
-                        <option key={bank.id} value={bank.id}>{bank.name} - {bank.account_number}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {selectedBank && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <div>
-                      <p className="text-xs text-gray-500">Account Balance</p>
-                      <p className="text-lg font-semibold text-gray-900">LKR {selectedBank.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-3 gap-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Transaction Type <span className="text-red-600">*</span>
-                    </label>
-                    <select
-                      value={formData.transaction_type}
-                      onChange={(e) => setFormData({ ...formData, transaction_type: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="BUY">BUY</option>
-                      <option value="SELL">SELL</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Order Type <span className="text-red-600">*</span>
-                    </label>
-                    <select
-                      value={formData.order_type}
-                      onChange={(e) => setFormData({ ...formData, order_type: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="MARKET">MARKET</option>
-                      <option value="LIMIT">LIMIT</option>
-                      <option value="STOP">STOP</option>
-                      <option value="STOP_LIMIT">STOP LIMIT</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Transaction Date <span className="text-red-600">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.transaction_date}
-                      onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
-                  </div>
-
-                  <div className="col-span-3">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Share <span className="text-red-600">*</span>
-                    </label>
-                    <select
-                      value={formData.share_id}
-                      onChange={(e) => setFormData({ ...formData, share_id: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
-                      <option value="">Select Share</option>
-                      {shares.map(share => (
-                        <option key={share.id} value={share.id}>
-                          {share.ticker} - {share.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {currentBalance && (
-                  <div className="bg-blue-50 p-4 rounded-lg grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs text-gray-600">Current Share Balance</p>
-                      <p className="text-sm font-semibold text-gray-900">{currentBalance.total_shares.toLocaleString()} shares</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Current Average Cost Per Share</p>
-                      <p className="text-sm font-semibold text-gray-900">LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Number of Shares <span className="text-red-600">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      value={formData.no_of_shares}
-                      onChange={(e) => setFormData({ ...formData, no_of_shares: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 100"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Price Per Share (LKR) <span className="text-red-600">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={formData.price_per_share}
-                      onChange={(e) => setFormData({ ...formData, price_per_share: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 150.50"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Total Amount (Gross)
-                    </label>
-                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                      LKR {calculateTotalAmountGross().toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
-
-                  {formData.transaction_type === 'BUY' && currentBalance && (
+                  <div className="grid grid-cols-3 gap-6">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Average Cost After Purchase
+                        Type <span className="text-red-600">*</span>
                       </label>
-                      <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                        LKR {calculateAverageCostWithPurchase().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      <select
+                        value={formData.relationship_type}
+                        onChange={(e) => setFormData({ ...formData, relationship_type: e.target.value, entity_broker_id: '', selected_broker_name_id: '' })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="BROKER">Broker</option>
+                        <option value="CUSTODIAN">Custodian</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        {formData.relationship_type === 'CUSTODIAN' ? 'CDS Account ID' : 'Broker Account ID'} <span className="text-red-600">*</span>
+                      </label>
+                      <select
+                        value={formData.entity_broker_id}
+                        onChange={(e) => setFormData({ ...formData, entity_broker_id: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                        disabled={!formData.entity_id}
+                      >
+                        <option value="">Select Account</option>
+                        {availableEntityBrokers.map(eb => (
+                          <option key={eb.id} value={eb.id}>
+                            {eb.relationship_type === 'CUSTODIAN' ? eb.custodian_account_number : eb.broker_account_number}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Broker Name {formData.relationship_type === 'CUSTODIAN' && <span className="text-red-600">*</span>}
+                      </label>
+                      {formData.relationship_type === 'CUSTODIAN' ? (
+                        <select
+                          value={formData.selected_broker_name_id}
+                          onChange={(e) => setFormData({ ...formData, selected_broker_name_id: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          required
+                        >
+                          <option value="">Select Broker</option>
+                          {availableBrokerNames.map(broker => (
+                            <option key={broker.id} value={broker.id}>{broker.broker_name}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={selectedEntityBroker ? getBrokerName(selectedEntityBroker.broker_id) : ''}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100"
+                          disabled
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {entityBalance > 0 && requiredAmount > 0 && formData.transaction_type === 'BUY' && (
+                    <div className={`p-4 rounded-lg border-2 ${
+                      entityBalance >= requiredAmount * 1.5 ? 'bg-green-50 border-green-300' :
+                      entityBalance >= requiredAmount ? 'bg-yellow-50 border-yellow-300' :
+                      'bg-red-50 border-red-300'
+                    }`}>
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-700">Available Balance</p>
+                          <p className={`text-2xl font-bold ${getBalanceColor(entityBalance, requiredAmount)}`}>
+                            LKR {entityBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-gray-700">Required</p>
+                          <p className="text-lg font-bold text-gray-900">
+                            LKR {requiredAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </p>
+                          <p className={`text-xs font-semibold mt-1 ${getBalanceColor(entityBalance, requiredAmount)}`}>
+                            {getBalanceStatus(entityBalance, requiredAmount)}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )}
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Brokerage Fee Type
-                    </label>
-                    <select
-                      value={formData.brokerage_fee_type_id}
-                      onChange={(e) => setFormData({ ...formData, brokerage_fee_type_id: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select Fee Type</option>
-                      {brokerageFeeTypes.map(type => (
-                        <option key={type.id} value={type.id}>
-                          {type.name} ({type.rate}%)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <div className="grid grid-cols-3 gap-6">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Transaction Type <span className="text-red-600">*</span>
+                      </label>
+                      <select
+                        value={formData.transaction_type}
+                        onChange={(e) => setFormData({ ...formData, transaction_type: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Brokerage Fee Rate (%)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.brokerage_fee_rate}
-                      onChange={(e) => {
-                        setFormData({ ...formData, brokerage_fee_rate: e.target.value });
-                        const rate = parseFloat(e.target.value) || 0;
-                        calculateFees(rate);
-                      }}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 0.30"
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Order Type <span className="text-red-600">*</span>
+                      </label>
+                      <select
+                        value={formData.order_type}
+                        onChange={(e) => setFormData({ ...formData, order_type: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="DAY">Day Order</option>
+                        <option value="GTC">GTC (Good Till Cancelled)</option>
+                      </select>
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Brokerage Fee (LKR)
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={formData.fees}
-                      onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 50.00"
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Transaction Date <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.transaction_date}
+                        onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Net Price Per Share
-                    </label>
-                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                      LKR {calculateNetPricePerShare().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    <div className="col-span-3">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Share <span className="text-red-600">*</span>
+                      </label>
+                      <select
+                        value={formData.share_id}
+                        onChange={(e) => setFormData({ ...formData, share_id: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="">Select Share</option>
+                        {shares.map(share => (
+                          <option key={share.id} value={share.id}>
+                            {share.ticker} - {share.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
-                  <div className="col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Total Amount (Net)
-                    </label>
-                    <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-blue-50 text-blue-900 font-bold text-lg">
-                      LKR {calculateTotalAmountNet().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  {currentBalance && (
+                    <div className="bg-blue-50 p-4 rounded-lg grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs text-gray-600">Current Share Balance</p>
+                        <p className="text-sm font-semibold text-gray-900">{currentBalance.total_shares.toLocaleString()} shares</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600">Current Average Cost Per Share</p>
+                        <p className="text-sm font-semibold text-gray-900">LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Number of Shares <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={formData.no_of_shares}
+                        onChange={(e) => setFormData({ ...formData, no_of_shares: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 100"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Price Per Share (LKR) <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={formData.price_per_share}
+                        onChange={(e) => setFormData({ ...formData, price_per_share: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 150.50"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Total Amount (Gross)
+                      </label>
+                      <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                        LKR {calculateTotalAmountGross().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+
+                    {formData.transaction_type === 'BUY' && currentBalance && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Average Cost After Purchase
+                        </label>
+                        <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                          LKR {calculateAverageCostWithPurchase().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="col-span-2">
+                      <div className="flex items-center space-x-4 mb-2">
+                        <label className="block text-sm font-semibold text-gray-700">
+                          Brokerage Fee Type
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.use_negotiated_fee}
+                            onChange={(e) => setFormData({ ...formData, use_negotiated_fee: e.target.checked })}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-gray-700">Use Negotiated Fee</span>
+                        </label>
+                      </div>
+                      <select
+                        value={formData.brokerage_fee_type_id}
+                        onChange={(e) => {
+                          const feeType = brokerageFeeTypes.find(ft => ft.id === e.target.value);
+                          if (feeType) {
+                            setFormData({ ...formData, brokerage_fee_type_id: e.target.value, brokerage_fee_rate: feeType.rate.toString() });
+                            calculateFees(feeType.rate);
+                          }
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={formData.use_negotiated_fee}
+                      >
+                        <option value="">Auto-select based on amount</option>
+                        {brokerageFeeTypes.map(type => (
+                          <option key={type.id} value={type.id}>
+                            {type.name} ({type.rate}%)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Brokerage Fee Rate (%)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.brokerage_fee_rate}
+                        onChange={(e) => {
+                          setFormData({ ...formData, brokerage_fee_rate: e.target.value });
+                          const rate = parseFloat(e.target.value) || 0;
+                          calculateFees(rate);
+                        }}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 0.30"
+                        disabled={!formData.use_negotiated_fee}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Brokerage Fee (LKR)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={formData.fees}
+                        onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="e.g., 50.00"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Net Price Per Share
+                      </label>
+                      <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                        LKR {calculateNetPricePerShare().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Total Amount (Net)
+                      </label>
+                      <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-blue-50 text-blue-900 font-bold text-lg">
+                        LKR {calculateTotalAmountNet().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1024,6 +1147,117 @@ export function Transactions() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showViewModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-2xl font-bold text-gray-900">Transaction Details</h2>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Entity</p>
+                  <p className="text-base font-bold text-gray-900 mt-1">{getEntityName(selectedTransaction.entity_id)}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Transaction Date</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    {new Date(selectedTransaction.transaction_date).toLocaleDateString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Transaction Type</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                      selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {selectedTransaction.transaction_type}
+                    </span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Order Type</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">{selectedTransaction.order_type}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-gray-500">Share</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">{getShareInfo(selectedTransaction.share_id)}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Number of Shares</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    {Number(selectedTransaction.no_of_shares).toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Price Per Share</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Total Amount (Gross)</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    LKR {Number(selectedTransaction.total_amount_gross).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Brokerage Fee</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    LKR {Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {selectedTransaction.brokerage_fee_rate && (
+                      <span className="text-sm text-gray-600 ml-2">
+                        ({selectedTransaction.brokerage_fee_rate}%)
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Net Price Per Share</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Total Amount (Net)</p>
+                  <p className="text-lg font-bold text-blue-900 mt-1">
+                    LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-gray-500">CDS/Broker Account</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">{selectedTransaction.cds_account_id || 'N/A'}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-sm font-medium text-gray-500">Approval Status</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">
+                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                      selectedTransaction.approval_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                      selectedTransaction.approval_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                      selectedTransaction.approval_status === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {selectedTransaction.approval_status}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setSelectedTransaction(null);
+                }}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
