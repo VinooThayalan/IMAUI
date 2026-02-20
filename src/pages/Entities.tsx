@@ -811,19 +811,6 @@ export function Entities() {
                     />
                   </div>
 
-                  {!isCustodian && (
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Broker</label>
-                      <input
-                        type="text"
-                        value={brokerFormData.broker_text}
-                        onChange={(e) => setBrokerFormData({...brokerFormData, broker_text: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter broker details"
-                      />
-                    </div>
-                  )}
-
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Assigned Date *</label>
                     <input
