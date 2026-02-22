@@ -1,74 +1,28 @@
-import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye, UserPlus, Building2 } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Eye, UserPlus, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
-const entities = [
-  {
-    id: 1,
-    entityId: 'E001',
-    name: 'Johnson Family Trust',
-    type: 'Trust',
-    taxId: '***-**-1234',
-    totalValue: 'Rs. 5,234,000',
-    shares: 12,
-    odLimit: 'Rs. 500,000',
-    status: 'Active',
-    manager: 'Sarah Johnson',
-    created: '2023-01-15'
-  },
-  {
-    id: 2,
-    entityId: 'E002',
-    name: 'Smith Holdings LLC',
-    type: 'LLC',
-    taxId: '***-**-5678',
-    totalValue: 'Rs. 8,456,700',
-    shares: 18,
-    odLimit: 'Rs. 1,000,000',
-    status: 'Active',
-    manager: 'Michael Smith',
-    created: '2022-11-20'
-  },
-  {
-    id: 3,
-    entityId: 'E003',
-    name: 'Brown Investment Group',
-    type: 'Corporation',
-    taxId: '***-**-9012',
-    totalValue: 'Rs. 3,876,200',
-    shares: 9,
-    odLimit: 'Rs. 750,000',
-    status: 'Active',
-    manager: 'Emily Brown',
-    created: '2023-03-08'
-  },
-  {
-    id: 4,
-    entityId: 'E004',
-    name: 'Davis Capital Partners',
-    type: 'Partnership',
-    taxId: '***-**-3456',
-    totalValue: 'Rs. 6,123,450',
-    shares: 15,
-    odLimit: 'Rs. 800,000',
-    status: 'Active',
-    manager: 'Robert Davis',
-    created: '2022-09-14'
-  },
-  {
-    id: 5,
-    entityId: 'E005',
-    name: 'Wilson Retirement Fund',
-    type: 'Trust',
-    taxId: '***-**-7890',
-    totalValue: 'Rs. 2,456,800',
-    shares: 7,
-    odLimit: 'Rs. 300,000',
-    status: 'Inactive',
-    manager: 'Jennifer Wilson',
-    created: '2023-05-22'
-  },
-];
+interface Entity {
+  id: string;
+  entity_id: string;
+  name: string;
+  entity_type_id: string;
+  tax_id: string | null;
+  nic_pv_number: string | null;
+  key_contact_name: string | null;
+  address: string | null;
+  email: string | null;
+  phone: string | null;
+  mobile_1: string | null;
+  mobile_2: string | null;
+  current_balance: number;
+  od_limit: number;
+  is_active: boolean;
+  created_at: string;
+  entity_types: {
+    name: string;
+  };
+}
 
 interface EntityType {
   id: string;
@@ -117,8 +71,12 @@ interface EntityBroker {
 export function Entities() {
   const [showModal, setShowModal] = useState(false);
   const [showBrokerModal, setShowBrokerModal] = useState(false);
-  const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [selectedEntityName, setSelectedEntityName] = useState<string>('');
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -153,11 +111,31 @@ export function Entities() {
   });
 
   useEffect(() => {
+    fetchEntities();
     fetchEntityTypes();
     fetchBrokers();
     fetchBanks();
     fetchCurrencies();
   }, []);
+
+  async function fetchEntities() {
+    try {
+      const { data, error } = await supabase
+        .from('entities')
+        .select(`
+          *,
+          entity_types (
+            name
+          )
+        `)
+        .order('entity_id');
+
+      if (error) throw error;
+      setEntities(data || []);
+    } catch (error) {
+      console.error('Error fetching entities:', error);
+    }
+  }
 
   async function fetchEntityTypes() {
     try {
@@ -218,7 +196,7 @@ export function Entities() {
     }
   }
 
-  async function fetchEntityBrokers(entityId: number) {
+  async function fetchEntityBrokers(entityId: string) {
     try {
       const { data, error } = await supabase
         .from('entity_brokers')
@@ -251,11 +229,33 @@ export function Entities() {
     }
   }
 
-  function handleOpenBrokerModal(entityId: number, entityName: string) {
+  function handleOpenBrokerModal(entityId: string, entityName: string) {
     setSelectedEntityId(entityId);
     setSelectedEntityName(entityName);
     fetchEntityBrokers(entityId);
     setShowBrokerModal(true);
+  }
+
+  function handleViewEntity(entity: Entity) {
+    setSelectedEntity(entity);
+    setShowViewModal(true);
+  }
+
+  function handleEditEntity(entity: Entity) {
+    setSelectedEntity(entity);
+    setEntityFormData({
+      name: entity.name,
+      entity_type_id: entity.entity_type_id,
+      tax_id: entity.tax_id || '',
+      nic_pv_number: entity.nic_pv_number || '',
+      key_contact_name: entity.key_contact_name || '',
+      address: entity.address || '',
+      email: entity.email || '',
+      phone: entity.phone || '',
+      mobile1: entity.mobile_1 || '',
+      mobile2: entity.mobile_2 || ''
+    });
+    setShowEditModal(true);
   }
 
   function handleCloseBrokerModal() {
@@ -401,9 +401,59 @@ export function Entities() {
         mobile1: '',
         mobile2: ''
       });
+      await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
       alert('Failed to create entity. Please try again.');
+    }
+  }
+
+  async function handleUpdateEntity(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!selectedEntity || !entityFormData.name || !entityFormData.entity_type_id) {
+      alert('Please fill in all required fields');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('entities')
+        .update({
+          name: entityFormData.name,
+          entity_type_id: entityFormData.entity_type_id,
+          tax_id: entityFormData.tax_id || null,
+          nic_pv_number: entityFormData.nic_pv_number || null,
+          key_contact_name: entityFormData.key_contact_name || null,
+          address: entityFormData.address || null,
+          email: entityFormData.email || null,
+          phone: entityFormData.phone || null,
+          mobile_1: entityFormData.mobile1 || null,
+          mobile_2: entityFormData.mobile2 || null
+        })
+        .eq('id', selectedEntity.id);
+
+      if (error) throw error;
+
+      alert('Entity updated successfully!');
+      setShowEditModal(false);
+      setSelectedEntity(null);
+      setEntityFormData({
+        name: '',
+        entity_type_id: '',
+        tax_id: '',
+        nic_pv_number: '',
+        key_contact_name: '',
+        address: '',
+        email: '',
+        phone: '',
+        mobile1: '',
+        mobile2: ''
+      });
+      await fetchEntities();
+    } catch (error) {
+      console.error('Error updating entity:', error);
+      alert('Failed to update entity. Please try again.');
     }
   }
 
@@ -454,52 +504,65 @@ export function Entities() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {entities.map((entity) => (
-                <tr key={entity.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-bold text-blue-600">{entity.entityId}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div>
-                      <div className="text-sm font-bold text-gray-900">{entity.name}</div>
-                      <div className="text-xs text-gray-500">{entity.taxId}</div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
-                      {entity.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{entity.manager}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      entity.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {entity.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleOpenBrokerModal(entity.id, entity.name)}
-                        className="px-3 py-1 text-xs font-medium bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                        title="Broker/Custodian"
-                      >
-                        Broker/Custodian
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded transition-colors" title="View">
-                        <Eye className="w-4 h-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded transition-colors" title="Edit">
-                        <Edit className="w-4 h-4 text-gray-600" />
-                      </button>
-                      <button className="p-1 hover:bg-gray-100 rounded transition-colors" title="More">
-                        <MoreVertical className="w-4 h-4 text-gray-600" />
-                      </button>
-                    </div>
+              {entities.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    No entities found. Click "Add Entity" to create one.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                entities.map((entity) => (
+                  <tr key={entity.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-blue-600">{entity.entity_id}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div>
+                        <div className="text-sm font-bold text-gray-900">{entity.name}</div>
+                        <div className="text-xs text-gray-500">{entity.tax_id || 'N/A'}</div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
+                        {entity.entity_types.name}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{entity.key_contact_name || 'N/A'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        entity.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                      }`}>
+                        {entity.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleOpenBrokerModal(entity.id, entity.name)}
+                          className="px-3 py-1 text-xs font-medium bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
+                          title="Broker/Custodian"
+                        >
+                          Broker/Custodian
+                        </button>
+                        <button
+                          onClick={() => handleViewEntity(entity)}
+                          className="p-1 hover:bg-gray-100 rounded transition-colors"
+                          title="View"
+                        >
+                          <Eye className="w-4 h-4 text-gray-600" />
+                        </button>
+                        <button
+                          onClick={() => handleEditEntity(entity)}
+                          className="p-1 hover:bg-gray-100 rounded transition-colors"
+                          title="Edit"
+                        >
+                          <Edit className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -906,6 +969,284 @@ export function Entities() {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showViewModal && selectedEntity && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Entity Details</h2>
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setSelectedEntity(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Entity ID</label>
+                  <p className="text-gray-900">{selectedEntity.entity_id}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Entity Name</label>
+                  <p className="text-gray-900">{selectedEntity.name}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Entity Type</label>
+                  <p className="text-gray-900">{selectedEntity.entity_types.name}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Tax ID</label>
+                  <p className="text-gray-900">{selectedEntity.tax_id || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">NIC / PV Number</label>
+                  <p className="text-gray-900">{selectedEntity.nic_pv_number || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Key Contact Name</label>
+                  <p className="text-gray-900">{selectedEntity.key_contact_name || 'N/A'}</p>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Address</label>
+                  <p className="text-gray-900">{selectedEntity.address || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Email</label>
+                  <p className="text-gray-900">{selectedEntity.email || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Phone</label>
+                  <p className="text-gray-900">{selectedEntity.phone || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Mobile 1</label>
+                  <p className="text-gray-900">{selectedEntity.mobile_1 || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Mobile 2</label>
+                  <p className="text-gray-900">{selectedEntity.mobile_2 || 'N/A'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Current Balance</label>
+                  <p className="text-gray-900">Rs. {selectedEntity.current_balance?.toLocaleString() || '0.00'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">OD Limit</label>
+                  <p className="text-gray-900">Rs. {selectedEntity.od_limit?.toLocaleString() || '0.00'}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Status</label>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    selectedEntity.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {selectedEntity.is_active ? 'Active' : 'Inactive'}
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Created Date</label>
+                  <p className="text-gray-900">{new Date(selectedEntity.created_at).toLocaleDateString()}</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  handleEditEntity(selectedEntity);
+                }}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => {
+                  setShowViewModal(false);
+                  setSelectedEntity(null);
+                }}
+                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && selectedEntity && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-gray-900">Edit Entity</h2>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedEntity(null);
+                  setEntityFormData({
+                    name: '',
+                    entity_type_id: '',
+                    tax_id: '',
+                    nic_pv_number: '',
+                    key_contact_name: '',
+                    address: '',
+                    email: '',
+                    phone: '',
+                    mobile1: '',
+                    mobile2: ''
+                  });
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateEntity}>
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entity Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={entityFormData.name}
+                      onChange={(e) => setEntityFormData({...entityFormData, name: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter entity name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entity Type *</label>
+                    <select
+                      required
+                      value={entityFormData.entity_type_id}
+                      onChange={(e) => setEntityFormData({...entityFormData, entity_type_id: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select entity type</option>
+                      {entityTypes.map((type) => (
+                        <option key={type.id} value={type.id}>
+                          {type.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax ID</label>
+                    <input
+                      type="text"
+                      value={entityFormData.tax_id}
+                      onChange={(e) => setEntityFormData({...entityFormData, tax_id: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter tax ID"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / PV Number</label>
+                    <input
+                      type="text"
+                      value={entityFormData.nic_pv_number}
+                      onChange={(e) => setEntityFormData({...entityFormData, nic_pv_number: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter NIC or PV number"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Key Contact Name</label>
+                    <input
+                      type="text"
+                      value={entityFormData.key_contact_name}
+                      onChange={(e) => setEntityFormData({...entityFormData, key_contact_name: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter key contact name"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Company / Individual Address</label>
+                    <textarea
+                      rows={3}
+                      value={entityFormData.address}
+                      onChange={(e) => setEntityFormData({...entityFormData, address: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter complete address"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Email</label>
+                    <input
+                      type="email"
+                      value={entityFormData.email}
+                      onChange={(e) => setEntityFormData({...entityFormData, email: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Phone</label>
+                    <input
+                      type="tel"
+                      value={entityFormData.phone}
+                      onChange={(e) => setEntityFormData({...entityFormData, phone: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="(555) 123-4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 1</label>
+                    <input
+                      type="tel"
+                      value={entityFormData.mobile1}
+                      onChange={(e) => setEntityFormData({...entityFormData, mobile1: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="+94 77 123 4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 2</label>
+                    <input
+                      type="tel"
+                      value={entityFormData.mobile2}
+                      onChange={(e) => setEntityFormData({...entityFormData, mobile2: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="+94 77 123 4567"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setSelectedEntity(null);
+                    setEntityFormData({
+                      name: '',
+                      entity_type_id: '',
+                      tax_id: '',
+                      nic_pv_number: '',
+                      key_contact_name: '',
+                      address: '',
+                      email: '',
+                      phone: '',
+                      mobile1: '',
+                      mobile2: ''
+                    });
+                  }}
+                  className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
+                  Update Entity
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
