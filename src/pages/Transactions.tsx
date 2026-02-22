@@ -114,7 +114,7 @@ export function Transactions() {
 
   const [formData, setFormData] = useState({
     entity_id: '',
-    relationship_type: 'BROKER',
+    relationship_type: 'Primary Broker',
     entity_broker_id: '',
     selected_broker_name_id: '',
     share_id: '',
@@ -320,7 +320,7 @@ export function Transactions() {
   function resetForm() {
     setFormData({
       entity_id: '',
-      relationship_type: 'BROKER',
+      relationship_type: 'Primary Broker',
       entity_broker_id: '',
       selected_broker_name_id: '',
       share_id: '',
@@ -357,7 +357,7 @@ export function Transactions() {
         entity_id: formData.entity_id,
         broker_id: selectedEntityBroker?.broker_id || null,
         bank_id: null,
-        cds_account_id: selectedEntityBroker?.relationship_type === 'CUSTODIAN'
+        cds_account_id: selectedEntityBroker?.relationship_type === 'Custodian'
           ? selectedEntityBroker?.custodian_account_number
           : selectedEntityBroker?.broker_account_number,
         share_id: formData.share_id,
@@ -773,7 +773,7 @@ export function Transactions() {
 
   const selectedEntityBroker = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
 
-  const availableBrokerNames = formData.relationship_type === 'CUSTODIAN' ? brokers : [];
+  const availableBrokerNames = formData.relationship_type === 'Custodian' ? brokers : [];
 
   const pendingCount = transactions.filter(t => t.approval_status === 'PENDING_APPROVAL').length;
 
@@ -1123,14 +1123,15 @@ export function Transactions() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       >
-                        <option value="BROKER">Broker</option>
-                        <option value="CUSTODIAN">Custodian</option>
+                        <option value="Primary Broker">Primary Broker</option>
+                        <option value="Secondary Broker">Secondary Broker</option>
+                        <option value="Custodian">Custodian</option>
                       </select>
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        {formData.relationship_type === 'CUSTODIAN' ? 'CDS Account ID' : 'Broker Account ID'} <span className="text-red-600">*</span>
+                        {formData.relationship_type === 'Custodian' ? 'CDS Account ID' : 'Broker Account ID'} <span className="text-red-600">*</span>
                       </label>
                       <select
                         value={formData.entity_broker_id}
@@ -1142,7 +1143,7 @@ export function Transactions() {
                         <option value="">Select Account</option>
                         {availableEntityBrokers.map(eb => (
                           <option key={eb.id} value={eb.id}>
-                            {eb.relationship_type === 'CUSTODIAN' ? eb.custodian_account_number : eb.broker_account_number}
+                            {eb.relationship_type === 'Custodian' ? eb.custodian_account_number : eb.broker_account_number}
                           </option>
                         ))}
                       </select>
@@ -1150,9 +1151,9 @@ export function Transactions() {
 
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Broker Name {formData.relationship_type === 'CUSTODIAN' && <span className="text-red-600">*</span>}
+                        Broker Name {formData.relationship_type === 'Custodian' && <span className="text-red-600">*</span>}
                       </label>
-                      {formData.relationship_type === 'CUSTODIAN' ? (
+                      {formData.relationship_type === 'Custodian' ? (
                         <select
                           value={formData.selected_broker_name_id}
                           onChange={(e) => setFormData({ ...formData, selected_broker_name_id: e.target.value })}
