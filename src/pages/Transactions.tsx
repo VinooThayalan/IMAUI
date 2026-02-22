@@ -114,7 +114,7 @@ export function Transactions() {
 
   const [formData, setFormData] = useState({
     entity_id: '',
-    relationship_type: 'Primary Broker',
+    relationship_type: 'Broker',
     entity_broker_id: '',
     selected_broker_name_id: '',
     share_id: '',
@@ -320,7 +320,7 @@ export function Transactions() {
   function resetForm() {
     setFormData({
       entity_id: '',
-      relationship_type: 'Primary Broker',
+      relationship_type: 'Broker',
       entity_broker_id: '',
       selected_broker_name_id: '',
       share_id: '',
@@ -1123,8 +1123,7 @@ export function Transactions() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       >
-                        <option value="Primary Broker">Primary Broker</option>
-                        <option value="Secondary Broker">Secondary Broker</option>
+                        <option value="Broker">Broker</option>
                         <option value="Custodian">Custodian</option>
                       </select>
                     </div>
