@@ -6,22 +6,20 @@ interface Entity {
   id: string;
   entity_id: string;
   name: string;
-  entity_type_id: string;
-  tax_id: string | null;
-  nic_pv_number: string | null;
+  entity_type_id: string | null;
+  tax_name: string | null;
+  nic_company_id: string | null;
   key_contact_name: string | null;
-  address: string | null;
-  email: string | null;
-  phone: string | null;
-  mobile_1: string | null;
-  mobile_2: string | null;
+  company_individual_address: string | null;
+  contact_email_company_individual: string | null;
+  contact_phone: string | null;
+  contact_mobile: string | null;
+  contact_mobile_number_2: string | null;
   current_balance: number;
-  od_limit: number;
-  is_active: boolean;
   created_at: string;
   entity_types: {
     name: string;
-  };
+  } | null;
 }
 
 interface EntityType {
@@ -38,8 +36,7 @@ interface Broker {
 
 interface Bank {
   id: string;
-  bank_name: string;
-  bank_code: string;
+  name: string;
 }
 
 interface Currency {
@@ -85,14 +82,14 @@ export function Entities() {
   const [entityFormData, setEntityFormData] = useState({
     name: '',
     entity_type_id: '',
-    tax_id: '',
-    nic_pv_number: '',
+    tax_name: '',
+    nic_company_id: '',
     key_contact_name: '',
-    address: '',
-    email: '',
-    phone: '',
-    mobile1: '',
-    mobile2: ''
+    company_individual_address: '',
+    contact_email_company_individual: '',
+    contact_phone: '',
+    contact_mobile: '',
+    contact_mobile_number_2: ''
   });
   const [brokerFormData, setBrokerFormData] = useState({
     broker_id: '',
@@ -171,8 +168,8 @@ export function Entities() {
     try {
       const { data, error } = await supabase
         .from('banks')
-        .select('id, bank_name, bank_code')
-        .order('bank_name');
+        .select('id, name')
+        .order('name');
 
       if (error) throw error;
       setBanks(data || []);
@@ -210,8 +207,7 @@ export function Entities() {
           ),
           banks (
             id,
-            bank_name,
-            bank_code
+            name
           ),
           broker_name:broker_name_id (
             id,
@@ -245,15 +241,15 @@ export function Entities() {
     setSelectedEntity(entity);
     setEntityFormData({
       name: entity.name,
-      entity_type_id: entity.entity_type_id,
-      tax_id: entity.tax_id || '',
-      nic_pv_number: entity.nic_pv_number || '',
+      entity_type_id: entity.entity_type_id || '',
+      tax_name: entity.tax_name || '',
+      nic_company_id: entity.nic_company_id || '',
       key_contact_name: entity.key_contact_name || '',
-      address: entity.address || '',
-      email: entity.email || '',
-      phone: entity.phone || '',
-      mobile1: entity.mobile_1 || '',
-      mobile2: entity.mobile_2 || ''
+      company_individual_address: entity.company_individual_address || '',
+      contact_email_company_individual: entity.contact_email_company_individual || '',
+      contact_phone: entity.contact_phone || '',
+      contact_mobile: entity.contact_mobile || '',
+      contact_mobile_number_2: entity.contact_mobile_number_2 || ''
     });
     setShowEditModal(true);
   }
@@ -372,17 +368,16 @@ export function Entities() {
     try {
       const { error } = await supabase.from('entities').insert({
         name: entityFormData.name,
-        entity_type_id: entityFormData.entity_type_id,
-        tax_id: entityFormData.tax_id || null,
-        nic_pv_number: entityFormData.nic_pv_number || null,
+        entity_type_id: entityFormData.entity_type_id || null,
+        tax_name: entityFormData.tax_name || null,
+        nic_company_id: entityFormData.nic_company_id || null,
         key_contact_name: entityFormData.key_contact_name || null,
-        address: entityFormData.address || null,
-        email: entityFormData.email || null,
-        phone: entityFormData.phone || null,
-        mobile_1: entityFormData.mobile1 || null,
-        mobile_2: entityFormData.mobile2 || null,
-        current_balance: 0,
-        od_limit: 0
+        company_individual_address: entityFormData.company_individual_address || null,
+        contact_email_company_individual: entityFormData.contact_email_company_individual || null,
+        contact_phone: entityFormData.contact_phone || null,
+        contact_mobile: entityFormData.contact_mobile || null,
+        contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
+        current_balance: 0
       });
 
       if (error) throw error;
@@ -392,14 +387,14 @@ export function Entities() {
       setEntityFormData({
         name: '',
         entity_type_id: '',
-        tax_id: '',
-        nic_pv_number: '',
+        tax_name: '',
+        nic_company_id: '',
         key_contact_name: '',
-        address: '',
-        email: '',
-        phone: '',
-        mobile1: '',
-        mobile2: ''
+        company_individual_address: '',
+        contact_email_company_individual: '',
+        contact_phone: '',
+        contact_mobile: '',
+        contact_mobile_number_2: ''
       });
       await fetchEntities();
     } catch (error) {
@@ -421,15 +416,15 @@ export function Entities() {
         .from('entities')
         .update({
           name: entityFormData.name,
-          entity_type_id: entityFormData.entity_type_id,
-          tax_id: entityFormData.tax_id || null,
-          nic_pv_number: entityFormData.nic_pv_number || null,
+          entity_type_id: entityFormData.entity_type_id || null,
+          tax_name: entityFormData.tax_name || null,
+          nic_company_id: entityFormData.nic_company_id || null,
           key_contact_name: entityFormData.key_contact_name || null,
-          address: entityFormData.address || null,
-          email: entityFormData.email || null,
-          phone: entityFormData.phone || null,
-          mobile_1: entityFormData.mobile1 || null,
-          mobile_2: entityFormData.mobile2 || null
+          company_individual_address: entityFormData.company_individual_address || null,
+          contact_email_company_individual: entityFormData.contact_email_company_individual || null,
+          contact_phone: entityFormData.contact_phone || null,
+          contact_mobile: entityFormData.contact_mobile || null,
+          contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null
         })
         .eq('id', selectedEntity.id);
 
@@ -441,14 +436,14 @@ export function Entities() {
       setEntityFormData({
         name: '',
         entity_type_id: '',
-        tax_id: '',
-        nic_pv_number: '',
+        tax_name: '',
+        nic_company_id: '',
         key_contact_name: '',
-        address: '',
-        email: '',
-        phone: '',
-        mobile1: '',
-        mobile2: ''
+        company_individual_address: '',
+        contact_email_company_individual: '',
+        contact_phone: '',
+        contact_mobile: '',
+        contact_mobile_number_2: ''
       });
       await fetchEntities();
     } catch (error) {
@@ -519,20 +514,18 @@ export function Entities() {
                     <td className="px-6 py-4">
                       <div>
                         <div className="text-sm font-bold text-gray-900">{entity.name}</div>
-                        <div className="text-xs text-gray-500">{entity.tax_id || 'N/A'}</div>
+                        <div className="text-xs text-gray-500">{entity.tax_name || 'N/A'}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
-                        {entity.entity_types.name}
+                        {entity.entity_types?.name || 'Not Set'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{entity.key_contact_name || 'N/A'}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        entity.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {entity.is_active ? 'Active' : 'Inactive'}
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                        Active
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -605,23 +598,23 @@ export function Entities() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax ID</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax Name</label>
                     <input
                       type="text"
-                      value={entityFormData.tax_id}
-                      onChange={(e) => setEntityFormData({...entityFormData, tax_id: e.target.value})}
+                      value={entityFormData.tax_name}
+                      onChange={(e) => setEntityFormData({...entityFormData, tax_name: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter tax ID"
+                      placeholder="Enter tax name"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / PV Number</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
                     <input
                       type="text"
-                      value={entityFormData.nic_pv_number}
-                      onChange={(e) => setEntityFormData({...entityFormData, nic_pv_number: e.target.value})}
+                      value={entityFormData.nic_company_id}
+                      onChange={(e) => setEntityFormData({...entityFormData, nic_company_id: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter NIC or PV number"
+                      placeholder="Enter NIC or Company ID"
                     />
                   </div>
                   <div className="col-span-2">
@@ -638,8 +631,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Company / Individual Address</label>
                     <textarea
                       rows={3}
-                      value={entityFormData.address}
-                      onChange={(e) => setEntityFormData({...entityFormData, address: e.target.value})}
+                      value={entityFormData.company_individual_address}
+                      onChange={(e) => setEntityFormData({...entityFormData, company_individual_address: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Enter complete address"
                     />
@@ -648,8 +641,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Email (Company / Individual)</label>
                     <input
                       type="email"
-                      value={entityFormData.email}
-                      onChange={(e) => setEntityFormData({...entityFormData, email: e.target.value})}
+                      value={entityFormData.contact_email_company_individual}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_email_company_individual: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="email@example.com"
                     />
@@ -658,8 +651,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Phone</label>
                     <input
                       type="tel"
-                      value={entityFormData.phone}
-                      onChange={(e) => setEntityFormData({...entityFormData, phone: e.target.value})}
+                      value={entityFormData.contact_phone}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_phone: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="(555) 123-4567"
                     />
@@ -668,8 +661,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 1</label>
                     <input
                       type="tel"
-                      value={entityFormData.mobile1}
-                      onChange={(e) => setEntityFormData({...entityFormData, mobile1: e.target.value})}
+                      value={entityFormData.contact_mobile}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_mobile: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+94 77 123 4567"
                     />
@@ -678,8 +671,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 2</label>
                     <input
                       type="tel"
-                      value={entityFormData.mobile2}
-                      onChange={(e) => setEntityFormData({...entityFormData, mobile2: e.target.value})}
+                      value={entityFormData.contact_mobile_number_2}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_mobile_number_2: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+94 77 123 4567"
                     />
@@ -827,7 +820,7 @@ export function Entities() {
                       <option value="">Select bank</option>
                       {banks.map((bank) => (
                         <option key={bank.id} value={bank.id}>
-                          {bank.bank_name}
+                          {bank.name}
                         </option>
                       ))}
                     </select>
@@ -939,7 +932,7 @@ export function Entities() {
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
                                 <div><span className="font-medium">Broker Account:</span> {eb.broker_account_number}</div>
                               )}
-                              {eb.banks && <div><span className="font-medium">Bank:</span> {eb.banks.bank_name}</div>}
+                              {eb.banks && <div><span className="font-medium">Bank:</span> {eb.banks.name}</div>}
                               {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
                               {eb.currency && <div><span className="font-medium">Currency:</span> {eb.currency}</div>}
                               {eb.facility_limit && <div><span className="font-medium">Facility Limit:</span> Rs. {eb.facility_limit.toLocaleString()}</div>}
@@ -1000,15 +993,15 @@ export function Entities() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Entity Type</label>
-                  <p className="text-gray-900">{selectedEntity.entity_types.name}</p>
+                  <p className="text-gray-900">{selectedEntity.entity_types?.name || 'Not Set'}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-500 mb-1">Tax ID</label>
-                  <p className="text-gray-900">{selectedEntity.tax_id || 'N/A'}</p>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Tax Name</label>
+                  <p className="text-gray-900">{selectedEntity.tax_name || 'N/A'}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-500 mb-1">NIC / PV Number</label>
-                  <p className="text-gray-900">{selectedEntity.nic_pv_number || 'N/A'}</p>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">NIC / Company ID</label>
+                  <p className="text-gray-900">{selectedEntity.nic_company_id || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Key Contact Name</label>
@@ -1016,38 +1009,32 @@ export function Entities() {
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Address</label>
-                  <p className="text-gray-900">{selectedEntity.address || 'N/A'}</p>
+                  <p className="text-gray-900">{selectedEntity.company_individual_address || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Email</label>
-                  <p className="text-gray-900">{selectedEntity.email || 'N/A'}</p>
+                  <p className="text-gray-900">{selectedEntity.contact_email_company_individual || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Phone</label>
-                  <p className="text-gray-900">{selectedEntity.phone || 'N/A'}</p>
+                  <p className="text-gray-900">{selectedEntity.contact_phone || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Mobile 1</label>
-                  <p className="text-gray-900">{selectedEntity.mobile_1 || 'N/A'}</p>
+                  <p className="text-gray-900">{selectedEntity.contact_mobile || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Mobile 2</label>
-                  <p className="text-gray-900">{selectedEntity.mobile_2 || 'N/A'}</p>
+                  <p className="text-gray-900">{selectedEntity.contact_mobile_number_2 || 'N/A'}</p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Current Balance</label>
                   <p className="text-gray-900">Rs. {selectedEntity.current_balance?.toLocaleString() || '0.00'}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-500 mb-1">OD Limit</label>
-                  <p className="text-gray-900">Rs. {selectedEntity.od_limit?.toLocaleString() || '0.00'}</p>
-                </div>
-                <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Status</label>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    selectedEntity.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    {selectedEntity.is_active ? 'Active' : 'Inactive'}
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                    Active
                   </span>
                 </div>
                 <div>
@@ -1092,14 +1079,14 @@ export function Entities() {
                   setEntityFormData({
                     name: '',
                     entity_type_id: '',
-                    tax_id: '',
-                    nic_pv_number: '',
+                    tax_name: '',
+                    nic_company_id: '',
                     key_contact_name: '',
-                    address: '',
-                    email: '',
-                    phone: '',
-                    mobile1: '',
-                    mobile2: ''
+                    company_individual_address: '',
+                    contact_email_company_individual: '',
+                    contact_phone: '',
+                    contact_mobile: '',
+                    contact_mobile_number_2: ''
                   });
                 }}
                 className="text-gray-400 hover:text-gray-600"
@@ -1138,23 +1125,23 @@ export function Entities() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax ID</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax Name</label>
                     <input
                       type="text"
-                      value={entityFormData.tax_id}
-                      onChange={(e) => setEntityFormData({...entityFormData, tax_id: e.target.value})}
+                      value={entityFormData.tax_name}
+                      onChange={(e) => setEntityFormData({...entityFormData, tax_name: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter tax ID"
+                      placeholder="Enter tax name"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / PV Number</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
                     <input
                       type="text"
-                      value={entityFormData.nic_pv_number}
-                      onChange={(e) => setEntityFormData({...entityFormData, nic_pv_number: e.target.value})}
+                      value={entityFormData.nic_company_id}
+                      onChange={(e) => setEntityFormData({...entityFormData, nic_company_id: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter NIC or PV number"
+                      placeholder="Enter NIC or Company ID"
                     />
                   </div>
                   <div className="col-span-2">
@@ -1171,8 +1158,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Company / Individual Address</label>
                     <textarea
                       rows={3}
-                      value={entityFormData.address}
-                      onChange={(e) => setEntityFormData({...entityFormData, address: e.target.value})}
+                      value={entityFormData.company_individual_address}
+                      onChange={(e) => setEntityFormData({...entityFormData, company_individual_address: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Enter complete address"
                     />
@@ -1181,8 +1168,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Email</label>
                     <input
                       type="email"
-                      value={entityFormData.email}
-                      onChange={(e) => setEntityFormData({...entityFormData, email: e.target.value})}
+                      value={entityFormData.contact_email_company_individual}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_email_company_individual: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="email@example.com"
                     />
@@ -1191,8 +1178,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Phone</label>
                     <input
                       type="tel"
-                      value={entityFormData.phone}
-                      onChange={(e) => setEntityFormData({...entityFormData, phone: e.target.value})}
+                      value={entityFormData.contact_phone}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_phone: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="(555) 123-4567"
                     />
@@ -1201,8 +1188,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 1</label>
                     <input
                       type="tel"
-                      value={entityFormData.mobile1}
-                      onChange={(e) => setEntityFormData({...entityFormData, mobile1: e.target.value})}
+                      value={entityFormData.contact_mobile}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_mobile: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+94 77 123 4567"
                     />
@@ -1211,8 +1198,8 @@ export function Entities() {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Mobile Number 2</label>
                     <input
                       type="tel"
-                      value={entityFormData.mobile2}
-                      onChange={(e) => setEntityFormData({...entityFormData, mobile2: e.target.value})}
+                      value={entityFormData.contact_mobile_number_2}
+                      onChange={(e) => setEntityFormData({...entityFormData, contact_mobile_number_2: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+94 77 123 4567"
                     />
@@ -1228,14 +1215,14 @@ export function Entities() {
                     setEntityFormData({
                       name: '',
                       entity_type_id: '',
-                      tax_id: '',
-                      nic_pv_number: '',
+                      tax_name: '',
+                      nic_company_id: '',
                       key_contact_name: '',
-                      address: '',
-                      email: '',
-                      phone: '',
-                      mobile1: '',
-                      mobile2: ''
+                      company_individual_address: '',
+                      contact_email_company_individual: '',
+                      contact_phone: '',
+                      contact_mobile: '',
+                      contact_mobile_number_2: ''
                     });
                   }}
                   className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
