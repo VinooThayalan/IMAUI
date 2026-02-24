@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, Clock, Upload, Eye, Edit2, Pause } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Edit2, Pause, Printer } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -70,7 +70,6 @@ export function TransactionApprovals() {
   const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'HOLD'>('APPROVE');
   const [isEditing, setIsEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [uploadingPdf, setUploadingPdf] = useState(false);
 
   const [editFormData, setEditFormData] = useState({
     entity_id: '',
@@ -204,38 +203,181 @@ export function TransactionApprovals() {
     }
   }
 
-  async function handlePdfUpload(file: File) {
-    if (!selectedRequest) return;
+  function handlePrintApproval(request: TransactionRequest) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
 
-    try {
-      setUploadingPdf(true);
+    const shareInfo = getShareInfo(request.share_id);
+    const entityName = getEntityName(request.entity_id);
+    const totalShares = Number(request.no_of_shares).toLocaleString();
+    const grossPrice = Number(request.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 });
+    const totalAmount = Number(request.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 });
 
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${selectedRequest.id}_${Date.now()}.${fileExt}`;
-      const filePath = `transaction-pdfs/${fileName}`;
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Transaction Approval - ${request.id}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 40px;
+              max-width: 1000px;
+              margin: 0 auto;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 40px;
+            }
+            .header h1 {
+              margin: 0 0 10px 0;
+              font-size: 24px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 30px;
+            }
+            th, td {
+              border: 1px solid #000;
+              padding: 8px;
+              text-align: left;
+            }
+            th {
+              background-color: #f5f5f5;
+              font-weight: bold;
+            }
+            .green-header {
+              background-color: #90EE90 !important;
+            }
+            .section-header {
+              background-color: #f0f0f0;
+              font-weight: bold;
+            }
+            .total-row {
+              font-weight: bold;
+              background-color: #f5f5f5;
+            }
+            .footer {
+              margin-top: 60px;
+              display: flex;
+              justify-content: space-between;
+            }
+            .signature-box {
+              width: 45%;
+            }
+            .signature-line {
+              border-top: 1px solid #000;
+              margin-top: 60px;
+              padding-top: 10px;
+            }
+            @media print {
+              body { padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Transaction Approval Form</h1>
+            <p>Transaction ID: ${request.id}</p>
+          </div>
 
-      alert('Note: File upload to storage requires Supabase Storage setup. For now, saving file reference.');
+          <table>
+            <tr>
+              <th colspan="9" class="section-header">Transaction Details</th>
+            </tr>
+            <tr>
+              <th>Entity:</th>
+              <td colspan="8">${entityName}</td>
+            </tr>
+            <tr>
+              <th>Investment</th>
+              <td colspan="8">${request.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</td>
+            </tr>
+            <tr>
+              <th>Name of the Investment</th>
+              <td colspan="8">${request.id}</td>
+            </tr>
+          </table>
 
-      const { error } = await supabase
-        .from('transaction_requests')
-        .update({
-          pdf_url: filePath,
-          pdf_uploaded_at: new Date().toISOString(),
-          pdf_uploaded_by: 'Current User',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedRequest.id);
+          <table>
+            <thead>
+              <tr>
+                <th>Date of Transaction</th>
+                <th>Share</th>
+                <th>Buy/Sell</th>
+                <th>Number of Shares</th>
+                <th class="green-header">Per Share Sales Price / Purchase Cost (Gross)</th>
+                <th class="green-header">Per Share Sales Price / Purchase Cost (Net)</th>
+                <th>Purchase/ Sale Value</th>
+                <th>CDS Acc. No</th>
+                <th>Broker Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${new Date(request.request_date).toLocaleDateString()}</td>
+                <td>${shareInfo.ticker}</td>
+                <td>${request.transaction_type}</td>
+                <td>${totalShares}</td>
+                <td class="green-header">${grossPrice}</td>
+                <td class="green-header">${grossPrice}</td>
+                <td>${totalAmount}</td>
+                <td>...</td>
+                <td>...</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="2">Total Sales Values /Purchase Values</td>
+                <td colspan="1">${totalShares}</td>
+                <td class="green-header" colspan="2">[Total No. shares]</td>
+                <td class="green-header" colspan="4">[Total Purchase value or sales Value]</td>
+              </tr>
+            </tbody>
+          </table>
 
-      if (error) throw error;
+          <table>
+            <tr>
+              <th style="width: 200px;">Authorized by</th>
+              <td>..........................</td>
+            </tr>
+            <tr>
+              <th>Authorized date</th>
+              <td>${new Date().toLocaleDateString()}</td>
+            </tr>
+            <tr>
+              <th>Generate Date</th>
+              <td>${new Date().toLocaleString()}</td>
+            </tr>
+          </table>
 
-      alert('PDF reference saved successfully');
-      loadData();
-    } catch (error) {
-      console.error('Error uploading PDF:', error);
-      alert('Failed to upload PDF');
-    } finally {
-      setUploadingPdf(false);
-    }
+          <div class="footer">
+            <div class="signature-box">
+              <div class="signature-line">
+                <strong>Prepared By:</strong><br/>
+                Name: ${request.requested_by}<br/>
+                Date: ${new Date(request.request_date).toLocaleDateString()}
+              </div>
+            </div>
+            <div class="signature-box">
+              <div class="signature-line">
+                <strong>Approved By:</strong><br/>
+                Name: ______________________<br/>
+                Date: ______________________
+              </div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
   }
 
   function openActionModal(request: TransactionRequest, action: 'APPROVE' | 'REJECT' | 'HOLD') {
@@ -545,6 +687,13 @@ export function TransactionApprovals() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.requested_by}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handlePrintApproval(request)}
+                          className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                          title="Print"
+                        >
+                          <Printer className="w-5 h-5" />
+                        </button>
                         {(request.status === 'PENDING' || request.status === 'HOLD') && (
                           <>
                             <button
@@ -647,22 +796,8 @@ export function TransactionApprovals() {
                     </div>
                   )}
 
-                  {selectedRequest.pdf_url && (
-                    <div className="pt-3 border-t border-gray-200">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-500">Signed PDF:</span>
-                        <div className="text-sm text-gray-900">
-                          <span className="text-green-600 font-semibold">✓ Uploaded</span>
-                          <p className="text-xs text-gray-500">
-                            {selectedRequest.pdf_uploaded_at && new Date(selectedRequest.pdf_uploaded_at).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   {actionType === 'APPROVE' && (
-                    <div className="pt-3 border-t border-gray-200 space-y-3">
+                    <div className="pt-3 border-t border-gray-200">
                       <button
                         onClick={() => setIsEditing(true)}
                         className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
@@ -670,27 +805,6 @@ export function TransactionApprovals() {
                         <Edit2 className="w-4 h-4" />
                         <span>Edit Transaction Details</span>
                       </button>
-
-                      {!selectedRequest.pdf_url && (
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Upload Signed PDF
-                          </label>
-                          <input
-                            type="file"
-                            accept=".pdf"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handlePdfUpload(file);
-                            }}
-                            className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer focus:outline-none"
-                            disabled={uploadingPdf}
-                          />
-                          <p className="text-xs text-gray-500 mt-1">
-                            Upload the signed PDF document for this transaction
-                          </p>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
