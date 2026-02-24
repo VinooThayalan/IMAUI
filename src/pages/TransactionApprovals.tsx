@@ -222,54 +222,65 @@ export function TransactionApprovals() {
             body {
               font-family: Arial, sans-serif;
               padding: 40px;
-              max-width: 1000px;
               margin: 0 auto;
             }
             .header {
-              text-align: center;
-              margin-bottom: 40px;
+              margin-bottom: 30px;
             }
-            .header h1 {
-              margin: 0 0 10px 0;
-              font-size: 24px;
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+            }
+            .info-table td {
+              padding: 4px 8px;
+              vertical-align: top;
+            }
+            .info-table td:first-child {
+              font-weight: bold;
+              width: 200px;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-bottom: 30px;
+              margin-bottom: 20px;
             }
             th, td {
               border: 1px solid #000;
               padding: 8px;
               text-align: left;
+              font-size: 13px;
             }
             th {
               background-color: #f5f5f5;
               font-weight: bold;
             }
-            .green-header {
+            .green-bg {
               background-color: #90EE90 !important;
-            }
-            .section-header {
-              background-color: #f0f0f0;
+              color: #006400;
               font-weight: bold;
             }
             .total-row {
               font-weight: bold;
               background-color: #f5f5f5;
             }
-            .footer {
-              margin-top: 60px;
-              display: flex;
-              justify-content: space-between;
+            .total-row td:first-child {
+              color: #006400;
             }
-            .signature-box {
-              width: 45%;
+            .total-row .green-text {
+              color: #006400;
+              font-style: italic;
             }
-            .signature-line {
-              border-top: 1px solid #000;
-              margin-top: 60px;
-              padding-top: 10px;
+            .auth-table {
+              width: 50%;
+              margin-top: 20px;
+            }
+            .auth-table td {
+              padding: 8px;
+            }
+            .auth-table td:first-child {
+              width: 150px;
+              font-weight: normal;
             }
             @media print {
               body { padding: 20px; }
@@ -278,94 +289,101 @@ export function TransactionApprovals() {
         </head>
         <body>
           <div class="header">
-            <h1>Transaction Approval Form</h1>
-            <p>Transaction ID: ${request.id}</p>
+            <h2 style="margin: 0 0 20px 0;">Transaction Approval Details</h2>
           </div>
 
-          <table>
+          <table class="info-table">
             <tr>
-              <th colspan="9" class="section-header">Transaction Details</th>
+              <td>Entity:</td>
+              <td>${entityName}</td>
             </tr>
             <tr>
-              <th>Entity:</th>
-              <td colspan="8">${entityName}</td>
+              <td>Investment</td>
+              <td>${request.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</td>
             </tr>
             <tr>
-              <th>Investment</th>
-              <td colspan="8">${request.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</td>
-            </tr>
-            <tr>
-              <th>Name of the Investment</th>
-              <td colspan="8">${request.id}</td>
+              <td>Name of the Investment</td>
+              <td>&lt;Transaction record ID&gt;</td>
             </tr>
           </table>
 
           <table>
             <thead>
               <tr>
-                <th>Date of Transaction</th>
-                <th>Share</th>
-                <th>Buy/Sell</th>
-                <th>Number of Shares</th>
-                <th class="green-header">Per Share Sales Price / Purchase Cost (Gross)</th>
-                <th class="green-header">Per Share Sales Price / Purchase Cost (Net)</th>
-                <th>Purchase/ Sale Value</th>
-                <th>CDS Acc. No</th>
-                <th>Broker Name</th>
+                <th rowspan="2">Date of Transaction</th>
+                <th rowspan="2">Share</th>
+                <th rowspan="2">Buy/Sell</th>
+                <th rowspan="2">Number of Shares</th>
+                <th colspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Gross)</th>
+                <th rowspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Net)</th>
+                <th rowspan="2">Purchase/ Sale Value</th>
+                <th rowspan="2">CDS Acc. No</th>
+                <th rowspan="2">Broker Name</th>
+              </tr>
+              <tr>
+                <th class="green-bg" colspan="2"></th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td>${new Date(request.request_date).toLocaleDateString()}</td>
-                <td>${shareInfo.ticker}</td>
-                <td>${request.transaction_type}</td>
-                <td>${totalShares}</td>
-                <td class="green-header">${grossPrice}</td>
-                <td class="green-header">${grossPrice}</td>
-                <td>${totalAmount}</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td>xx</td>
                 <td>...</td>
+                <td>xx</td>
+              </tr>
+              <tr>
+                <td>xx</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td>xx</td>
                 <td>...</td>
+                <td>xx</td>
+              </tr>
+              <tr>
+                <td>xx</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td>xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td class="green-bg">xx</td>
+                <td>xx</td>
+                <td>...</td>
+                <td>xx</td>
               </tr>
               <tr class="total-row">
                 <td colspan="2">Total Sales Values /Purchase Values</td>
-                <td colspan="1">${totalShares}</td>
-                <td class="green-header" colspan="2">[Total No. shares]</td>
-                <td class="green-header" colspan="4">[Total Purchase value or sales Value]</td>
+                <td>yy</td>
+                <td colspan="3" class="green-text">[Total No. shares]</td>
+                <td colspan="4" class="green-text">[Total Purchase value or sales Value]</td>
+              </tr>
+              <tr>
+                <td colspan="10" style="border: none; padding: 20px 8px;"></td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized by</td>
+                <td colspan="7" style="border-left: none;">..........................</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized date</td>
+                <td colspan="7" style="border-left: none;">..........................</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Generate Date</td>
+                <td colspan="7" style="border-left: none;">&lt;generated date&gt;</td>
               </tr>
             </tbody>
           </table>
-
-          <table>
-            <tr>
-              <th style="width: 200px;">Authorized by</th>
-              <td>..........................</td>
-            </tr>
-            <tr>
-              <th>Authorized date</th>
-              <td>${new Date().toLocaleDateString()}</td>
-            </tr>
-            <tr>
-              <th>Generate Date</th>
-              <td>${new Date().toLocaleString()}</td>
-            </tr>
-          </table>
-
-          <div class="footer">
-            <div class="signature-box">
-              <div class="signature-line">
-                <strong>Prepared By:</strong><br/>
-                Name: ${request.requested_by}<br/>
-                Date: ${new Date(request.request_date).toLocaleDateString()}
-              </div>
-            </div>
-            <div class="signature-box">
-              <div class="signature-line">
-                <strong>Approved By:</strong><br/>
-                Name: ______________________<br/>
-                Date: ______________________
-              </div>
-            </div>
-          </div>
 
           <script>
             window.onload = function() {
