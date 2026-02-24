@@ -1,5 +1,5 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, Send, CheckCircle, XCircle, Eye, Printer, Upload, Clock } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface Transaction {
@@ -96,9 +96,6 @@ export function Transactions() {
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [showApprovalActionModal, setShowApprovalActionModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
@@ -110,14 +107,7 @@ export function Transactions() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
-  const [approvalAction, setApprovalAction] = useState<'APPROVE' | 'REJECT'>('APPROVE');
-  const [validityHours, setValidityHours] = useState('24');
-  const [approvalNotes, setApprovalNotes] = useState('');
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -396,180 +386,32 @@ export function Transactions() {
     }
   }
 
-  function toggleTransactionSelection(transactionId: string) {
-    const newSelected = new Set(selectedTransactions);
-    if (newSelected.has(transactionId)) {
-      newSelected.delete(transactionId);
-    } else {
-      newSelected.add(transactionId);
-    }
-    setSelectedTransactions(newSelected);
-  }
-
-  function toggleAllTransactions() {
-    const currentTransactions = activeTab === 'all'
-      ? filteredTransactions.filter(t => t.approval_status === 'DRAFT')
-      : [];
-
-    if (selectedTransactions.size === currentTransactions.length && currentTransactions.length > 0) {
-      setSelectedTransactions(new Set());
-    } else {
-      const allIds = currentTransactions.map(t => t.id);
-      setSelectedTransactions(new Set(allIds));
-    }
-  }
-
-  async function handleSendForApproval() {
-    if (selectedTransactions.size === 0) {
-      alert('Please select at least one transaction');
-      return;
-    }
-
-    if (!validityHours || parseFloat(validityHours) <= 0) {
-      alert('Please enter a valid duration');
+  async function handleCancelTransaction(transaction: Transaction) {
+    if (!confirm('Are you sure you want to cancel this transaction? This action cannot be undone.')) {
       return;
     }
 
     try {
       setSubmitting(true);
-
-      const hours = parseFloat(validityHours);
-      const expiresAt = new Date();
-      expiresAt.setHours(expiresAt.getHours() + hours);
-
-      const updates = Array.from(selectedTransactions).map(id =>
-        supabase.from('transactions').update({
-          approval_status: 'PENDING_APPROVAL',
-          submitted_for_approval_at: new Date().toISOString(),
-          approval_validity_hours: hours,
-          approval_expires_at: expiresAt.toISOString(),
-          submitted_by: 'Current User',
-          updated_at: new Date().toISOString()
-        }).eq('id', id)
-      );
-
-      const results = await Promise.all(updates);
-      const errors = results.filter(r => r.error);
-
-      if (errors.length > 0) {
-        throw new Error('Some transactions failed to update');
-      }
-
-      alert(`${selectedTransactions.size} transaction(s) sent for approval`);
-      setShowApprovalModal(false);
-      setSelectedTransactions(new Set());
-      setValidityHours('24');
-      loadData();
-    } catch (error) {
-      console.error('Error sending for approval:', error);
-      alert('Failed to send for approval');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleApprovalAction() {
-    if (!selectedTransaction) return;
-
-    if (approvalAction === 'REJECT' && !rejectionReason.trim()) {
-      alert('Please provide a rejection reason');
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      const updateData: any = {
-        approval_status: approvalAction === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-        approved_by: 'Approver User',
-        approval_date: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      if (approvalAction === 'APPROVE') {
-        updateData.approval_notes = approvalNotes;
-      } else {
-        updateData.rejection_reason = rejectionReason;
-      }
 
       const { error } = await supabase
         .from('transactions')
-        .update(updateData)
-        .eq('id', selectedTransaction.id);
+        .delete()
+        .eq('id', transaction.id);
 
       if (error) throw error;
 
-      alert(`Transaction ${approvalAction === 'APPROVE' ? 'approved' : 'rejected'} successfully`);
-      setShowApprovalActionModal(false);
-      setSelectedTransaction(null);
-      setApprovalNotes('');
-      setRejectionReason('');
+      alert('Transaction cancelled successfully');
       loadData();
     } catch (error) {
-      console.error('Error processing approval:', error);
-      alert('Failed to process approval');
+      console.error('Error cancelling transaction:', error);
+      alert('Failed to cancel transaction');
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleUploadApproval() {
-    if (!selectedTransaction || !uploadFile) {
-      alert('Please select a file to upload');
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      const fileExt = uploadFile.name.split('.').pop();
-      const fileName = `${selectedTransaction.id}_${Date.now()}.${fileExt}`;
-      const filePath = `approvals/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, uploadFile);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
-
-      const { error: updateError } = await supabase
-        .from('transactions')
-        .update({
-          approval_status: 'APPROVED',
-          approved_by: 'Offline Approver',
-          approval_date: new Date().toISOString(),
-          offline_approval: true,
-          approval_document_url: publicUrl,
-          approval_document_name: uploadFile.name,
-          approval_document_uploaded_at: new Date().toISOString(),
-          approval_document_uploaded_by: 'Current User',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedTransaction.id);
-
-      if (updateError) throw updateError;
-
-      alert('Approval document uploaded successfully');
-      setShowUploadModal(false);
-      setSelectedTransaction(null);
-      setUploadFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      loadData();
-    } catch (error) {
-      console.error('Error uploading approval:', error);
-      alert('Failed to upload approval document');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function handlePrintApproval(transaction: Transaction) {
+  function handlePrintTransaction(transaction: Transaction) {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -800,15 +642,6 @@ export function Transactions() {
           <p className="text-gray-500 mt-1">Manage buy and sell transactions</p>
         </div>
         <div className="flex items-center space-x-3">
-          {selectedTransactions.size > 0 && activeTab === 'all' && (
-            <button
-              onClick={() => setShowApprovalModal(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
-              <Send className="w-5 h-5" />
-              <span className="font-medium">Send for Approval ({selectedTransactions.size})</span>
-            </button>
-          )}
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -933,20 +766,6 @@ export function Transactions() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {activeTab === 'all' && (
-                  <th className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={
-                        selectedTransactions.size > 0 &&
-                        selectedTransactions.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length &&
-                        filteredTransactions.filter(t => t.approval_status === 'DRAFT').length > 0
-                      }
-                      onChange={toggleAllTransactions}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                  </th>
-                )}
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
@@ -960,18 +779,6 @@ export function Transactions() {
             <tbody className="divide-y divide-gray-200">
               {filteredTransactions.map((transaction) => (
                 <tr key={transaction.id} className="hover:bg-gray-50">
-                  {activeTab === 'all' && (
-                    <td className="px-4 py-4">
-                      {transaction.approval_status === 'DRAFT' && (
-                        <input
-                          type="checkbox"
-                          checked={selectedTransactions.has(transaction.id)}
-                          onChange={() => toggleTransactionSelection(transaction.id)}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                        />
-                      )}
-                    </td>
-                  )}
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
                       {new Date(transaction.transaction_date).toLocaleDateString()}
@@ -1030,49 +837,21 @@ export function Transactions() {
                       >
                         <Eye className="w-5 h-5" />
                       </button>
-                      {transaction.approval_status === 'PENDING_APPROVAL' && (
-                        <>
-                          <button
-                            onClick={() => handlePrintApproval(transaction)}
-                            className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
-                            title="Print Approval Request"
-                          >
-                            <Printer className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedTransaction(transaction);
-                              setShowUploadModal(true);
-                            }}
-                            className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                            title="Upload Offline Approval"
-                          >
-                            <Upload className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedTransaction(transaction);
-                              setApprovalAction('APPROVE');
-                              setShowApprovalActionModal(true);
-                            }}
-                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                            title="Approve"
-                          >
-                            <CheckCircle className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedTransaction(transaction);
-                              setApprovalAction('REJECT');
-                              setShowApprovalActionModal(true);
-                            }}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Reject"
-                          >
-                            <XCircle className="w-5 h-5" />
-                          </button>
-                        </>
-                      )}
+                      <button
+                        onClick={() => handlePrintTransaction(transaction)}
+                        className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
+                        title="Print Transaction"
+                      >
+                        <Printer className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => handleCancelTransaction(transaction)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Cancel Transaction"
+                        disabled={submitting}
+                      >
+                        <XCircle className="w-5 h-5" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1603,245 +1382,6 @@ export function Transactions() {
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showUploadModal && selectedTransaction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900">Upload Offline Approval</h2>
-              <p className="text-sm text-gray-500 mt-1">Upload proof of approval obtained offline</p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Transaction:</strong> {getShareInfo(selectedTransaction.share_id)}
-                </p>
-                <p className="text-sm text-blue-800 mt-1">
-                  <strong>Amount:</strong> LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Approval Document <span className="text-red-600">*</span>
-                </label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Supported formats: PDF, JPG, PNG (Max 5MB)
-                </p>
-              </div>
-
-              {uploadFile && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                  <p className="text-sm text-gray-700">
-                    <strong>Selected:</strong> {uploadFile.name}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Size: {(uploadFile.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
-              <button
-                onClick={() => {
-                  setShowUploadModal(false);
-                  setSelectedTransaction(null);
-                  setUploadFile(null);
-                  if (fileInputRef.current) {
-                    fileInputRef.current.value = '';
-                  }
-                }}
-                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUploadApproval}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:bg-gray-400"
-                disabled={submitting || !uploadFile}
-              >
-                {submitting ? 'Uploading...' : 'Upload & Approve'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showApprovalModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900">Send for Approval</h2>
-              <p className="text-sm text-gray-500 mt-1">Set validity period for approval</p>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <p className="text-sm text-gray-600 mb-4">
-                  Sending <span className="font-bold text-green-700">{selectedTransactions.size}</span> transaction(s) for approval
-                </p>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Validity Period (Hours) <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={validityHours}
-                  onChange={(e) => setValidityHours(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., 24"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Transaction(s) will expire after this duration if not approved
-                </p>
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
-              <button
-                onClick={() => {
-                  setShowApprovalModal(false);
-                  setValidityHours('24');
-                }}
-                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendForApproval}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:bg-gray-400"
-                disabled={submitting}
-              >
-                {submitting ? 'Sending...' : 'Send for Approval'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showApprovalActionModal && selectedTransaction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900">
-                {approvalAction === 'APPROVE' ? 'Approve Transaction' : 'Reject Transaction'}
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">Review transaction details</p>
-            </div>
-            <div className="p-6 space-y-6">
-              <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Entity:</span>
-                  <span className="text-sm font-bold text-gray-900">{getEntityName(selectedTransaction.entity_id)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Share:</span>
-                  <span className="text-sm font-bold text-gray-900">{getShareInfo(selectedTransaction.share_id)}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Type:</span>
-                  <span className={`text-sm font-bold px-2 py-1 rounded ${
-                    selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                  }`}>
-                    {selectedTransaction.transaction_type}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Quantity:</span>
-                  <span className="text-sm font-bold text-gray-900">{Number(selectedTransaction.no_of_shares).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Price per Share:</span>
-                  <span className="text-sm font-bold text-gray-900">
-                    LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Total Amount:</span>
-                  <span className="text-sm font-bold text-gray-900">
-                    LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-500">Submitted By:</span>
-                  <span className="text-sm font-bold text-gray-900">{selectedTransaction.submitted_by || 'N/A'}</span>
-                </div>
-                {selectedTransaction.approval_expires_at && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-500">Expires:</span>
-                    <span className="text-sm font-bold text-orange-600">
-                      {getTimeRemaining(selectedTransaction)}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {approvalAction === 'APPROVE' ? (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Approval Notes (Optional)
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={approvalNotes}
-                    onChange={(e) => setApprovalNotes(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Add any notes about this approval..."
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Rejection Reason <span className="text-red-600">*</span>
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Provide a detailed reason for rejection..."
-                    required
-                  />
-                </div>
-              )}
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
-              <button
-                onClick={() => {
-                  setShowApprovalActionModal(false);
-                  setSelectedTransaction(null);
-                  setApprovalNotes('');
-                  setRejectionReason('');
-                }}
-                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleApprovalAction}
-                className={`px-6 py-2 rounded-lg font-medium text-white transition-colors disabled:bg-gray-400 ${
-                  approvalAction === 'APPROVE'
-                    ? 'bg-green-600 hover:bg-green-700'
-                    : 'bg-red-600 hover:bg-red-700'
-                }`}
-                disabled={submitting}
-              >
-                {submitting ? 'Processing...' : `${approvalAction === 'APPROVE' ? 'Approve' : 'Reject'} Transaction`}
               </button>
             </div>
           </div>
