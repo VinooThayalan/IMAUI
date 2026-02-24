@@ -709,10 +709,7 @@ export function Transactions() {
         <div className="border-b border-gray-200">
           <div className="flex space-x-1 p-2">
             <button
-              onClick={() => {
-                setActiveTab('all');
-                setSelectedTransactions(new Set());
-              }}
+              onClick={() => setActiveTab('all')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                 activeTab === 'all'
                   ? 'bg-blue-600 text-white'
@@ -722,10 +719,7 @@ export function Transactions() {
               All Transactions
             </button>
             <button
-              onClick={() => {
-                setActiveTab('pending');
-                setSelectedTransactions(new Set());
-              }}
+              onClick={() => setActiveTab('pending')}
               className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
                 activeTab === 'pending'
                   ? 'bg-blue-600 text-white'
