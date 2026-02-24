@@ -603,149 +603,199 @@ export function TransactionApprovals() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th
-                  onClick={() => handleSort('entity_id')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Entity {sortColumn === 'entity_id' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th
-                  onClick={() => handleSort('transaction_type')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Type {sortColumn === 'transaction_type' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th
-                  onClick={() => handleSort('share_id')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Share {sortColumn === 'share_id' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th
-                  onClick={() => handleSort('no_of_shares')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Quantity {sortColumn === 'no_of_shares' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th
-                  onClick={() => handleSort('total_amount')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Amount {sortColumn === 'total_amount' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th
-                  onClick={() => handleSort('status')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Status {sortColumn === 'status' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Time Left</th>
-                <th
-                  onClick={() => handleSort('requested_by')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                >
-                  Requested By {sortColumn === 'requested_by' && (sortDirection === 'asc' ? '↑' : '↓')}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {sortedRequests.map((request) => {
-                const StatusIcon = statusConfig[request.status as keyof typeof statusConfig]?.icon || Clock;
-                const shareInfo = getShareInfo(request.share_id);
+          {sortedRequests.map((request) => {
+            const StatusIcon = statusConfig[request.status as keyof typeof statusConfig]?.icon || Clock;
+            const shareInfo = getShareInfo(request.share_id);
+            const entityName = getEntityName(request.entity_id);
 
-                return (
-                  <tr key={request.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div>
-                        <div className="text-sm font-bold text-gray-900">{getEntityName(request.entity_id)}</div>
-                        <div className="text-xs text-gray-500">{new Date(request.request_date).toLocaleDateString()}</div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${typeColors[request.transaction_type as keyof typeof typeColors]}`}>
+            return (
+              <div key={request.id} className="border-b border-gray-200 p-6 hover:bg-gray-50">
+                <div className="mb-4 flex items-start justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-3">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${typeColors[request.transaction_type as keyof typeof typeColors]}`}>
                         {request.transaction_type}
                       </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-bold text-gray-900">{shareInfo.ticker}</div>
-                      <div className="text-xs text-gray-500">{shareInfo.name}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {Number(request.no_of_shares).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                      Rs. {Number(request.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center space-x-2">
                         <StatusIcon className={`w-4 h-4 ${statusConfig[request.status as keyof typeof statusConfig]?.color}`} />
                         <span className={`text-xs font-semibold ${statusConfig[request.status as keyof typeof statusConfig]?.color}`}>
                           {request.status}
                         </span>
                       </div>
-                      {request.status === 'HOLD' && request.hold_until && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Until: {new Date(request.hold_until).toLocaleString()}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
                       {getTimeRemaining(request) && (
-                        <div className={`text-sm font-semibold ${
+                        <span className={`text-xs font-semibold ${
                           getTimeRemaining(request) === 'Expired' ? 'text-red-600' : 'text-orange-600'
                         }`}>
                           {getTimeRemaining(request)}
-                        </div>
+                        </span>
                       )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.requested_by}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      Requested by {request.requested_by} on {new Date(request.request_date).toLocaleDateString()}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handlePrintApproval(request)}
+                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Print"
+                    >
+                      <Printer className="w-5 h-5" />
+                    </button>
+                    {(request.status === 'PENDING' || request.status === 'HOLD') && (
+                      <>
                         <button
-                          onClick={() => handlePrintApproval(request)}
-                          className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
-                          title="Print"
+                          onClick={() => openActionModal(request, 'APPROVE')}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Approve"
                         >
-                          <Printer className="w-5 h-5" />
+                          <CheckCircle className="w-5 h-5" />
                         </button>
-                        {(request.status === 'PENDING' || request.status === 'HOLD') && (
-                          <>
-                            <button
-                              onClick={() => openActionModal(request, 'APPROVE')}
-                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                              title="Approve"
-                            >
-                              <CheckCircle className="w-5 h-5" />
-                            </button>
-                            <button
-                              onClick={() => openActionModal(request, 'REJECT')}
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Reject"
-                            >
-                              <XCircle className="w-5 h-5" />
-                            </button>
-                            {request.status === 'PENDING' && (
-                              <button
-                                onClick={() => openActionModal(request, 'HOLD')}
-                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                title="Hold"
-                              >
-                                <Pause className="w-5 h-5" />
-                              </button>
-                            )}
-                          </>
+                        <button
+                          onClick={() => openActionModal(request, 'REJECT')}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Reject"
+                        >
+                          <XCircle className="w-5 h-5" />
+                        </button>
+                        {request.status === 'PENDING' && (
+                          <button
+                            onClick={() => openActionModal(request, 'HOLD')}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Hold"
+                          >
+                            <Pause className="w-5 h-5" />
+                          </button>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-4 bg-gray-50 rounded-lg p-4 space-y-2">
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <span className="font-semibold text-gray-700">Entity:</span>
+                      <div className="text-gray-900">{entityName}</div>
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-700">Investment</span>
+                      <div className="text-gray-900">{request.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</div>
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-700">Name of the Investment</span>
+                      <div className="text-gray-900 text-xs">&lt;Transaction record ID&gt;</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse border border-gray-300">
+                    <thead>
+                      <tr>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Date of Transaction
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Share
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Buy/Sell
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Number of Shares
+                        </th>
+                        <th colSpan={2} className="border border-gray-300 px-3 py-2 bg-green-200 text-xs font-semibold text-green-900 text-center">
+                          Per Share Sales Price / Purchase Cost (Gross)
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-green-200 text-xs font-semibold text-green-900 text-left">
+                          Per Share Sales Price / Purchase Cost (Net)
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Purchase/ Sale Value
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          CDS Acc. No
+                        </th>
+                        <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
+                          Broker Name
+                        </th>
+                      </tr>
+                      <tr>
+                        <th colSpan={2} className="border border-gray-300 px-3 py-1 bg-green-200"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="hover:bg-gray-50">
+                        <td className="border border-gray-300 px-3 py-2 text-sm">{new Date(request.request_date).toLocaleDateString()}</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                      </tr>
+                      <tr className="hover:bg-gray-50">
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                      </tr>
+                      <tr className="hover:bg-gray-50">
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
+                      </tr>
+                      <tr className="bg-gray-100">
+                        <td colSpan={2} className="border border-gray-300 px-3 py-2 text-sm font-semibold text-green-900">
+                          Total Sales Values /Purchase Values
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-sm font-semibold">yy</td>
+                        <td colSpan={3} className="border border-gray-300 px-3 py-2 text-sm text-green-900 italic">
+                          [Total No. shares]
+                        </td>
+                        <td colSpan={4} className="border border-gray-300 px-3 py-2 text-sm text-green-900 italic">
+                          [Total Purchase value or sales Value]
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={10} className="px-3 py-4"></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Authorized by</td>
+                        <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">..........................</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Authorized date</td>
+                        <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">..........................</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Generate Date</td>
+                        <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">&lt;generated date&gt;</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
           {requests.length === 0 && (
             <div className="text-center py-12">
               <p className="text-gray-500">No transaction requests found</p>
