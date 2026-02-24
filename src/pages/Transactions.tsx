@@ -83,6 +83,13 @@ interface EntityBroker {
   custodian_account_number: string | null;
   broker_account_number: string | null;
   broker_name_id: string | null;
+  bank_id: string | null;
+  bank_account_number: string | null;
+  facility_limit: number | null;
+  bank?: {
+    name: string;
+    balance: number;
+  } | null;
 }
 
 export function Transactions() {
@@ -175,7 +182,7 @@ export function Transactions() {
         supabase.from('banks').select('id, name, account_number, balance').order('name'),
         supabase.from('brokers').select('id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
-        supabase.from('entity_brokers').select('*').eq('is_active', true)
+        supabase.from('entity_brokers').select('*, bank:banks(name, balance)').eq('is_active', true)
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -1174,6 +1181,34 @@ export function Transactions() {
                       )}
                     </div>
                   </div>
+
+                  {selectedEntityBroker && selectedEntityBroker.bank && (
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                      <h3 className="text-sm font-bold text-blue-900 mb-3">Bank Account Details</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-xs text-gray-600">Bank Name</p>
+                          <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank.name}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Account Number</p>
+                          <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank_account_number || 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Facility Limit</p>
+                          <p className="text-sm font-semibold text-gray-900">
+                            LKR {selectedEntityBroker.facility_limit ? Number(selectedEntityBroker.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-600">Available Balance</p>
+                          <p className="text-sm font-bold text-green-700">
+                            LKR {selectedEntityBroker.bank.balance ? Number(selectedEntityBroker.bank.balance).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {entityBalance > 0 && requiredAmount > 0 && formData.transaction_type === 'BUY' && (
                     <div className={`p-4 rounded-lg border-2 ${
