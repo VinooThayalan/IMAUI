@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
