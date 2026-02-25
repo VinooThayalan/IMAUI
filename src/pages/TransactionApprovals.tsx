@@ -204,25 +204,25 @@ export function TransactionApprovals() {
   }
 
   function handlePrintApproval(request: TransactionRequest) {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const shareInfo = getShareInfo(request.share_id);
     const entityName = getEntityName(request.entity_id);
     const totalShares = Number(request.no_of_shares).toLocaleString();
     const grossPrice = Number(request.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 });
     const totalAmount = Number(request.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 });
+    const currentDate = new Date().toLocaleDateString();
 
     const html = `
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="UTF-8">
           <title>Transaction Approval - ${request.id}</title>
           <style>
             body {
               font-family: Arial, sans-serif;
               padding: 40px;
               margin: 0 auto;
+              max-width: 1200px;
             }
             .header {
               margin-bottom: 30px;
@@ -270,17 +270,6 @@ export function TransactionApprovals() {
             .total-row .green-text {
               color: #006400;
               font-style: italic;
-            }
-            .auth-table {
-              width: 50%;
-              margin-top: 20px;
-            }
-            .auth-table td {
-              padding: 8px;
-            }
-            .auth-table td:first-child {
-              width: 150px;
-              font-weight: normal;
             }
             @media print {
               body { padding: 20px; }
@@ -380,20 +369,27 @@ export function TransactionApprovals() {
               </tr>
               <tr>
                 <td colspan="3" style="border-right: none; font-weight: normal;">Generate Date</td>
-                <td colspan="7" style="border-left: none;">&lt;generated date&gt;</td>
+                <td colspan="7" style="border-left: none;">${currentDate}</td>
               </tr>
             </tbody>
           </table>
 
           <script>
-            window.onload = function() {
+            setTimeout(function() {
               window.print();
-            };
+            }, 500);
           </script>
         </body>
       </html>
     `;
 
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow pop-ups to print the document');
+      return;
+    }
+
+    printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
   }
