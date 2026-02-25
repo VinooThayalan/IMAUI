@@ -111,6 +111,7 @@ export function Transactions() {
   const [searchTerm, setSearchTerm] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -694,6 +695,73 @@ export function Transactions() {
     };
   }
 
+  function toggleTransactionSelection(transactionId: string) {
+    setSelectedTransactionIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(transactionId)) {
+        newSet.delete(transactionId);
+      } else {
+        newSet.add(transactionId);
+      }
+      return newSet;
+    });
+  }
+
+  function toggleSelectAll() {
+    const draftTransactions = filteredTransactions.filter(t => t.approval_status === 'DRAFT');
+    if (selectedTransactionIds.size === draftTransactions.length && draftTransactions.length > 0) {
+      setSelectedTransactionIds(new Set());
+    } else {
+      setSelectedTransactionIds(new Set(draftTransactions.map(t => t.id)));
+    }
+  }
+
+  async function submitSelectedForApproval() {
+    if (selectedTransactionIds.size === 0) {
+      alert('Please select at least one transaction to submit for approval');
+      return;
+    }
+
+    const validityHours = prompt('Enter validity period in hours (e.g., 24, 48, 72):', '24');
+    if (!validityHours) return;
+
+    const hours = parseInt(validityHours);
+    if (isNaN(hours) || hours <= 0) {
+      alert('Please enter a valid number of hours');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      for (const transactionId of selectedTransactionIds) {
+        const submittedAt = new Date();
+        const expiresAt = new Date(submittedAt.getTime() + hours * 60 * 60 * 1000);
+
+        const { error } = await supabase
+          .from('transactions')
+          .update({
+            approval_status: 'PENDING_APPROVAL',
+            submitted_for_approval_at: submittedAt.toISOString(),
+            approval_validity_hours: hours,
+            approval_expires_at: expiresAt.toISOString()
+          })
+          .eq('id', transactionId);
+
+        if (error) throw error;
+      }
+
+      alert(`${selectedTransactionIds.size} transaction(s) submitted for approval successfully`);
+      setSelectedTransactionIds(new Set());
+      fetchTransactions();
+    } catch (error) {
+      console.error('Error submitting transactions:', error);
+      alert('Failed to submit transactions for approval');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function getTimeRemaining(transaction: Transaction): string {
     if (!transaction.approval_expires_at) return '';
 
@@ -762,6 +830,16 @@ export function Transactions() {
           <p className="text-gray-500 mt-1">Manage buy and sell transactions</p>
         </div>
         <div className="flex items-center space-x-3">
+          {selectedTransactionIds.size > 0 && (
+            <button
+              onClick={submitSelectedForApproval}
+              disabled={submitting}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+            >
+              <Clock className="w-5 h-5" />
+              <span className="font-medium">Submit for Approval ({selectedTransactionIds.size})</span>
+            </button>
+          )}
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -880,6 +958,17 @@ export function Transactions() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="px-4 py-3 text-left">
+                  <input
+                    type="checkbox"
+                    checked={
+                      filteredTransactions.filter(t => t.approval_status === 'DRAFT').length > 0 &&
+                      selectedTransactionIds.size === filteredTransactions.filter(t => t.approval_status === 'DRAFT').length
+                    }
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
@@ -893,6 +982,16 @@ export function Transactions() {
             <tbody className="divide-y divide-gray-200">
               {filteredTransactions.map((transaction) => (
                 <tr key={transaction.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-4 text-center">
+                    {transaction.approval_status === 'DRAFT' && (
+                      <input
+                        type="checkbox"
+                        checked={selectedTransactionIds.has(transaction.id)}
+                        onChange={() => toggleTransactionSelection(transaction.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
                       {new Date(transaction.transaction_date).toLocaleDateString()}
