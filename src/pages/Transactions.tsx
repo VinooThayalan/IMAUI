@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -576,6 +576,73 @@ export function Transactions() {
     printWindow.document.close();
   }
 
+  async function handleEmailTransaction(transaction: Transaction) {
+    const email = prompt('Enter email address to send transaction details:');
+    if (!email || !email.trim()) return;
+
+    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      alert('Please enter a valid email address');
+      return;
+    }
+
+    try {
+      const entityName = getEntityName(transaction.entity_id);
+      const shareInfo = getShareInfo(transaction.share_id);
+      const share = shares.find(s => s.id === transaction.share_id);
+      const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
+      const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
+      const brokerageFeeType = transaction.brokerage_fee_type_id
+        ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
+        : null;
+
+      const entityBroker = entityBrokers.find(eb =>
+        eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
+      );
+
+      const transactionData = {
+        entity: entityName,
+        transaction_type: transaction.transaction_type,
+        share: share?.name || 'N/A',
+        ticker: share?.ticker || 'N/A',
+        transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
+        cds_acc_type: entityBroker?.relationship_type || 'N/A',
+        cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
+        order_type: transaction.order_type,
+        no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
+        gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        broker_name: brokerName,
+        brokerage_fee_type: brokerageFeeType?.name || 'N/A',
+        brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
+        brokerage_fee: Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        bank_name: bank?.name || 'N/A',
+        bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
+      };
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: email.trim(),
+          transaction: transactionData
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send email');
+      }
+
+      alert(`Transaction details sent successfully to ${email}`);
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email. Please try again.');
+    }
+  }
+
   function getTimeRemaining(transaction: Transaction): string {
     if (!transaction.approval_expires_at) return '';
 
@@ -839,6 +906,13 @@ export function Transactions() {
                         title="Print Transaction"
                       >
                         <Printer className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => handleEmailTransaction(transaction)}
+                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Email Transaction"
+                      >
+                        <Mail className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => handleCancelTransaction(transaction)}
