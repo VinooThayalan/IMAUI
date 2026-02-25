@@ -96,6 +96,9 @@ export function Transactions() {
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailAddress, setEmailAddress] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
@@ -576,46 +579,55 @@ export function Transactions() {
     printWindow.document.close();
   }
 
-  async function handleEmailTransaction(transaction: Transaction) {
-    const email = prompt('Enter email address to send transaction details:');
-    if (!email || !email.trim()) return;
+  function handleEmailTransaction(transaction: Transaction) {
+    setSelectedTransaction(transaction);
+    setEmailAddress('');
+    setShowEmailModal(true);
+  }
 
-    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+  async function sendEmail() {
+    if (!selectedTransaction || !emailAddress.trim()) {
+      alert('Please enter an email address');
+      return;
+    }
+
+    if (!emailAddress.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
       alert('Please enter a valid email address');
       return;
     }
 
     try {
-      const entityName = getEntityName(transaction.entity_id);
-      const shareInfo = getShareInfo(transaction.share_id);
-      const share = shares.find(s => s.id === transaction.share_id);
-      const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
-      const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
-      const brokerageFeeType = transaction.brokerage_fee_type_id
-        ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
+      setSendingEmail(true);
+
+      const entityName = getEntityName(selectedTransaction.entity_id);
+      const share = shares.find(s => s.id === selectedTransaction.share_id);
+      const brokerName = selectedTransaction.broker_id ? getBrokerName(selectedTransaction.broker_id) : 'N/A';
+      const bank = selectedTransaction.bank_id ? banks.find(b => b.id === selectedTransaction.bank_id) : null;
+      const brokerageFeeType = selectedTransaction.brokerage_fee_type_id
+        ? brokerageFeeTypes.find(ft => ft.id === selectedTransaction.brokerage_fee_type_id)
         : null;
 
       const entityBroker = entityBrokers.find(eb =>
-        eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
+        eb.entity_id === selectedTransaction.entity_id && eb.broker_id === selectedTransaction.broker_id
       );
 
       const transactionData = {
         entity: entityName,
-        transaction_type: transaction.transaction_type,
+        transaction_type: selectedTransaction.transaction_type,
         share: share?.name || 'N/A',
         ticker: share?.ticker || 'N/A',
-        transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
+        transaction_date: new Date(selectedTransaction.transaction_date).toLocaleDateString(),
         cds_acc_type: entityBroker?.relationship_type || 'N/A',
-        cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
-        order_type: transaction.order_type,
-        no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
-        gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        cds_acc_no: selectedTransaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
+        order_type: selectedTransaction.order_type,
+        no_of_shares: Number(selectedTransaction.no_of_shares).toLocaleString(),
+        gross_price_per_share: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        net_price_per_share: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        total_amount: Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
         broker_name: brokerName,
         brokerage_fee_type: brokerageFeeType?.name || 'N/A',
-        brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
-        brokerage_fee: Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        brokerage_fee_rate: selectedTransaction.brokerage_fee_rate ? `${selectedTransaction.brokerage_fee_rate}%` : 'N/A',
+        brokerage_fee: Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
         bank_name: bank?.name || 'N/A',
         bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
       };
@@ -627,7 +639,7 @@ export function Transactions() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          to: email.trim(),
+          to: emailAddress.trim(),
           transaction: transactionData
         })
       });
@@ -636,11 +648,50 @@ export function Transactions() {
         throw new Error('Failed to send email');
       }
 
-      alert(`Transaction details sent successfully to ${email}`);
+      alert(`Transaction details sent successfully to ${emailAddress}`);
+      setShowEmailModal(false);
+      setEmailAddress('');
     } catch (error) {
       console.error('Error sending email:', error);
       alert('Failed to send email. Please try again.');
+    } finally {
+      setSendingEmail(false);
     }
+  }
+
+  function getTransactionEmailData(transaction: Transaction) {
+    const entityName = getEntityName(transaction.entity_id);
+    const share = shares.find(s => s.id === transaction.share_id);
+    const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
+    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
+    const brokerageFeeType = transaction.brokerage_fee_type_id
+      ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
+      : null;
+
+    const entityBroker = entityBrokers.find(eb =>
+      eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
+    );
+
+    return {
+      entity: entityName,
+      transaction_type: transaction.transaction_type,
+      share: share?.name || 'N/A',
+      ticker: share?.ticker || 'N/A',
+      transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
+      cds_acc_type: entityBroker?.relationship_type || 'N/A',
+      cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
+      order_type: transaction.order_type,
+      no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
+      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      broker_name: brokerName,
+      brokerage_fee_type: brokerageFeeType?.name || 'N/A',
+      brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
+      brokerage_fee: Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      bank_name: bank?.name || 'N/A',
+      bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
+    };
   }
 
   function getTimeRemaining(transaction: Transaction): string {
@@ -1452,6 +1503,159 @@ export function Transactions() {
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEmailModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
+              <h2 className="text-2xl font-bold text-gray-900">Email Transaction Details</h2>
+              <p className="text-sm text-gray-500 mt-1">Preview the email template and enter recipient email</p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Email Preview</h3>
+
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="text-center mb-6 pb-4 border-b border-gray-200">
+                    <h4 className="text-xl font-bold text-gray-900">Transaction Details</h4>
+                    <p className="text-sm text-gray-500 mt-1">{new Date().toLocaleString()}</p>
+                  </div>
+
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {(() => {
+                        const data = getTransactionEmailData(selectedTransaction);
+                        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+
+                        return (
+                          <>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Entity</td>
+                              <td className="py-3 text-gray-900">{data.entity}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Transaction Type</td>
+                              <td className="py-3">
+                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${typeColor}`}>
+                                  {data.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}
+                                </span>
+                              </td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Share</td>
+                              <td className="py-3 text-gray-900">{data.ticker} - {data.share}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Transaction Date</td>
+                              <td className="py-3 text-gray-900">{data.transaction_date}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 bg-green-50">
+                              <td className="py-3 pr-4 font-semibold text-green-800">CDS Acc Type</td>
+                              <td className="py-3 text-green-900 font-semibold">{data.cds_acc_type}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 bg-green-50">
+                              <td className="py-3 pr-4 font-semibold text-green-800">CDS Acc No.</td>
+                              <td className="py-3 text-green-900 font-semibold">{data.cds_acc_no}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Order Type</td>
+                              <td className="py-3 text-gray-900">{data.order_type}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">No. of Shares</td>
+                              <td className="py-3 text-gray-900">{data.no_of_shares}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 bg-green-50">
+                              <td className="py-3 pr-4 font-semibold text-green-800">Gross Price Per Share</td>
+                              <td className="py-3 text-green-900 font-semibold">LKR {data.gross_price_per_share}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Net Price Per Share</td>
+                              <td className="py-3 text-gray-900">LKR {data.net_price_per_share}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Total Amount</td>
+                              <td className="py-3 text-gray-900 font-bold">LKR {data.total_amount}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Broker Name</td>
+                              <td className="py-3 text-gray-900">{data.broker_name}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee Type</td>
+                              <td className="py-3 text-gray-900">{data.brokerage_fee_type}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee Rate</td>
+                              <td className="py-3 text-gray-900">{data.brokerage_fee_rate}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200">
+                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee</td>
+                              <td className="py-3 text-gray-900">LKR {data.brokerage_fee}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 bg-green-50">
+                              <td className="py-3 pr-4 font-semibold text-green-800">Bank Name</td>
+                              <td className="py-3 text-green-900 font-semibold">{data.bank_name}</td>
+                            </tr>
+                            <tr className="border-b border-gray-200 bg-green-50">
+                              <td className="py-3 pr-4 font-semibold text-green-800">Bank Acc No.</td>
+                              <td className="py-3 text-green-900 font-semibold">{data.bank_acc_no}</td>
+                            </tr>
+                          </>
+                        );
+                      })()}
+                    </tbody>
+                  </table>
+
+                  <div className="mt-6 pt-4 border-t border-gray-200 text-center text-xs text-gray-500">
+                    <p>This is an automated email containing transaction details.</p>
+                    <p>Please do not reply to this email.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Recipient Email Address <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={emailAddress}
+                    onChange={(e) => setEmailAddress(e.target.value)}
+                    placeholder="Enter email address (e.g., user@example.com)"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={sendingEmail}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowEmailModal(false);
+                  setEmailAddress('');
+                  setSelectedTransaction(null);
+                }}
+                disabled={sendingEmail}
+                className="px-6 py-2 text-gray-700 hover:bg-gray-200 rounded-lg font-medium transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendEmail}
+                disabled={sendingEmail || !emailAddress.trim()}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+              >
+                <Mail className="w-4 h-4" />
+                <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
               </button>
             </div>
           </div>
