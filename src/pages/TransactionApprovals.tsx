@@ -903,130 +903,52 @@ export function TransactionApprovals() {
                   </div>
                 </div>
               ) : !isEditing ? (
-                <div className="space-y-6">
-                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <span className="font-semibold text-gray-700">Entity:</span>
-                        <div className="text-gray-900">{getEntityName(selectedRequest.entity_id)}</div>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-700">Investment</span>
-                        <div className="text-gray-900">{selectedRequest.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</div>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-700">Name of the Investment</span>
-                        <div className="text-gray-900 text-xs">&lt;Transaction record ID&gt;</div>
-                      </div>
+                <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Entity:</span>
+                    <span className="text-sm font-bold text-gray-900">{getEntityName(selectedRequest.entity_id)}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Share:</span>
+                    <span className="text-sm font-bold text-gray-900">
+                      {getShareInfo(selectedRequest.share_id).ticker} - {getShareInfo(selectedRequest.share_id).name}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Type:</span>
+                    <span className={`text-sm font-bold px-2 py-1 rounded ${typeColors[selectedRequest.transaction_type as keyof typeof typeColors]}`}>
+                      {selectedRequest.transaction_type}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Quantity:</span>
+                    <span className="text-sm font-bold text-gray-900">{Number(selectedRequest.no_of_shares).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Price per Share:</span>
+                    <span className="text-sm font-bold text-gray-900">
+                      Rs. {Number(selectedRequest.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Total Amount:</span>
+                    <span className="text-sm font-bold text-gray-900">
+                      Rs. {Number(selectedRequest.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-500">Requested By:</span>
+                    <span className="text-sm font-bold text-gray-900">{selectedRequest.requested_by}</span>
+                  </div>
+                  {selectedRequest.notes && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-500">Notes:</span>
+                      <p className="text-sm text-gray-900 mt-1">{selectedRequest.notes}</p>
                     </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full border-collapse border border-gray-300">
-                      <thead>
-                        <tr>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Date of Transaction
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Share
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Buy/Sell
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Number of Shares
-                          </th>
-                          <th colSpan={2} className="border border-gray-300 px-3 py-2 bg-green-200 text-xs font-semibold text-green-900 text-center">
-                            Per Share Sales Price / Purchase Cost (Gross)
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-green-200 text-xs font-semibold text-green-900 text-left">
-                            Per Share Sales Price / Purchase Cost (Net)
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Purchase/ Sale Value
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            CDS Acc. No
-                          </th>
-                          <th rowSpan={2} className="border border-gray-300 px-3 py-2 bg-gray-100 text-xs font-semibold text-gray-700 text-left">
-                            Broker Name
-                          </th>
-                        </tr>
-                        <tr>
-                          <th colSpan={2} className="border border-gray-300 px-3 py-1 bg-green-200"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">{new Date(selectedRequest.request_date).toLocaleDateString()}</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                        </tr>
-                        <tr>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm bg-green-100 text-green-900 font-semibold">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">...</td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm">xx</td>
-                        </tr>
-                        <tr className="bg-gray-100">
-                          <td colSpan={2} className="border border-gray-300 px-3 py-2 text-sm font-semibold text-green-900">
-                            Total Sales Values /Purchase Values
-                          </td>
-                          <td className="border border-gray-300 px-3 py-2 text-sm font-semibold">yy</td>
-                          <td colSpan={3} className="border border-gray-300 px-3 py-2 text-sm text-green-900 italic">
-                            [Total No. shares]
-                          </td>
-                          <td colSpan={4} className="border border-gray-300 px-3 py-2 text-sm text-green-900 italic">
-                            [Total Purchase value or sales Value]
-                          </td>
-                        </tr>
-                        <tr>
-                          <td colSpan={10} className="px-3 py-4"></td>
-                        </tr>
-                        <tr>
-                          <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Authorized by</td>
-                          <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">..........................</td>
-                        </tr>
-                        <tr>
-                          <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Authorized date</td>
-                          <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">..........................</td>
-                        </tr>
-                        <tr>
-                          <td colSpan={3} className="border-r-0 border border-gray-300 px-3 py-2 text-sm">Generate Date</td>
-                          <td colSpan={7} className="border-l-0 border border-gray-300 px-3 py-2 text-sm">&lt;generated date&gt;</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  )}
 
                   {actionType === 'APPROVE' && (
-                    <div className="flex justify-end border-t border-gray-200 pt-4">
+                    <div className="pt-3 border-t border-gray-200">
                       <button
                         onClick={() => setIsEditing(true)}
                         className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
