@@ -412,164 +412,166 @@ export function Transactions() {
   }
 
   function handlePrintTransaction(transaction: Transaction) {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
+    const entityName = getEntityName(transaction.entity_id);
+    const shareInfo = getShareInfo(transaction.share_id);
+    const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
+    const cdsAccount = transaction.cds_account_id || '...';
+    const currentDate = new Date().toLocaleDateString();
 
     const html = `
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Transaction Approval Request - ${transaction.id}</title>
+          <meta charset="UTF-8">
+          <title>Transaction Approval - ${transaction.id}</title>
           <style>
             body {
               font-family: Arial, sans-serif;
               padding: 40px;
-              max-width: 800px;
               margin: 0 auto;
+              max-width: 1200px;
             }
             .header {
-              text-align: center;
-              border-bottom: 2px solid #333;
-              padding-bottom: 20px;
               margin-bottom: 30px;
             }
-            .header h1 {
-              margin: 0;
-              font-size: 24px;
+            .info-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
             }
-            .section {
-              margin-bottom: 30px;
+            .info-table td {
+              padding: 4px 8px;
+              vertical-align: top;
             }
-            .section h2 {
-              font-size: 18px;
-              border-bottom: 1px solid #ccc;
-              padding-bottom: 10px;
-              margin-bottom: 15px;
-            }
-            .field {
-              display: flex;
-              margin-bottom: 10px;
-            }
-            .field-label {
+            .info-table td:first-child {
               font-weight: bold;
               width: 200px;
             }
-            .field-value {
-              flex: 1;
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
             }
-            .signature-section {
-              margin-top: 60px;
-              display: flex;
-              justify-content: space-between;
+            th, td {
+              border: 1px solid #000;
+              padding: 8px;
+              text-align: left;
+              font-size: 13px;
             }
-            .signature-box {
-              width: 45%;
+            th {
+              background-color: #f5f5f5;
+              font-weight: bold;
             }
-            .signature-line {
-              border-top: 1px solid #333;
-              margin-top: 60px;
-              padding-top: 10px;
-              text-align: center;
+            .green-bg {
+              background-color: #90EE90 !important;
+              color: #006400;
+              font-weight: bold;
+            }
+            .total-row {
+              font-weight: bold;
+              background-color: #f5f5f5;
+            }
+            .total-row td:first-child {
+              color: #006400;
+            }
+            .total-row .green-text {
+              color: #006400;
+              font-style: italic;
             }
             @media print {
-              body {
-                padding: 20px;
-              }
+              body { padding: 20px; }
             }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>Transaction Approval Request</h1>
-            <p>Reference: ${transaction.id}</p>
+            <h2 style="margin: 0 0 20px 0;">Transaction Approval Details</h2>
           </div>
 
-          <div class="section">
-            <h2>Transaction Details</h2>
-            <div class="field">
-              <div class="field-label">Entity:</div>
-              <div class="field-value">${getEntityName(transaction.entity_id)}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Transaction Type:</div>
-              <div class="field-value">${transaction.transaction_type}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Order Type:</div>
-              <div class="field-value">${transaction.order_type}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Transaction Date:</div>
-              <div class="field-value">${new Date(transaction.transaction_date).toLocaleDateString()}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Share:</div>
-              <div class="field-value">${getShareInfo(transaction.share_id)}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Number of Shares:</div>
-              <div class="field-value">${Number(transaction.no_of_shares).toLocaleString()}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Price Per Share:</div>
-              <div class="field-value">LKR ${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-          </div>
+          <table class="info-table">
+            <tr>
+              <td>Entity:</td>
+              <td>${entityName}</td>
+            </tr>
+            <tr>
+              <td>Investment</td>
+              <td>${transaction.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</td>
+            </tr>
+            <tr>
+              <td>Name of the Investment</td>
+              <td>${shareInfo}</td>
+            </tr>
+          </table>
 
-          <div class="section">
-            <h2>Financial Summary</h2>
-            <div class="field">
-              <div class="field-label">Total Amount (Gross):</div>
-              <div class="field-value">LKR ${Number(transaction.total_amount_gross).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Brokerage Fee:</div>
-              <div class="field-value">LKR ${Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })} ${transaction.brokerage_fee_rate ? `(${transaction.brokerage_fee_rate}%)` : ''}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Net Price Per Share:</div>
-              <div class="field-value">LKR ${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-            </div>
-            <div class="field">
-              <div class="field-label"><strong>Total Amount (Net):</strong></div>
-              <div class="field-value"><strong>LKR ${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></div>
-            </div>
-          </div>
-
-          <div class="section">
-            <h2>Approval Information</h2>
-            <div class="field">
-              <div class="field-label">Submitted By:</div>
-              <div class="field-value">${transaction.submitted_by || 'N/A'}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Submitted On:</div>
-              <div class="field-value">${transaction.submitted_for_approval_at ? new Date(transaction.submitted_for_approval_at).toLocaleString() : 'N/A'}</div>
-            </div>
-            <div class="field">
-              <div class="field-label">Valid Until:</div>
-              <div class="field-value">${transaction.approval_expires_at ? new Date(transaction.approval_expires_at).toLocaleString() : 'N/A'}</div>
-            </div>
-          </div>
-
-          <div class="signature-section">
-            <div class="signature-box">
-              <div class="signature-line">Requested By</div>
-            </div>
-            <div class="signature-box">
-              <div class="signature-line">Approved By</div>
-            </div>
-          </div>
+          <table>
+            <thead>
+              <tr>
+                <th rowspan="2">Date of Transaction</th>
+                <th rowspan="2">Share</th>
+                <th rowspan="2">Buy/Sell</th>
+                <th rowspan="2">Number of Shares</th>
+                <th colspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Gross)</th>
+                <th rowspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Net)</th>
+                <th rowspan="2">Purchase/ Sale Value</th>
+                <th rowspan="2">CDS Acc. No</th>
+                <th rowspan="2">Broker Name</th>
+              </tr>
+              <tr>
+                <th class="green-bg" colspan="2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${new Date(transaction.transaction_date).toLocaleDateString()}</td>
+                <td>${shareInfo}</td>
+                <td>${transaction.transaction_type}</td>
+                <td>${Number(transaction.no_of_shares).toLocaleString()}</td>
+                <td class="green-bg" colspan="2">${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td class="green-bg">${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td>${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td>${cdsAccount}</td>
+                <td>${brokerName}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="2">Total Sales Values /Purchase Values</td>
+                <td>${transaction.transaction_type}</td>
+                <td colspan="3" class="green-text">${Number(transaction.no_of_shares).toLocaleString()} shares</td>
+                <td colspan="4" class="green-text">LKR ${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+              </tr>
+              <tr>
+                <td colspan="10" style="border: none; padding: 20px 8px;"></td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized by</td>
+                <td colspan="7" style="border-left: none;">..........................</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized date</td>
+                <td colspan="7" style="border-left: none;">..........................</td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Generate Date</td>
+                <td colspan="7" style="border-left: none;">${currentDate}</td>
+              </tr>
+            </tbody>
+          </table>
 
           <script>
-            window.onload = function() {
+            setTimeout(function() {
               window.print();
-            };
+            }, 500);
           </script>
         </body>
       </html>
     `;
 
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow pop-ups to print the document');
+      return;
+    }
+
+    printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
   }
