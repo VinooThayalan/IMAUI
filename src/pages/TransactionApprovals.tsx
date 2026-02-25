@@ -31,6 +31,13 @@ interface Transaction {
   approval_notes: string | null;
   rejection_reason: string | null;
   created_at: string;
+  currency: string | null;
+  settlement_date: string | null;
+}
+
+interface User {
+  id: string;
+  email: string;
 }
 
 interface Entity {
@@ -50,10 +57,11 @@ interface Broker {
 }
 
 const statusConfig = {
-  PENDING: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
+  PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
   APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
-  CANCELLED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Cancelled' }
+  CANCELLED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Cancelled' },
+  ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' }
 };
 
 export function TransactionApprovals() {
@@ -103,7 +111,7 @@ export function TransactionApprovals() {
         supabase
           .from('transactions')
           .select('*')
-          .in('approval_status', ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'])
+          .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED', 'ON_HOLD'])
           .order('submitted_for_approval_at', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
@@ -132,7 +140,7 @@ export function TransactionApprovals() {
       const { data } = await supabase
         .from('transactions')
         .select('id, approval_expires_at')
-        .eq('approval_status', 'PENDING')
+        .eq('approval_status', 'PENDING_APPROVAL')
         .not('approval_expires_at', 'is', null);
 
       if (!data) return;
@@ -170,7 +178,7 @@ export function TransactionApprovals() {
   }
 
   function getTimeRemaining(transaction: Transaction): string {
-    if (!transaction.approval_expires_at || transaction.approval_status !== 'PENDING') return '';
+    if (!transaction.approval_expires_at || (transaction.approval_status !== 'PENDING_APPROVAL' && transaction.approval_status !== 'ON_HOLD')) return '';
 
     const expiresAt = new Date(transaction.approval_expires_at);
     const diffMs = expiresAt.getTime() - currentTime.getTime();
@@ -188,6 +196,10 @@ export function TransactionApprovals() {
     } else {
       return `${seconds}s`;
     }
+  }
+
+  function checkAutoApproval(transaction: Transaction): boolean {
+    return transaction.submitted_by === user?.email;
   }
 
   function openModal(transaction: Transaction, type: 'VIEW' | 'APPROVE' | 'REJECT' | 'HOLD') {
@@ -390,7 +402,7 @@ export function TransactionApprovals() {
                       LKR {Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {transaction.approval_status === 'PENDING' ? (
+                      {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') ? (
                         <span className={`inline-flex items-center space-x-1 ${
                           timeRemaining === 'EXPIRED' ? 'text-red-600 font-semibold' : 'text-gray-700'
                         }`}>
@@ -416,7 +428,7 @@ export function TransactionApprovals() {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        {transaction.approval_status === 'PENDING' && (
+                        {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') && (
                           <>
                             <button
                               onClick={() => openModal(transaction, 'APPROVE')}
@@ -470,6 +482,15 @@ export function TransactionApprovals() {
             </div>
 
             <div className="p-6 space-y-6">
+              {checkAutoApproval(selectedTransaction) && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center space-x-2">
+                  <CheckCircle className="w-5 h-5 text-blue-600" />
+                  <p className="text-sm text-blue-800 font-medium">
+                    Auto approval - Entity owner initiated this request
+                  </p>
+                </div>
+              )}
+
               {!isEditing ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -520,8 +541,49 @@ export function TransactionApprovals() {
                       <div className="mt-1 text-sm font-semibold text-gray-900">{getBrokerName(selectedTransaction.broker_id)}</div>
                     </div>
                     <div>
+                      <label className="block text-sm font-medium text-gray-500">Order Type</label>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.order_type || 'N/A'}</div>
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium text-gray-500">CDS Account</label>
                       <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.cds_account_id || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Brokerage Fee</label>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                        LKR {Number(selectedTransaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Net Price Per Share</label>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                        LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Settlement Date</label>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                        {selectedTransaction.settlement_date ? new Date(selectedTransaction.settlement_date).toLocaleDateString() : 'N/A'}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Currency</label>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.currency || 'LKR'}</div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Time to Approve</label>
+                      <div className="mt-1">
+                        {(selectedTransaction.approval_status === 'PENDING_APPROVAL' || selectedTransaction.approval_status === 'ON_HOLD') ? (
+                          <span className={`inline-flex items-center space-x-1 text-sm font-semibold ${
+                            getTimeRemaining(selectedTransaction) === 'EXPIRED' ? 'text-red-600' : 'text-gray-900'
+                          }`}>
+                            <Clock className="w-4 h-4" />
+                            <span>{getTimeRemaining(selectedTransaction) || 'No limit'}</span>
+                          </span>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-500">Status</label>
@@ -534,6 +596,24 @@ export function TransactionApprovals() {
                       </div>
                     </div>
                   </div>
+
+                  {selectedTransaction.approval_notes && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Previous Notes</label>
+                      <div className="mt-1 text-sm text-gray-700 bg-gray-50 rounded p-2">
+                        {selectedTransaction.approval_notes}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTransaction.rejection_reason && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-500">Rejection Reason</label>
+                      <div className="mt-1 text-sm text-red-700 bg-red-50 rounded p-2">
+                        {selectedTransaction.rejection_reason}
+                      </div>
+                    </div>
+                  )}
 
                   {actionType === 'APPROVE' && (
                     <div className="pt-4 border-t border-gray-200">
@@ -642,18 +722,25 @@ export function TransactionApprovals() {
               {actionType !== 'VIEW' && !isEditing && (
                 <div className="space-y-4 pt-4 border-t border-gray-200">
                   {actionType === 'REJECT' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Rejection Reason <span className="text-red-500">*</span>
-                      </label>
-                      <textarea
-                        value={actionFormData.rejection_reason}
-                        onChange={(e) => setActionFormData({ ...actionFormData, rejection_reason: e.target.value })}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Provide reason for rejection..."
-                      />
-                    </div>
+                    <>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <p className="text-sm text-amber-800">
+                          Upon rejection, any on-hold cash will be released back to the entity's available balance.
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Rejection Reason <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          value={actionFormData.rejection_reason}
+                          onChange={(e) => setActionFormData({ ...actionFormData, rejection_reason: e.target.value })}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Provide reason for rejection..."
+                        />
+                      </div>
+                    </>
                   )}
 
                   {actionType === 'HOLD' && (
