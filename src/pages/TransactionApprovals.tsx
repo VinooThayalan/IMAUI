@@ -96,11 +96,16 @@ export function TransactionApprovals() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => {
+    const timeInterval = setInterval(() => {
       setCurrentTime(new Date());
-      checkExpiredTransactions();
     }, 1000);
-    return () => clearInterval(interval);
+    const expiryInterval = setInterval(() => {
+      checkExpiredTransactions();
+    }, 10000);
+    return () => {
+      clearInterval(timeInterval);
+      clearInterval(expiryInterval);
+    };
   }, []);
 
   async function loadData() {
@@ -148,6 +153,8 @@ export function TransactionApprovals() {
       const now = new Date();
       const expired = data.filter(t => new Date(t.approval_expires_at!) <= now);
 
+      if (expired.length === 0) return;
+
       for (const t of expired) {
         await supabase
           .from('transactions')
@@ -155,9 +162,13 @@ export function TransactionApprovals() {
           .eq('id', t.id);
       }
 
-      if (expired.length > 0) {
-        loadData();
-      }
+      setTransactions(prevTransactions =>
+        prevTransactions.map(trans =>
+          expired.some(exp => exp.id === trans.id)
+            ? { ...trans, approval_status: 'CANCELLED' }
+            : trans
+        )
+      );
     } catch (error) {
       console.error('Error checking expired transactions:', error);
     }
