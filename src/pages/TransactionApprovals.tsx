@@ -112,7 +112,7 @@ export function TransactionApprovals() {
           .from('transactions')
           .select('*')
           .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED', 'ON_HOLD'])
-          .order('submitted_for_approval_at', { ascending: false }),
+          .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
         supabase.from('brokers').select('id, broker_name').order('broker_name')
