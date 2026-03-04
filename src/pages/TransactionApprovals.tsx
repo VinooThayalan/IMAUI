@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, Clock, Edit2, Pause, Eye } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, CreditCard as Edit2, Pause, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
