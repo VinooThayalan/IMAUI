@@ -60,7 +60,7 @@ const statusConfig = {
   PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
   APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
-  CANCELLED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Cancelled' },
+  EXPIRED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Expired' },
   ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' }
 };
 
@@ -116,7 +116,7 @@ export function TransactionApprovals() {
         supabase
           .from('transactions')
           .select('*')
-          .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CANCELLED', 'ON_HOLD'])
+          .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD'])
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
@@ -158,14 +158,14 @@ export function TransactionApprovals() {
       for (const t of expired) {
         await supabase
           .from('transactions')
-          .update({ approval_status: 'CANCELLED' })
+          .update({ approval_status: 'EXPIRED' })
           .eq('id', t.id);
       }
 
       setTransactions(prevTransactions =>
         prevTransactions.map(trans =>
           expired.some(exp => exp.id === trans.id)
-            ? { ...trans, approval_status: 'CANCELLED' }
+            ? { ...trans, approval_status: 'EXPIRED' }
             : trans
         )
       );

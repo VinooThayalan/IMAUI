@@ -753,7 +753,7 @@ export function Transactions() {
 
       alert(`${selectedTransactionIds.size} transaction(s) submitted for approval successfully`);
       setSelectedTransactionIds(new Set());
-      fetchTransactions();
+      loadData();
     } catch (error) {
       console.error('Error submitting transactions:', error);
       alert('Failed to submit transactions for approval');
