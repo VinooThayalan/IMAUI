@@ -598,13 +598,13 @@ export function Entities() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax Name</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">TIN Number</label>
                     <input
                       type="text"
                       value={entityFormData.tax_name}
                       onChange={(e) => setEntityFormData({...entityFormData, tax_name: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter tax name"
+                      placeholder="Enter TIN number"
                     />
                   </div>
                   <div>
@@ -996,7 +996,7 @@ export function Entities() {
                   <p className="text-gray-900">{selectedEntity.entity_types?.name || 'Not Set'}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-500 mb-1">Tax Name</label>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">TIN Number</label>
                   <p className="text-gray-900">{selectedEntity.tax_name || 'N/A'}</p>
                 </div>
                 <div>
@@ -1125,13 +1125,13 @@ export function Entities() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Tax Name</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">TIN Number</label>
                     <input
                       type="text"
                       value={entityFormData.tax_name}
                       onChange={(e) => setEntityFormData({...entityFormData, tax_name: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter tax name"
+                      placeholder="Enter TIN number"
                     />
                   </div>
                   <div>
