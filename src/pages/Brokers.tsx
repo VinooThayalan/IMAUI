@@ -51,7 +51,7 @@ export function Brokers() {
   });
   const [entityFormData, setEntityFormData] = useState({
     entity_id: '',
-    relationship_type: 'Primary Broker',
+    relationship_type: 'Broker',
     assigned_date: new Date().toISOString().split('T')[0],
     notes: ''
   });
@@ -232,7 +232,7 @@ export function Brokers() {
     setBrokerEntities([]);
     setEntityFormData({
       entity_id: '',
-      relationship_type: 'Primary Broker',
+      relationship_type: 'Broker',
       assigned_date: new Date().toISOString().split('T')[0],
       notes: ''
     });
@@ -257,7 +257,7 @@ export function Brokers() {
       await fetchBrokerEntities(selectedBrokerId);
       setEntityFormData({
         entity_id: '',
-        relationship_type: 'Primary Broker',
+        relationship_type: 'Broker',
         assigned_date: new Date().toISOString().split('T')[0],
         notes: ''
       });
@@ -597,10 +597,8 @@ export function Brokers() {
                       onChange={(e) => setEntityFormData({...entityFormData, relationship_type: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="Primary Broker">Primary Broker</option>
-                      <option value="Secondary Broker">Secondary Broker</option>
+                      <option value="Broker">Broker</option>
                       <option value="Custodian">Custodian</option>
-                      <option value="Other">Other</option>
                     </select>
                   </div>
                   <div>
