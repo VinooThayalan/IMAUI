@@ -402,18 +402,34 @@ export function CashBalance() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Number</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Facility Limit</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Code</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Opening Balance</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Running Balance</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Current]</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Available]</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Created By</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredTransactions.map((transaction) => {
+              {filteredTransactions.map((transaction, index) => {
                 const entity = entities.find(e => e.entity_id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id);
+
+                const sortedTransactions = [...filteredTransactions].sort((a, b) =>
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                const currentIndex = sortedTransactions.findIndex(t => t.id === transaction.id);
+                const openingBalance = currentIndex > 0
+                  ? sortedTransactions[currentIndex - 1].running_balance
+                  : 0;
+
+                const onHoldAmount = transaction.on_hold_amount || 0;
+                const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount;
+
                 return (
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -446,11 +462,18 @@ export function CashBalance() {
                             <Landmark className="w-3 h-3" />
                             <span>{bank.name}</span>
                           </div>
-                          <div className="text-xs text-gray-500">{bank.account_number}</div>
                         </button>
                       ) : (
                         <div className="text-sm text-gray-400">-</div>
                       )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{bank?.account_number || '-'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {entity ? `Rs. ${entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -467,6 +490,11 @@ export function CashBalance() {
                       <div className="text-sm text-gray-900">{transaction.description}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-semibold text-gray-900">
+                        Rs. {openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className={`text-sm font-semibold ${transaction.type === 'Addition' ? 'text-green-600' : 'text-red-600'}`}>
                         {transaction.type === 'Addition' ? '+' : '-'}Rs. {transaction.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
@@ -474,6 +502,11 @@ export function CashBalance() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
                         Rs. {transaction.running_balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className={`text-sm font-bold ${availableBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        Rs. {availableBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
