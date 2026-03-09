@@ -6,6 +6,11 @@ interface Broker {
   id: string;
   broker_id: string;
   broker_name: string;
+  contact_person_name: string | null;
+  contact_person_email: string | null;
+  contact_person_phone: string | null;
+  contact_person_mobile: string | null;
+  contact_person_designation: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -37,6 +42,11 @@ export function Brokers() {
   const [brokerEntities, setBrokerEntities] = useState<BrokerEntity[]>([]);
   const [formData, setFormData] = useState({
     broker_name: '',
+    contact_person_name: '',
+    contact_person_email: '',
+    contact_person_phone: '',
+    contact_person_mobile: '',
+    contact_person_designation: '',
     is_active: true
   });
   const [entityFormData, setEntityFormData] = useState({
@@ -111,12 +121,22 @@ export function Brokers() {
       setEditingBroker(broker);
       setFormData({
         broker_name: broker.broker_name,
+        contact_person_name: broker.contact_person_name || '',
+        contact_person_email: broker.contact_person_email || '',
+        contact_person_phone: broker.contact_person_phone || '',
+        contact_person_mobile: broker.contact_person_mobile || '',
+        contact_person_designation: broker.contact_person_designation || '',
         is_active: broker.is_active
       });
     } else {
       setEditingBroker(null);
       setFormData({
         broker_name: '',
+        contact_person_name: '',
+        contact_person_email: '',
+        contact_person_phone: '',
+        contact_person_mobile: '',
+        contact_person_designation: '',
         is_active: true
       });
     }
@@ -128,6 +148,11 @@ export function Brokers() {
     setEditingBroker(null);
     setFormData({
       broker_name: '',
+      contact_person_name: '',
+      contact_person_email: '',
+      contact_person_phone: '',
+      contact_person_mobile: '',
+      contact_person_designation: '',
       is_active: true
     });
   }
@@ -141,6 +166,11 @@ export function Brokers() {
           .from('brokers')
           .update({
             broker_name: formData.broker_name,
+            contact_person_name: formData.contact_person_name || null,
+            contact_person_email: formData.contact_person_email || null,
+            contact_person_phone: formData.contact_person_phone || null,
+            contact_person_mobile: formData.contact_person_mobile || null,
+            contact_person_designation: formData.contact_person_designation || null,
             is_active: formData.is_active,
             updated_at: new Date().toISOString()
           })
@@ -150,7 +180,15 @@ export function Brokers() {
       } else {
         const { error } = await supabase
           .from('brokers')
-          .insert([formData]);
+          .insert([{
+            broker_name: formData.broker_name,
+            contact_person_name: formData.contact_person_name || null,
+            contact_person_email: formData.contact_person_email || null,
+            contact_person_phone: formData.contact_person_phone || null,
+            contact_person_mobile: formData.contact_person_mobile || null,
+            contact_person_designation: formData.contact_person_designation || null,
+            is_active: formData.is_active
+          }]);
 
         if (error) throw error;
       }
@@ -299,6 +337,7 @@ export function Brokers() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Broker ID</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Broker Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact Person</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -306,7 +345,7 @@ export function Brokers() {
               <tbody className="divide-y divide-gray-200">
                 {filteredBrokers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
                       No brokers found
                     </td>
                   </tr>
@@ -318,6 +357,26 @@ export function Brokers() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm font-bold text-gray-900">{broker.broker_name}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {broker.contact_person_name ? (
+                          <div className="text-sm">
+                            <div className="font-semibold text-gray-900">{broker.contact_person_name}</div>
+                            {broker.contact_person_designation && (
+                              <div className="text-xs text-gray-500">{broker.contact_person_designation}</div>
+                            )}
+                            {broker.contact_person_email && (
+                              <div className="text-xs text-blue-600">{broker.contact_person_email}</div>
+                            )}
+                            {(broker.contact_person_phone || broker.contact_person_mobile) && (
+                              <div className="text-xs text-gray-500">
+                                {broker.contact_person_phone || broker.contact_person_mobile}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-gray-400">No contact person</div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -361,8 +420,8 @@ export function Brokers() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-2xl font-bold text-gray-900">
                 {editingBroker ? 'Edit Broker' : 'Add New Broker'}
@@ -394,7 +453,71 @@ export function Brokers() {
                   placeholder="Enter broker name"
                 />
               </div>
-              <div className="flex items-center">
+
+              <div className="border-t border-gray-200 pt-4 mt-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Person Details</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Contact Person Name</label>
+                    <input
+                      type="text"
+                      value={formData.contact_person_name}
+                      onChange={(e) => setFormData({ ...formData, contact_person_name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter contact person name"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Designation</label>
+                    <input
+                      type="text"
+                      value={formData.contact_person_designation}
+                      onChange={(e) => setFormData({ ...formData, contact_person_designation: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Senior Manager, Account Manager"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
+                      <input
+                        type="email"
+                        value={formData.contact_person_email}
+                        onChange={(e) => setFormData({ ...formData, contact_person_email: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="email@example.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Phone</label>
+                      <input
+                        type="tel"
+                        value={formData.contact_person_phone}
+                        onChange={(e) => setFormData({ ...formData, contact_person_phone: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="+94 11 234 5678"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Mobile</label>
+                    <input
+                      type="tel"
+                      value={formData.contact_person_mobile}
+                      onChange={(e) => setFormData({ ...formData, contact_person_mobile: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="+94 77 123 4567"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center pt-4 border-t border-gray-200">
                 <input
                   type="checkbox"
                   id="is_active"
