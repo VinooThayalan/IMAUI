@@ -566,6 +566,7 @@ export function Entities() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-2xl font-bold text-gray-900">Add New Entity</h2>
+              <p className="text-sm text-gray-500 mt-1">Entity ID will be generated automatically</p>
             </div>
             <form onSubmit={handleCreateEntity}>
               <div className="p-6 space-y-6">
