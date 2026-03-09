@@ -1,4 +1,4 @@
-import { Plus, Search, Edit, Trash2, UserPlus, Users } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
