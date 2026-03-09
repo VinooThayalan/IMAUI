@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, DollarSign, Edit, Eye, MoreVertical } from 'lucide-react';
+import { Plus, Search, Filter, DollarSign, CreditCard as Edit, Eye, MoreVertical } from 'lucide-react';
 import { useState } from 'react';
 
 const banks = [
