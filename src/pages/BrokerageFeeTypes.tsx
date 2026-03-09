@@ -1,4 +1,4 @@
-import { Plus, Edit, Trash2, Percent } from 'lucide-react';
+import { Plus, CreditCard as Edit, Trash2, Percent } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
