@@ -211,8 +211,8 @@ export function BrokerageFeeTypes() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Min Price</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Max Price</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Min Transaction Cost</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Max Transaction Cost</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rate</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
@@ -301,7 +301,7 @@ export function BrokerageFeeTypes() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Min Price (LKR)</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Minimum Transaction Cost (LKR)</label>
                     <input
                       type="number"
                       step="0.01"
@@ -312,7 +312,7 @@ export function BrokerageFeeTypes() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Max Price (LKR)</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Maximum Transaction Cost (LKR)</label>
                     <input
                       type="number"
                       step="0.01"

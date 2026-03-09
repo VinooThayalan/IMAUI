@@ -243,7 +243,15 @@ export function Transactions() {
     const shares = parseFloat(formData.no_of_shares) || 0;
     const price = parseFloat(formData.price_per_share) || 0;
     const grossAmount = shares * price;
-    const fees = (grossAmount * rate) / 100;
+
+    let effectiveRate;
+    if (grossAmount < 100000000) {
+      effectiveRate = 1.12;
+    } else {
+      effectiveRate = 1.12 + rate;
+    }
+
+    const fees = (grossAmount * effectiveRate) / 100;
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
