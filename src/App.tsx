@@ -17,6 +17,7 @@ import { Settings } from './pages/Settings';
 import { DailyPrices } from './pages/DailyPrices';
 import { CashBalance } from './pages/CashBalance';
 import { ShareAnalytics } from './pages/ShareAnalytics';
+import { PortfolioSummary } from './pages/PortfolioSummary';
 import { BrokerageFeeTypes } from './pages/BrokerageFeeTypes';
 import { RightsIssues } from './pages/RightsIssues';
 import { Amalgamations } from './pages/Amalgamations';
@@ -86,6 +87,8 @@ function App() {
         return <CashBalance />;
       case 'share-analytics':
         return <ShareAnalytics />;
+      case 'portfolio-summary':
+        return <PortfolioSummary />;
       case 'brokerage-fee-types':
         return <BrokerageFeeTypes />;
       case 'entity-types':

@@ -91,6 +91,7 @@ const navSections: NavSection[] = [
     title: 'System',
     items: [
       { icon: FileText, label: 'Reports', href: '#reports', menuName: 'reports' },
+      { icon: PieChart, label: 'Portfolio Summary', href: '#portfolio-summary', menuName: 'portfolio-summary' },
       { icon: Settings, label: 'Settings', href: '#settings', menuName: 'settings' },
       { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management' },
     ]
