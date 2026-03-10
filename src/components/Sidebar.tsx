@@ -1,35 +1,4 @@
-import {
-  LayoutDashboard,
-  Building2,
-  TrendingUp,
-  Landmark,
-  ArrowLeftRight,
-  DollarSign,
-  FileText,
-  Settings,
-  PieChart,
-  Calendar,
-  Wallet,
-  BarChart3,
-  CheckSquare,
-  FileEdit,
-  FileUp,
-  ClipboardCheck,
-  Percent,
-  GitBranch,
-  GitMerge,
-  ShoppingCart,
-  SplitSquareVertical,
-  Rocket,
-  Users,
-  ChevronDown,
-  ChevronRight,
-  Wrench,
-  Tag,
-  Briefcase,
-  Factory,
-  Layers
-} from 'lucide-react';
+import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers } from 'lucide-react';
 import { useState } from 'react';
 
 interface NavItem {
