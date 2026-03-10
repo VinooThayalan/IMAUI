@@ -115,7 +115,7 @@ export function CashBalance() {
     }
 
     try {
-      const entity = entities.find(e => e.entity_id === formData.entityId);
+      const entity = entities.find(e => e.id === formData.entityId);
       if (!entity) return;
 
       const entityTransactions = transactions
@@ -153,7 +153,7 @@ export function CashBalance() {
       await supabase
         .from('entities')
         .update({ current_balance: newBalance })
-        .eq('entity_id', formData.entityId);
+        .eq('id', formData.entityId);
 
       await loadData();
 
@@ -181,7 +181,7 @@ export function CashBalance() {
     let filtered = transactions;
 
     if (selectedEntity) {
-      filtered = filtered.filter(t => t.entity_id === selectedEntity.entity_id);
+      filtered = filtered.filter(t => t.entity_id === selectedEntity.id);
     }
 
     if (selectedBank) {
@@ -416,7 +416,7 @@ export function CashBalance() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredTransactions.map((transaction, index) => {
-                const entity = entities.find(e => e.entity_id === transaction.entity_id);
+                const entity = entities.find(e => e.id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id);
 
                 const sortedTransactions = [...filteredTransactions].sort((a, b) =>
@@ -448,7 +448,7 @@ export function CashBalance() {
                         onClick={() => entity && handleEntityClick(entity)}
                         className="text-left hover:underline"
                       >
-                        <div className="text-sm font-bold text-blue-600">{transaction.entity_id || '-'}</div>
+                        <div className="text-sm font-bold text-blue-600">{entity?.entity_id || '-'}</div>
                         <div className="text-xs text-gray-500">{entity?.name || 'N/A'}</div>
                       </button>
                     </td>
@@ -546,7 +546,7 @@ export function CashBalance() {
                   >
                     <option value="">Select entity</option>
                     {entities.map((entity) => (
-                      <option key={entity.id} value={entity.entity_id}>
+                      <option key={entity.id} value={entity.id}>
                         {entity.entity_id} - {entity.name}
                       </option>
                     ))}
@@ -565,8 +565,7 @@ export function CashBalance() {
                     {banks
                       .filter((bank) => {
                         if (!formData.entityId) return false;
-                        const selectedEntity = entities.find(e => e.entity_id === formData.entityId);
-                        return selectedEntity && bank.entity_id === selectedEntity.id;
+                        return bank.entity_id === formData.entityId;
                       })
                       .map((bank) => (
                         <option key={bank.id} value={bank.id}>
@@ -592,7 +591,7 @@ export function CashBalance() {
                 })()}
 
                 {formData.entityId && (() => {
-                  const selectedEntity = entities.find(e => e.entity_id === formData.entityId);
+                  const selectedEntity = entities.find(e => e.id === formData.entityId);
                   return selectedEntity ? (
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit (OD Limit)</label>
@@ -607,7 +606,7 @@ export function CashBalance() {
                 })()}
 
                 {formData.entityId && (() => {
-                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  const entity = entities.find(e => e.id === formData.entityId);
                   if (!entity) return null;
 
                   const entityTransactions = transactions
