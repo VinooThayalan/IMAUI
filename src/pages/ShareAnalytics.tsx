@@ -17,7 +17,14 @@ interface ShareDetail {
   name: string;
   total_shares: number;
   avg_cost: number;
+  avg_cost_buy: number;
+  avg_cost_sell: number;
   total_cost: number;
+  sales_cost: number;
+  purchase_value: number;
+  sale_value: number;
+  cost_per_share: number;
+  avg_price: number;
   current_price: number;
   current_value: number;
   gain_loss: number;
@@ -212,6 +219,14 @@ export function ShareAnalytics() {
         name: string;
         total_shares: number;
         total_cost: number;
+        buy_shares: number;
+        buy_cost: number;
+        buy_count: number;
+        sell_shares: number;
+        sell_cost: number;
+        sell_count: number;
+        total_buy_value: number;
+        total_sell_value: number;
         first_purchase: string;
         last_transaction: string;
       }>();
@@ -226,6 +241,14 @@ export function ShareAnalytics() {
             name: tx.shares.name,
             total_shares: 0,
             total_cost: 0,
+            buy_shares: 0,
+            buy_cost: 0,
+            buy_count: 0,
+            sell_shares: 0,
+            sell_cost: 0,
+            sell_count: 0,
+            total_buy_value: 0,
+            total_sell_value: 0,
             first_purchase: tx.transaction_date,
             last_transaction: tx.transaction_date
           });
@@ -233,14 +256,25 @@ export function ShareAnalytics() {
 
         const share = shareMap.get(shareId)!;
         const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        const shares = Number(tx.no_of_shares);
+        const amount = Number(tx.total_amount);
 
         if (isBuy) {
-          share.total_shares += Number(tx.no_of_shares);
-          share.total_cost += Number(tx.total_amount);
+          share.total_shares += shares;
+          share.total_cost += amount;
+          share.buy_shares += shares;
+          share.buy_cost += amount;
+          share.buy_count += 1;
+          share.total_buy_value += amount;
         } else {
-          share.total_shares -= Number(tx.no_of_shares);
-          const avgCost = share.total_shares > 0 ? share.total_cost / (share.total_shares + Number(tx.no_of_shares)) : 0;
-          share.total_cost -= avgCost * Number(tx.no_of_shares);
+          share.total_shares -= shares;
+          const avgCost = share.total_shares > 0 ? share.total_cost / (share.total_shares + shares) : 0;
+          const costReduction = avgCost * shares;
+          share.total_cost -= costReduction;
+          share.sell_shares += shares;
+          share.sell_cost += costReduction;
+          share.sell_count += 1;
+          share.total_sell_value += amount;
         }
 
         if (tx.transaction_date < share.first_purchase) {
@@ -254,10 +288,16 @@ export function ShareAnalytics() {
       const sharesList: ShareDetail[] = Array.from(shareMap.entries())
         .map(([shareId, data]) => {
           const avgCost = data.total_shares > 0 ? data.total_cost / data.total_shares : 0;
+          const avgCostBuy = data.buy_shares > 0 ? data.buy_cost / data.buy_shares : 0;
+          const avgCostSell = data.sell_shares > 0 ? data.sell_cost / data.sell_shares : 0;
           const currentPrice = latestPrices.get(shareId) || avgCost;
           const currentValue = data.total_shares * currentPrice;
           const gainLoss = currentValue - data.total_cost;
           const gainLossPercent = data.total_cost > 0 ? (gainLoss / data.total_cost) * 100 : 0;
+          const costPerShare = avgCost;
+          const avgPrice = (data.buy_shares + data.sell_shares) > 0
+            ? (data.buy_cost + data.sell_cost) / (data.buy_shares + data.sell_shares)
+            : 0;
 
           return {
             share_id: shareId,
@@ -265,7 +305,14 @@ export function ShareAnalytics() {
             name: data.name,
             total_shares: data.total_shares,
             avg_cost: avgCost,
+            avg_cost_buy: avgCostBuy,
+            avg_cost_sell: avgCostSell,
             total_cost: data.total_cost,
+            sales_cost: data.sell_cost,
+            purchase_value: data.total_buy_value,
+            sale_value: data.total_sell_value,
+            cost_per_share: costPerShare,
+            avg_price: avgPrice,
             current_price: currentPrice,
             current_value: currentValue,
             gain_loss: gainLoss,
@@ -595,8 +642,14 @@ export function ShareAnalytics() {
                 <tr>
                   <SortableHeader field="ticker">Ticker</SortableHeader>
                   <SortableHeader field="name">Company Name</SortableHeader>
-                  <SortableHeader field="total_shares">Shares</SortableHeader>
-                  <SortableHeader field="avg_cost">Avg Cost</SortableHeader>
+                  <SortableHeader field="total_shares">No. of shares</SortableHeader>
+                  <SortableHeader field="sales_cost">Sales Cost</SortableHeader>
+                  <SortableHeader field="avg_cost_buy">Av Cost (Buy)</SortableHeader>
+                  <SortableHeader field="avg_cost_sell">Av Cost (Sell)</SortableHeader>
+                  <SortableHeader field="avg_price">Av price</SortableHeader>
+                  <SortableHeader field="cost_per_share">Cost per share</SortableHeader>
+                  <SortableHeader field="sale_value">Sale Value</SortableHeader>
+                  <SortableHeader field="purchase_value">Purchase Value</SortableHeader>
                   <SortableHeader field="total_cost">Total Cost</SortableHeader>
                   <SortableHeader field="current_price">Current Price</SortableHeader>
                   <SortableHeader field="current_value">Current Value</SortableHeader>
@@ -614,7 +667,25 @@ export function ShareAnalytics() {
                     <td className="px-6 py-4 text-sm text-gray-900">{share.name}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{share.total_shares.toLocaleString()}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">
-                      Rs. {share.avg_cost.toFixed(2)}
+                      Rs. {share.sales_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.avg_cost_buy.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.avg_cost_sell.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.avg_price.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.cost_per_share.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.sale_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      Rs. {share.purchase_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
                       Rs. {share.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -687,7 +758,7 @@ export function ShareAnalytics() {
                 <tr>
                   <SortableHeader field="transaction_date">Date</SortableHeader>
                   <SortableHeader field="transaction_type">Type</SortableHeader>
-                  <SortableHeader field="no_of_shares">Shares</SortableHeader>
+                  <SortableHeader field="no_of_shares">No. of shares</SortableHeader>
                   <SortableHeader field="price_per_share">Price/Share</SortableHeader>
                   <SortableHeader field="total_amount">Total Amount</SortableHeader>
                   <SortableHeader field="fees">Fees</SortableHeader>
