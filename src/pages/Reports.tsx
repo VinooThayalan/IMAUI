@@ -648,7 +648,7 @@ export function Reports() {
         entries_in: entriesIn,
         entries_out: entriesOut,
         total_in: totalIn,
-        total_out: totalIn,
+        total_out: totalOut,
         opening_balance: openingBalance,
         closing_balance: closingBalance
       });

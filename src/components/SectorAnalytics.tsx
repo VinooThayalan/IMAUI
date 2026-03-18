@@ -45,7 +45,7 @@ export function SectorAnalytics() {
       setLoading(true);
 
       const [transactionsRes, pricesRes, sharesRes, dividendsRes] = await Promise.all([
-        supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount, price_per_share'),
+        supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('shares').select('id, sector'),
         supabase.from('dividends').select('share_id, amount_net')
@@ -67,28 +67,45 @@ export function SectorAnalytics() {
         shareToSector.set(s.id, s.sector || 'Other');
       });
 
-      const sectorMap = new Map<string, { holdings: number; cost: number; dividends: number }>();
+      const holdingsMap = new Map<string, { holdings: number; cost: number }>();
 
-      transactionsRes.data?.forEach((tx: any) => {
-        const sector = shareToSector.get(tx.share_id) || 'Other';
-        if (!sectorMap.has(sector)) {
-          sectorMap.set(sector, { holdings: 0, cost: 0, dividends: 0 });
+      transactionsRes.data?.forEach((tx: { share_id: string; transaction_type: string; no_of_shares: number; total_amount: number }) => {
+        if (!holdingsMap.has(tx.share_id)) {
+          holdingsMap.set(tx.share_id, { holdings: 0, cost: 0 });
         }
 
-        const data = sectorMap.get(sector)!;
+        const data = holdingsMap.get(tx.share_id)!;
         const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
 
         if (isBuy) {
           data.holdings += Number(tx.no_of_shares);
           data.cost += Number(tx.total_amount);
         } else {
-          data.holdings -= Number(tx.no_of_shares);
-          const avgCost = data.holdings > 0 ? data.cost / (data.holdings + Number(tx.no_of_shares)) : 0;
-          data.cost -= avgCost * Number(tx.no_of_shares);
+          const soldShares = Number(tx.no_of_shares);
+          const avgCost = data.holdings > 0 ? data.cost / data.holdings : 0;
+          data.holdings -= soldShares;
+          data.cost -= avgCost * soldShares;
+          if (data.holdings < 0) data.holdings = 0;
+          if (data.cost < 0) data.cost = 0;
         }
       });
 
-      dividendsRes.data?.forEach((div: any) => {
+      const sectorMap = new Map<string, { cost: number; marketValue: number; dividends: number }>();
+
+      holdingsMap.forEach((data, shareId) => {
+        if (data.holdings > 0) {
+          const sector = shareToSector.get(shareId) || 'Other';
+          if (!sectorMap.has(sector)) {
+            sectorMap.set(sector, { cost: 0, marketValue: 0, dividends: 0 });
+          }
+          const sEntry = sectorMap.get(sector)!;
+          const currentPrice = latestPrices.get(shareId) || 0;
+          sEntry.cost += data.cost;
+          sEntry.marketValue += data.holdings * currentPrice;
+        }
+      });
+
+      dividendsRes.data?.forEach((div: { share_id: string; amount_net: number }) => {
         const sector = shareToSector.get(div.share_id) || 'Other';
         if (sectorMap.has(sector)) {
           sectorMap.get(sector)!.dividends += Number(div.amount_net);
@@ -97,58 +114,17 @@ export function SectorAnalytics() {
 
       const result: SectorData[] = [];
       sectorMap.forEach((data, sector) => {
-        if (data.holdings > 0) {
-          const currentPrice = latestPrices.get(sector) || 0;
-          const marketValue = data.cost;
-          const totalReturns = marketValue - data.cost + data.dividends;
-
+        if (data.marketValue > 0 || data.cost > 0) {
           result.push({
             sector,
-            totalReturns,
+            totalReturns: data.marketValue - data.cost + data.dividends,
             totalDividends: data.dividends,
-            marketValue
+            marketValue: data.marketValue
           });
         }
       });
 
-      const aggregatedData = new Map<string, SectorData>();
-
-      transactionsRes.data?.forEach((tx: any) => {
-        const sector = shareToSector.get(tx.share_id) || 'Other';
-
-        if (!aggregatedData.has(sector)) {
-          aggregatedData.set(sector, {
-            sector,
-            totalReturns: 0,
-            totalDividends: 0,
-            marketValue: 0
-          });
-        }
-
-        const sectorData = aggregatedData.get(sector)!;
-        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
-        const amount = Number(tx.total_amount);
-        const shares = Number(tx.no_of_shares);
-        const price = Number(tx.price_per_share);
-
-        if (isBuy) {
-          sectorData.marketValue += amount;
-        }
-      });
-
-      dividendsRes.data?.forEach((div: any) => {
-        const sector = shareToSector.get(div.share_id) || 'Other';
-        if (aggregatedData.has(sector)) {
-          aggregatedData.get(sector)!.totalDividends += Number(div.amount_net);
-        }
-      });
-
-      Array.from(aggregatedData.values()).forEach(data => {
-        const currentValue = data.marketValue * 1.15;
-        data.totalReturns = currentValue - data.marketValue + data.totalDividends;
-      });
-
-      setSectorData(Array.from(aggregatedData.values()).filter(d => d.marketValue > 0));
+      setSectorData(result);
     } catch (error) {
       console.error('Error fetching sector data:', error);
     } finally {

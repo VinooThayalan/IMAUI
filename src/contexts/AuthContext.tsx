@@ -72,6 +72,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error('Error loading app user:', error);
+    } finally {
+      setLoading(false);
     }
   }
 
