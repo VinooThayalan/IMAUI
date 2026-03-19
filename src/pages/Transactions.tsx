@@ -61,12 +61,18 @@ interface Broker {
   broker_name: string;
 }
 
+interface FeeBreakdownItem {
+  name: string;
+  rate: number;
+}
+
 interface BrokerageFeeType {
   id: string;
   name: string;
   rate: number;
   min_price: number | null;
   max_price: number | null;
+  fee_breakdown_items: FeeBreakdownItem[];
 }
 
 interface ShareBalance {
@@ -115,6 +121,7 @@ export function Transactions() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
+  const [feeBreakdownItems, setFeeBreakdownItems] = useState<FeeBreakdownItem[]>([]);
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -155,12 +162,16 @@ export function Transactions() {
         });
 
         if (matchingFeeType) {
+          const breakdown = Array.isArray(matchingFeeType.fee_breakdown_items)
+            ? matchingFeeType.fee_breakdown_items.map(i => ({ ...i }))
+            : [];
+          setFeeBreakdownItems(breakdown);
           setFormData(prev => ({
             ...prev,
             brokerage_fee_type_id: matchingFeeType.id,
             brokerage_fee_rate: matchingFeeType.rate.toString()
           }));
-          calculateFees(matchingFeeType.rate);
+          calculateFeesFromBreakdown(breakdown);
         }
       } else if (formData.brokerage_fee_rate) {
         calculateFees(parseFloat(formData.brokerage_fee_rate));
@@ -242,19 +253,20 @@ export function Transactions() {
     }
   }
 
+  function calculateFeesFromBreakdown(items: FeeBreakdownItem[]) {
+    const shares = parseFloat(formData.no_of_shares) || 0;
+    const price = parseFloat(formData.price_per_share) || 0;
+    const grossAmount = shares * price;
+    const totalRate = items.reduce((sum, item) => sum + (item.rate || 0), 0);
+    const fees = (grossAmount * totalRate) / 100;
+    setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
+  }
+
   function calculateFees(rate: number) {
     const shares = parseFloat(formData.no_of_shares) || 0;
     const price = parseFloat(formData.price_per_share) || 0;
     const grossAmount = shares * price;
-
-    let effectiveRate;
-    if (grossAmount < 100000000) {
-      effectiveRate = 1.12;
-    } else {
-      effectiveRate = 1.12 + rate;
-    }
-
-    const fees = (grossAmount * effectiveRate) / 100;
+    const fees = (grossAmount * rate) / 100;
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
@@ -346,6 +358,7 @@ export function Transactions() {
       fees: '',
       use_negotiated_fee: false
     });
+    setFeeBreakdownItems([]);
   }
 
   async function handleCreateTransaction(e: React.FormEvent) {
@@ -1473,7 +1486,7 @@ export function Transactions() {
                     )}
 
                     <div className="col-span-2">
-                      <div className="flex items-center space-x-4 mb-2">
+                      <div className="flex items-center justify-between mb-2">
                         <label className="block text-sm font-semibold text-gray-700">
                           Brokerage Fee Type
                         </label>
@@ -1487,50 +1500,131 @@ export function Transactions() {
                           <span className="text-sm font-medium text-gray-700">Use Negotiated Fee</span>
                         </label>
                       </div>
-                      <select
-                        value={formData.brokerage_fee_type_id}
-                        onChange={(e) => {
-                          const feeType = brokerageFeeTypes.find(ft => ft.id === e.target.value);
-                          if (feeType) {
-                            setFormData({ ...formData, brokerage_fee_type_id: e.target.value, brokerage_fee_rate: feeType.rate.toString() });
-                            calculateFees(feeType.rate);
-                          }
-                        }}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        disabled={formData.use_negotiated_fee}
-                      >
-                        <option value="">Auto-select based on amount</option>
-                        {brokerageFeeTypes.map(type => (
-                          <option key={type.id} value={type.id}>
-                            {type.name} ({type.rate}%)
-                          </option>
-                        ))}
-                      </select>
+                      {!formData.use_negotiated_fee ? (
+                        formData.brokerage_fee_type_id ? (
+                          <div className="flex items-center space-x-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                            <span className="text-sm font-semibold text-blue-800">
+                              {brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id)?.name ?? 'Auto-detected'}
+                            </span>
+                            <span className="text-xs text-blue-500 bg-blue-100 px-2 py-0.5 rounded-full">Auto-detected</span>
+                          </div>
+                        ) : (
+                          <div className="px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-400 italic">
+                            Enter shares and price to auto-detect fee type
+                          </div>
+                        )
+                      ) : (
+                        <select
+                          value={formData.brokerage_fee_type_id}
+                          onChange={(e) => {
+                            const feeType = brokerageFeeTypes.find(ft => ft.id === e.target.value);
+                            if (feeType) {
+                              const breakdown = Array.isArray(feeType.fee_breakdown_items)
+                                ? feeType.fee_breakdown_items.map(i => ({ ...i }))
+                                : [];
+                              setFeeBreakdownItems(breakdown);
+                              setFormData({ ...formData, brokerage_fee_type_id: e.target.value, brokerage_fee_rate: feeType.rate.toString() });
+                              calculateFeesFromBreakdown(breakdown);
+                            }
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">Select fee type</option>
+                          {brokerageFeeTypes.map(type => (
+                            <option key={type.id} value={type.id}>
+                              {type.name} ({type.rate}%)
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Brokerage Fee Rate (%)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={formData.brokerage_fee_rate}
-                        onChange={(e) => {
-                          setFormData({ ...formData, brokerage_fee_rate: e.target.value });
-                          const rate = parseFloat(e.target.value) || 0;
-                          calculateFees(rate);
-                        }}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g., 0.30"
-                        disabled={!formData.use_negotiated_fee}
-                      />
-                    </div>
+                    {feeBreakdownItems.length > 0 && (
+                      <div className="col-span-2">
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Fee Breakdown
+                          <span className="ml-2 text-xs font-normal text-gray-500">
+                            (rates are editable for this transaction only)
+                          </span>
+                        </label>
+                        <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th className="px-4 py-2 text-left font-semibold text-gray-600">Fee Component</th>
+                                <th className="px-4 py-2 text-right font-semibold text-gray-600 w-32">Rate (%)</th>
+                                <th className="px-4 py-2 text-right font-semibold text-gray-600 w-40">Amount (LKR)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {feeBreakdownItems.map((item, idx) => {
+                                const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
+                                const itemAmount = (grossAmount * item.rate) / 100;
+                                return (
+                                  <tr key={idx} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2 text-gray-700">{item.name}</td>
+                                    <td className="px-4 py-2">
+                                      <input
+                                        type="number"
+                                        step="0.0001"
+                                        min="0"
+                                        value={item.rate}
+                                        onChange={(e) => {
+                                          const updated = feeBreakdownItems.map((it, i) =>
+                                            i === idx ? { ...it, rate: parseFloat(e.target.value) || 0 } : it
+                                          );
+                                          setFeeBreakdownItems(updated);
+                                          calculateFeesFromBreakdown(updated);
+                                        }}
+                                        className="w-full px-2 py-1 border border-gray-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                                      />
+                                    </td>
+                                    <td className="px-4 py-2 text-right text-gray-700 font-medium">
+                                      {itemAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                              <tr>
+                                <td className="px-4 py-2.5 font-bold text-gray-900">Total</td>
+                                <td className="px-4 py-2.5 text-right font-bold text-blue-700">
+                                  {feeBreakdownItems.reduce((s, i) => s + i.rate, 0).toFixed(4)}%
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-bold text-blue-700">
+                                  {(parseFloat(formData.fees) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
 
-                    <div>
+                    {formData.use_negotiated_fee && (
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Brokerage Fee Rate (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          value={formData.brokerage_fee_rate}
+                          onChange={(e) => {
+                            setFormData({ ...formData, brokerage_fee_rate: e.target.value });
+                            calculateFees(parseFloat(e.target.value) || 0);
+                          }}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="e.g., 1.12"
+                        />
+                      </div>
+                    )}
+
+                    <div className={formData.use_negotiated_fee ? '' : 'col-span-2'}>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
-                        Brokerage Fee (LKR)
+                        Total Brokerage Fee (LKR)
                       </label>
                       <input
                         type="number"
