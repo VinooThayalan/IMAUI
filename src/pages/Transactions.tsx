@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -97,6 +97,9 @@ export function Transactions() {
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -420,6 +423,87 @@ export function Transactions() {
       alert('Failed to cancel transaction');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function handleOpenUploadModal(transaction: Transaction) {
+    setSelectedTransaction(transaction);
+    setUploadFile(null);
+    setShowUploadModal(true);
+  }
+
+  async function handleUploadDocument() {
+    if (!selectedTransaction || !uploadFile) {
+      alert('Please select a file to upload');
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      const fileExt = uploadFile.name.split('.').pop();
+      const filePath = `${selectedTransaction.id}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('transaction-documents')
+        .upload(filePath, uploadFile, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('transaction-documents')
+        .getPublicUrl(filePath);
+
+      const { data: signedData } = await supabase.storage
+        .from('transaction-documents')
+        .createSignedUrl(filePath, 60 * 60 * 24 * 365);
+
+      const documentUrl = signedData?.signedUrl || publicUrl;
+
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({
+          approval_document_url: documentUrl,
+          approval_document_name: uploadFile.name,
+          approval_document_uploaded_at: new Date().toISOString()
+        })
+        .eq('id', selectedTransaction.id);
+
+      if (updateError) throw updateError;
+
+      alert('Document uploaded successfully');
+      setShowUploadModal(false);
+      setUploadFile(null);
+      setSelectedTransaction(null);
+      loadData();
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      alert('Failed to upload document. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemoveDocument(transaction: Transaction) {
+    if (!confirm('Are you sure you want to remove this document?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          approval_document_url: null,
+          approval_document_name: null,
+          approval_document_uploaded_at: null,
+          approval_document_uploaded_by: null
+        })
+        .eq('id', transaction.id);
+
+      if (error) throw error;
+
+      loadData();
+    } catch (error) {
+      console.error('Error removing document:', error);
+      alert('Failed to remove document');
     }
   }
 
@@ -1073,6 +1157,21 @@ export function Transactions() {
                         <Mail className="w-5 h-5" />
                       </button>
                       <button
+                        onClick={() => handleOpenUploadModal(transaction)}
+                        className={`p-2 rounded-lg transition-colors ${
+                          transaction.approval_document_name
+                            ? 'text-blue-700 bg-blue-50 hover:bg-blue-100'
+                            : 'text-gray-500 hover:bg-gray-50'
+                        }`}
+                        title={transaction.approval_document_name ? 'Document Uploaded' : 'Upload Document'}
+                      >
+                        {transaction.approval_document_name ? (
+                          <FileText className="w-5 h-5" />
+                        ) : (
+                          <Upload className="w-5 h-5" />
+                        )}
+                      </button>
+                      <button
                         onClick={() => handleCancelTransaction(transaction)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Cancel Transaction"
@@ -1610,6 +1709,113 @@ export function Transactions() {
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUploadModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Upload Approval Document</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {getEntityName(selectedTransaction.entity_id)} — {getShareInfo(selectedTransaction.share_id)}
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowUploadModal(false); setUploadFile(null); setSelectedTransaction(null); }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {selectedTransaction.approval_document_name && (
+                <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <FileText className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-blue-900">{selectedTransaction.approval_document_name}</p>
+                      {selectedTransaction.approval_document_uploaded_at && (
+                        <p className="text-xs text-blue-600 mt-0.5">
+                          Uploaded {new Date(selectedTransaction.approval_document_uploaded_at).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <a
+                      href={selectedTransaction.approval_document_url || '#'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-medium text-blue-600 hover:text-blue-800 underline"
+                    >
+                      View
+                    </a>
+                    <button
+                      onClick={() => {
+                        setShowUploadModal(false);
+                        setSelectedTransaction(null);
+                        handleRemoveDocument(selectedTransaction);
+                      }}
+                      className="text-xs font-medium text-red-600 hover:text-red-800"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  {selectedTransaction.approval_document_name ? 'Replace Document' : 'Select Document'}
+                </label>
+                <label className={`flex flex-col items-center justify-center w-full h-36 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                  uploadFile ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-gray-400'
+                }`}>
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                    className="hidden"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    disabled={uploading}
+                  />
+                  {uploadFile ? (
+                    <div className="flex flex-col items-center space-y-2 px-4 text-center">
+                      <FileText className="w-8 h-8 text-blue-600" />
+                      <p className="text-sm font-semibold text-blue-800">{uploadFile.name}</p>
+                      <p className="text-xs text-blue-600">{(uploadFile.size / 1024).toFixed(1)} KB — click to change</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center space-y-2">
+                      <Upload className="w-8 h-8 text-gray-400" />
+                      <p className="text-sm text-gray-600">Click to browse or drag and drop</p>
+                      <p className="text-xs text-gray-400">PDF, PNG, JPG, DOC, DOCX</p>
+                    </div>
+                  )}
+                </label>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+              <button
+                onClick={() => { setShowUploadModal(false); setUploadFile(null); setSelectedTransaction(null); }}
+                disabled={uploading}
+                className="px-5 py-2 text-gray-700 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUploadDocument}
+                disabled={uploading || !uploadFile}
+                className="px-5 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{uploading ? 'Uploading...' : 'Upload'}</span>
               </button>
             </div>
           </div>
