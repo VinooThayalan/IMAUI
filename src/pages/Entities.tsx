@@ -609,13 +609,13 @@ export function Entities() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Company Reg ID</label>
                     <input
                       type="text"
                       value={entityFormData.nic_company_id}
                       onChange={(e) => setEntityFormData({...entityFormData, nic_company_id: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter NIC or Company ID"
+                      placeholder="Enter Company Reg ID"
                     />
                   </div>
                   <div className="col-span-2">
@@ -1001,7 +1001,7 @@ export function Entities() {
                   <p className="text-gray-900">{selectedEntity.tax_name || 'N/A'}</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-500 mb-1">NIC / Company ID</label>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">Company Reg ID</label>
                   <p className="text-gray-900">{selectedEntity.nic_company_id || 'N/A'}</p>
                 </div>
                 <div>
@@ -1136,13 +1136,13 @@ export function Entities() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">NIC / Company ID</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Company Reg ID</label>
                     <input
                       type="text"
                       value={entityFormData.nic_company_id}
                       onChange={(e) => setEntityFormData({...entityFormData, nic_company_id: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter NIC or Company ID"
+                      placeholder="Enter Company Reg ID"
                     />
                   </div>
                   <div className="col-span-2">
