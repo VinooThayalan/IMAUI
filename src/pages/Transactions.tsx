@@ -1560,8 +1560,10 @@ export function Transactions() {
                               {feeBreakdownItems.map((item, idx) => {
                                 const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
                                 const itemAmount = (grossAmount * item.rate) / 100;
+                                const isBrokerageFee = item.name.toLowerCase().includes('brokerage fee');
+                                const isLocked = formData.use_negotiated_fee && !isBrokerageFee;
                                 return (
-                                  <tr key={idx} className="hover:bg-gray-50">
+                                  <tr key={idx} className={isLocked ? 'bg-gray-50' : 'hover:bg-gray-50'}>
                                     <td className="px-4 py-2 text-gray-700">{item.name}</td>
                                     <td className="px-4 py-2">
                                       <input
@@ -1569,6 +1571,7 @@ export function Transactions() {
                                         step="0.0001"
                                         min="0"
                                         value={item.rate}
+                                        disabled={isLocked}
                                         onChange={(e) => {
                                           const updated = feeBreakdownItems.map((it, i) =>
                                             i === idx ? { ...it, rate: parseFloat(e.target.value) || 0 } : it
@@ -1576,10 +1579,14 @@ export function Transactions() {
                                           setFeeBreakdownItems(updated);
                                           calculateFeesFromBreakdown(updated);
                                         }}
-                                        className="w-full px-2 py-1 border border-gray-200 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                                        className={`w-full px-2 py-1 border rounded text-right text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                          isLocked
+                                            ? 'border-transparent bg-transparent text-gray-500 cursor-not-allowed'
+                                            : 'border-gray-200'
+                                        }`}
                                       />
                                     </td>
-                                    <td className="px-4 py-2 text-right text-gray-700 font-medium">
+                                    <td className={`px-4 py-2 text-right font-medium ${isLocked ? 'text-gray-400' : 'text-gray-700'}`}>
                                       {itemAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </td>
                                   </tr>
@@ -1602,7 +1609,7 @@ export function Transactions() {
                       </div>
                     )}
 
-                    {formData.use_negotiated_fee && (
+                    {formData.use_negotiated_fee && feeBreakdownItems.length === 0 && (
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                           Brokerage Fee Rate (%)
@@ -1622,7 +1629,7 @@ export function Transactions() {
                       </div>
                     )}
 
-                    <div className={formData.use_negotiated_fee ? '' : 'col-span-2'}>
+                    <div className={(formData.use_negotiated_fee && feeBreakdownItems.length === 0) ? '' : 'col-span-2'}>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
                         Total Brokerage Fee (LKR)
                       </label>
