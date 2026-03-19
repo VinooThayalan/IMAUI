@@ -572,12 +572,6 @@ export function TransactionApprovals() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-500">Settlement Date</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        {selectedTransaction.settlement_date ? new Date(selectedTransaction.settlement_date).toLocaleDateString() : 'N/A'}
-                      </div>
-                    </div>
-                    <div>
                       <label className="block text-sm font-medium text-gray-500">Currency</label>
                       <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.currency || 'LKR'}</div>
                     </div>
