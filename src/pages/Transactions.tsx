@@ -1162,28 +1162,32 @@ export function Transactions() {
                       >
                         <Printer className="w-5 h-5" />
                       </button>
-                      <button
-                        onClick={() => handleEmailTransaction(transaction)}
-                        className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                        title="Email Transaction"
-                      >
-                        <Mail className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleOpenUploadModal(transaction)}
-                        className={`p-2 rounded-lg transition-colors ${
-                          transaction.approval_document_name
-                            ? 'text-blue-700 bg-blue-50 hover:bg-blue-100'
-                            : 'text-gray-500 hover:bg-gray-50'
-                        }`}
-                        title={transaction.approval_document_name ? 'Document Uploaded' : 'Upload Document'}
-                      >
-                        {transaction.approval_document_name ? (
-                          <FileText className="w-5 h-5" />
-                        ) : (
-                          <Upload className="w-5 h-5" />
-                        )}
-                      </button>
+                      {transaction.approval_status === 'APPROVED' && (
+                        <button
+                          onClick={() => handleEmailTransaction(transaction)}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Email Transaction"
+                        >
+                          <Mail className="w-5 h-5" />
+                        </button>
+                      )}
+                      {transaction.approval_status === 'PENDING_APPROVAL' && (
+                        <button
+                          onClick={() => handleOpenUploadModal(transaction)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            transaction.approval_document_name
+                              ? 'text-blue-700 bg-blue-50 hover:bg-blue-100'
+                              : 'text-gray-500 hover:bg-gray-50'
+                          }`}
+                          title={transaction.approval_document_name ? 'Document Uploaded' : 'Upload Document'}
+                        >
+                          {transaction.approval_document_name ? (
+                            <FileText className="w-5 h-5" />
+                          ) : (
+                            <Upload className="w-5 h-5" />
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleCancelTransaction(transaction)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
