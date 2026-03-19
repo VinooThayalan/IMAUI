@@ -1,11 +1,11 @@
-import { CheckCircle, XCircle, Pause, Search, FileText, Eye } from 'lucide-react';
+import { CheckCircle, XCircle, Search, FileText, Eye } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface BuyAndSellApproval {
   id: string;
   buy_sell_note_id: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'On Hold';
+  status: 'Pending' | 'Approved' | 'Rejected';
   submitted_by: string;
   submitted_date: string;
   reviewed_by?: string;
@@ -58,10 +58,10 @@ export function BuyAndSellApprovals() {
   const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'Pending' | 'Approved' | 'Rejected' | 'On Hold'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'Pending' | 'Approved' | 'Rejected'>('all');
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [selectedApproval, setSelectedApproval] = useState<BuyAndSellApproval | null>(null);
-  const [reviewAction, setReviewAction] = useState<'Approved' | 'Rejected' | 'On Hold'>('Approved');
+  const [reviewAction, setReviewAction] = useState<'Approved' | 'Rejected'>('Approved');
   const [reviewRemarks, setReviewRemarks] = useState('');
 
   useEffect(() => {
@@ -123,7 +123,7 @@ export function BuyAndSellApprovals() {
     }
   }
 
-  function handleOpenReviewModal(approval: BuyAndSellApproval, action: 'Approved' | 'Rejected' | 'On Hold') {
+  function handleOpenReviewModal(approval: BuyAndSellApproval, action: 'Approved' | 'Rejected') {
     setSelectedApproval(approval);
     setReviewAction(action);
     setReviewRemarks('');
@@ -167,7 +167,6 @@ export function BuyAndSellApprovals() {
       case 'Pending': return 'bg-yellow-100 text-yellow-800';
       case 'Approved': return 'bg-green-100 text-green-800';
       case 'Rejected': return 'bg-red-100 text-red-800';
-      case 'On Hold': return 'bg-gray-100 text-gray-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -227,7 +226,6 @@ export function BuyAndSellApprovals() {
             <option value="Pending">Pending</option>
             <option value="Approved">Approved</option>
             <option value="Rejected">Rejected</option>
-            <option value="On Hold">On Hold</option>
           </select>
         </div>
       </div>
@@ -326,13 +324,6 @@ export function BuyAndSellApprovals() {
                             <CheckCircle className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleOpenReviewModal(approval, 'On Hold')}
-                            className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
-                            title="Put On Hold"
-                          >
-                            <Pause className="w-4 h-4" />
-                          </button>
-                          <button
                             onClick={() => handleOpenReviewModal(approval, 'Rejected')}
                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             title="Reject"
@@ -409,9 +400,7 @@ export function BuyAndSellApprovals() {
                   className={`px-4 py-2 text-white rounded-lg transition-colors ${
                     reviewAction === 'Approved'
                       ? 'bg-green-600 hover:bg-green-700'
-                      : reviewAction === 'Rejected'
-                      ? 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
-                      : 'bg-gray-600 hover:bg-gray-700'
+                      : 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
                   }`}
                 >
                   Confirm {reviewAction}
