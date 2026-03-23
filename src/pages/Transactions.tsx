@@ -62,6 +62,7 @@ interface Bank {
 interface Broker {
   id: string;
   broker_name: string;
+  contact_person_email: string | null;
 }
 
 interface FeeBreakdownItem {
@@ -110,6 +111,8 @@ export function Transactions() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
+  const [ccAddresses, setCcAddresses] = useState<string[]>([]);
+  const [ccInput, setCcInput] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -192,7 +195,7 @@ export function Transactions() {
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
-        supabase.from('brokers').select('id, broker_name').eq('is_active', true).order('broker_name'),
+        supabase.from('brokers').select('id, broker_name, contact_person_email').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
         supabase.from('entity_brokers').select('*, bank:banks(name, balance)').eq('is_active', true)
       ]);
@@ -716,7 +719,10 @@ export function Transactions() {
 
   function handleEmailTransaction(transaction: Transaction) {
     setSelectedTransaction(transaction);
-    setEmailAddress('');
+    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    setEmailAddress(broker?.contact_person_email || '');
+    setCcAddresses([]);
+    setCcInput('');
     setShowEmailModal(true);
   }
 
@@ -775,6 +781,7 @@ export function Transactions() {
         },
         body: JSON.stringify({
           to: emailAddress.trim(),
+          cc: ccAddresses.filter(e => e.trim()),
           transaction: transactionData
         })
       });
@@ -783,9 +790,11 @@ export function Transactions() {
         throw new Error('Failed to send email');
       }
 
-      alert(`Transaction details sent successfully to ${emailAddress}`);
+      alert(`Transaction details sent successfully to ${emailAddress}${ccAddresses.length ? ` (CC: ${ccAddresses.join(', ')})` : ''}`);
       setShowEmailModal(false);
       setEmailAddress('');
+      setCcAddresses([]);
+      setCcInput('');
     } catch (error) {
       console.error('Error sending email:', error);
       alert('Failed to send email. Please try again.');
@@ -2166,16 +2175,77 @@ export function Transactions() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Recipient Email Address <span className="text-red-500">*</span>
+                    To (Broker Email) <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="email"
                     value={emailAddress}
                     onChange={(e) => setEmailAddress(e.target.value)}
-                    placeholder="Enter email address (e.g., user@example.com)"
+                    placeholder="Enter recipient email address"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={sendingEmail}
                   />
+                  {(() => {
+                    const broker = selectedTransaction?.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
+                    return broker?.contact_person_email ? (
+                      <p className="mt-1 text-xs text-gray-500">Auto-populated from broker: <span className="font-medium text-gray-700">{broker.broker_name}</span></p>
+                    ) : null;
+                  })()}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">CC</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={ccInput}
+                      onChange={(e) => setCcInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          const val = ccInput.trim();
+                          if (val && val.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) && !ccAddresses.includes(val)) {
+                            setCcAddresses([...ccAddresses, val]);
+                            setCcInput('');
+                          }
+                        }
+                      }}
+                      placeholder="Add CC email and press Enter"
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={sendingEmail}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const val = ccInput.trim();
+                        if (val && val.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) && !ccAddresses.includes(val)) {
+                          setCcAddresses([...ccAddresses, val]);
+                          setCcInput('');
+                        }
+                      }}
+                      disabled={sendingEmail || !ccInput.trim()}
+                      className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors disabled:opacity-50 text-sm whitespace-nowrap"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {ccAddresses.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {ccAddresses.map((email, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-800 text-sm rounded-full border border-blue-200">
+                          {email}
+                          <button
+                            type="button"
+                            onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))}
+                            disabled={sendingEmail}
+                            className="ml-1 text-blue-500 hover:text-blue-700 disabled:opacity-50"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2185,6 +2255,8 @@ export function Transactions() {
                 onClick={() => {
                   setShowEmailModal(false);
                   setEmailAddress('');
+                  setCcAddresses([]);
+                  setCcInput('');
                   setSelectedTransaction(null);
                 }}
                 disabled={sendingEmail}

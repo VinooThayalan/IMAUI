@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { to, transaction } = await req.json() as { to: string; transaction: TransactionData };
+    const { to, cc, transaction } = await req.json() as { to: string; cc?: string[]; transaction: TransactionData };
 
     if (!to || !transaction) {
       return new Response(
@@ -221,6 +221,9 @@ Deno.serve(async (req: Request) => {
     `;
 
     console.log(`Sending transaction email to: ${to}`);
+    if (cc && cc.length > 0) {
+      console.log(`CC: ${cc.join(', ')}`);
+    }
     console.log(`Transaction: ${transaction.entity} - ${transaction.transaction_type} - ${transaction.share}`);
 
     return new Response(
@@ -228,6 +231,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         message: "Email would be sent in production",
         to: to,
+        cc: cc || [],
         preview: "In production, this would send via your email service (SendGrid, Resend, etc.)"
       }),
       {
