@@ -9,13 +9,11 @@ interface Bank {
   balance: number | null;
   currency: string | null;
   entity_id: string | null;
-  share_id: string | null;
   facility_limit: number | null;
   interest_rate: number | null;
   charges_per_transaction: number | null;
   is_active: boolean | null;
   entity?: { name: string; entity_id: string } | null;
-  share?: { ticker: string } | null;
 }
 
 interface Entity {
@@ -24,17 +22,10 @@ interface Entity {
   entity_id: string;
 }
 
-interface Share {
-  id: string;
-  ticker: string;
-  name: string;
-}
-
 interface BankFormData {
   entity_id: string;
   name: string;
   account_number: string;
-  share_id: string;
   facility_limit: string;
   interest_rate: string;
   charges_per_transaction: string;
@@ -44,7 +35,6 @@ const defaultForm: BankFormData = {
   entity_id: '',
   name: '',
   account_number: '',
-  share_id: '',
   facility_limit: '',
   interest_rate: '',
   charges_per_transaction: ''
@@ -53,7 +43,6 @@ const defaultForm: BankFormData = {
 export function Banks() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [shares, setShares] = useState<Share[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -68,22 +57,19 @@ export function Banks() {
   async function loadData() {
     try {
       setLoading(true);
-      const [banksRes, entitiesRes, sharesRes] = await Promise.all([
+      const [banksRes, entitiesRes] = await Promise.all([
         supabase
           .from('banks')
-          .select('*, entity:entities(name, entity_id), share:shares(ticker)')
+          .select('*, entity:entities(name, entity_id)')
           .order('name'),
-        supabase.from('entities').select('id, name, entity_id').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('name')
+        supabase.from('entities').select('id, name, entity_id').order('name')
       ]);
 
       if (banksRes.error) throw banksRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
-      if (sharesRes.error) throw sharesRes.error;
 
       setBanks((banksRes.data as Bank[]) || []);
       setEntities(entitiesRes.data || []);
-      setShares(sharesRes.data || []);
     } catch (error) {
       console.error('Error loading banks:', error);
     } finally {
@@ -103,7 +89,6 @@ export function Banks() {
       entity_id: bank.entity_id || '',
       name: bank.name,
       account_number: bank.account_number || '',
-      share_id: bank.share_id || '',
       facility_limit: bank.facility_limit?.toString() || '',
       interest_rate: bank.interest_rate?.toString() || '',
       charges_per_transaction: bank.charges_per_transaction?.toString() || ''
@@ -130,7 +115,6 @@ export function Banks() {
         entity_id: formData.entity_id || null,
         name: formData.name,
         account_number: formData.account_number || null,
-        share_id: formData.share_id || null,
         currency: 'LKR',
         facility_limit: formData.facility_limit ? parseFloat(formData.facility_limit) : null,
         interest_rate: formData.interest_rate ? parseFloat(formData.interest_rate) : null,
@@ -162,8 +146,7 @@ export function Banks() {
       b.name.toLowerCase().includes(q) ||
       (b.account_number || '').toLowerCase().includes(q) ||
       (b.entity?.name || '').toLowerCase().includes(q) ||
-      (b.entity?.entity_id || '').toLowerCase().includes(q) ||
-      (b.share?.ticker || '').toLowerCase().includes(q)
+      (b.entity?.entity_id || '').toLowerCase().includes(q)
     );
   });
 
@@ -255,7 +238,6 @@ export function Banks() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank Name</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Number</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Balance</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Facility Limit</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Interest Rate</th>
@@ -267,7 +249,7 @@ export function Banks() {
               <tbody className="divide-y divide-gray-200">
                 {filteredBanks.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center text-gray-500">No bank accounts found</td>
+                    <td colSpan={9} className="px-6 py-12 text-center text-gray-500">No bank accounts found</td>
                   </tr>
                 ) : (
                   filteredBanks.map(bank => (
@@ -280,9 +262,6 @@ export function Banks() {
                         <div className="text-sm font-bold text-gray-900">{bank.name}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{bank.account_number || '-'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-bold text-gray-900">{bank.share?.ticker || '-'}</span>
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                         {bank.balance != null
                           ? `Rs. ${bank.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -374,19 +353,6 @@ export function Banks() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter account number"
                   />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Share</label>
-                  <select
-                    value={formData.share_id}
-                    onChange={e => setFormData(prev => ({ ...prev, share_id: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select share (optional)</option>
-                    {shares.map(s => (
-                      <option key={s.id} value={s.id}>{s.ticker} - {s.name}</option>
-                    ))}
-                  </select>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Currency</label>
