@@ -34,6 +34,7 @@ interface Transaction {
   approval_document_uploaded_at: string | null;
   approval_document_uploaded_by: string | null;
   offline_approval: boolean | null;
+  day_trade: boolean | null;
   created_at: string;
 }
 
@@ -54,6 +55,8 @@ interface Bank {
   name: string;
   account_number: string;
   balance: number;
+  entity_id: string | null;
+  facility_limit: number | null;
 }
 
 interface Broker {
@@ -137,7 +140,8 @@ export function Transactions() {
     brokerage_fee_type_id: '',
     brokerage_fee_rate: '',
     fees: '',
-    use_negotiated_fee: false
+    use_negotiated_fee: false,
+    day_trade: false
   });
 
   useEffect(() => {
@@ -187,7 +191,7 @@ export function Transactions() {
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
-        supabase.from('banks').select('id, name, account_number, balance').order('name'),
+        supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
         supabase.from('entity_brokers').select('*, bank:banks(name, balance)').eq('is_active', true)
@@ -270,6 +274,18 @@ export function Transactions() {
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
+  function handleDayTradeChange(checked: boolean) {
+    setFormData(prev => ({ ...prev, day_trade: checked }));
+    if (checked && feeBreakdownItems.length > 0) {
+      const updated = feeBreakdownItems.map(item => ({
+        ...item,
+        rate: item.name.toLowerCase().includes('levy') ? item.rate : 0
+      }));
+      setFeeBreakdownItems(updated);
+      calculateFeesFromBreakdown(updated);
+    }
+  }
+
   function calculateTotalAmountGross() {
     const shares = parseFloat(formData.no_of_shares) || 0;
     const price = parseFloat(formData.price_per_share) || 0;
@@ -309,6 +325,17 @@ export function Transactions() {
     } else {
       return balance.avg_cost;
     }
+  }
+
+  function calculateSellPnL() {
+    const key = `${formData.entity_id}-${formData.share_id}`;
+    const balance = shareBalances.get(key);
+    if (!balance || balance.avg_cost === 0) return null;
+    const salePrice = parseFloat(formData.price_per_share) || 0;
+    const numShares = parseFloat(formData.no_of_shares) || 0;
+    const pnlPerShare = salePrice - balance.avg_cost;
+    const totalPnl = pnlPerShare * numShares;
+    return { avgCost: balance.avg_cost, pnlPerShare, totalPnl };
   }
 
   function getEntityName(entityId: string) {
@@ -356,7 +383,8 @@ export function Transactions() {
       brokerage_fee_type_id: '',
       brokerage_fee_rate: '',
       fees: '',
-      use_negotiated_fee: false
+      use_negotiated_fee: false,
+      day_trade: false
     });
     setFeeBreakdownItems([]);
   }
@@ -397,7 +425,8 @@ export function Transactions() {
         fees: parseFloat(formData.fees) || 0,
         net_price_per_share: netPricePerShare,
         total_amount: totalAmountNet,
-        approval_status: 'DRAFT'
+        approval_status: 'DRAFT',
+        day_trade: formData.day_trade
       });
 
       if (error) throw error;
@@ -905,6 +934,8 @@ export function Transactions() {
   const currentBalance = shareBalances.get(key);
   const entityBalance = formData.entity_id ? getEntityBalance(formData.entity_id) : 0;
   const requiredAmount = calculateTotalAmountNet();
+  const entityBankAccounts = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
+  const sellPnL = formData.transaction_type === 'SELL' && formData.price_per_share && formData.no_of_shares ? calculateSellPnL() : null;
 
   const availableEntityBrokers = formData.entity_id
     ? entityBrokers.filter(eb =>
@@ -1242,6 +1273,32 @@ export function Transactions() {
                     </select>
                   </div>
 
+                  {entityBankAccounts.length > 0 && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Entity Bank Accounts</h3>
+                      <div className="grid grid-cols-3 gap-3">
+                        {entityBankAccounts.map(bank => (
+                          <div key={bank.id} className="bg-white rounded-lg border border-gray-200 p-3">
+                            <p className="text-sm font-bold text-gray-900">{bank.name}</p>
+                            {bank.account_number && <p className="text-xs text-gray-500 mt-0.5">{bank.account_number}</p>}
+                            <div className="mt-2 space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-gray-500">Balance</span>
+                                <span className="font-semibold text-green-700">LKR {Number(bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              </div>
+                              {bank.facility_limit != null && (
+                                <div className="flex justify-between text-xs">
+                                  <span className="text-gray-500">Facility Limit</span>
+                                  <span className="font-semibold text-blue-700">LKR {Number(bank.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-3 gap-6">
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -1305,30 +1362,63 @@ export function Transactions() {
                     </div>
                   </div>
 
-                  {selectedEntityBroker && selectedEntityBroker.bank && (
+                  {selectedEntityBroker && (
                     <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                      <h3 className="text-sm font-bold text-blue-900 mb-3">Bank Account Details</h3>
+                      <h3 className="text-sm font-bold text-blue-900 mb-3">
+                        {formData.relationship_type === 'Custodian' ? 'Custodian Account Details' : 'Broker Account Details'}
+                      </h3>
                       <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-xs text-gray-600">Bank Name</p>
-                          <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank.name}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Account Number</p>
-                          <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank_account_number || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Facility Limit</p>
-                          <p className="text-sm font-semibold text-gray-900">
-                            LKR {selectedEntityBroker.facility_limit ? Number(selectedEntityBroker.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-600">Available Balance</p>
-                          <p className="text-sm font-bold text-green-700">
-                            LKR {selectedEntityBroker.bank.balance ? Number(selectedEntityBroker.bank.balance).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
-                          </p>
-                        </div>
+                        {formData.relationship_type === 'Custodian' ? (
+                          <>
+                            <div>
+                              <p className="text-xs text-gray-600">Custodian Account Number</p>
+                              <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.custodian_account_number || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Broker Name</p>
+                              <p className="text-sm font-semibold text-gray-900">
+                                {formData.selected_broker_name_id ? brokers.find(b => b.id === formData.selected_broker_name_id)?.broker_name || 'N/A' : 'Not selected'}
+                              </p>
+                            </div>
+                            {selectedEntityBroker.bank && (
+                              <>
+                                <div>
+                                  <p className="text-xs text-gray-600">Bank</p>
+                                  <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank.name}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-600">Available Balance</p>
+                                  <p className="text-sm font-bold text-green-700">
+                                    LKR {Number(selectedEntityBroker.bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <p className="text-xs text-gray-600">Bank Name</p>
+                              <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank?.name || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Bank Account Number</p>
+                              <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank_account_number || 'N/A'}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Facility Limit</p>
+                              <p className="text-sm font-semibold text-gray-900">
+                                LKR {selectedEntityBroker.facility_limit ? Number(selectedEntityBroker.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-600">Available Balance</p>
+                              <p className="text-sm font-bold text-green-700">
+                                LKR {selectedEntityBroker.bank?.balance ? Number(selectedEntityBroker.bank.balance).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                              </p>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1373,6 +1463,15 @@ export function Transactions() {
                         <option value="BUY">BUY</option>
                         <option value="SELL">SELL</option>
                       </select>
+                      <label className="flex items-center space-x-2 mt-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.day_trade}
+                          onChange={(e) => handleDayTradeChange(e.target.checked)}
+                          className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500"
+                        />
+                        <span className="text-sm font-medium text-orange-700">Day Trade + Sell</span>
+                      </label>
                     </div>
 
                     <div>
@@ -1385,7 +1484,10 @@ export function Transactions() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       >
-                        <option value="DAY">Day Order</option>
+                        <option value="DAY">1 Day Order</option>
+                        <option value="2DAY">2 Day Order</option>
+                        <option value="3DAY">3 Day Order</option>
+                        <option value="4DAY">4 Day Order</option>
                         <option value="GTC">GTC (Good Till Cancelled)</option>
                       </select>
                     </div>
@@ -1489,6 +1591,30 @@ export function Transactions() {
                       </div>
                     )}
 
+                    {formData.transaction_type === 'SELL' && sellPnL && (
+                      <div className={`col-span-2 p-4 rounded-lg border-2 ${sellPnL.pnlPerShare >= 0 ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+                        <h4 className="text-sm font-bold text-gray-700 mb-3">Estimated P&L</h4>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-600">Avg Cost / Share</p>
+                            <p className="text-sm font-semibold text-gray-900">LKR {sellPnL.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-600">P&L / Share</p>
+                            <p className={`text-sm font-bold ${sellPnL.pnlPerShare >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                              {sellPnL.pnlPerShare >= 0 ? '+' : ''}LKR {sellPnL.pnlPerShare.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-600">Total P&L</p>
+                            <p className={`text-sm font-bold ${sellPnL.totalPnl >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                              {sellPnL.totalPnl >= 0 ? '+' : ''}LKR {sellPnL.totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="col-span-2">
                       <div className="flex items-center justify-between mb-2">
                         <label className="block text-sm font-semibold text-gray-700">
@@ -1564,8 +1690,7 @@ export function Transactions() {
                               {feeBreakdownItems.map((item, idx) => {
                                 const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
                                 const itemAmount = (grossAmount * item.rate) / 100;
-                                const isBrokerageFee = item.name.toLowerCase().includes('brokerage fee');
-                                const isLocked = formData.use_negotiated_fee && !isBrokerageFee;
+                                const isLocked = false;
                                 return (
                                   <tr key={idx} className={isLocked ? 'bg-gray-50' : 'hover:bg-gray-50'}>
                                     <td className="px-4 py-2 text-gray-700">{item.name}</td>
