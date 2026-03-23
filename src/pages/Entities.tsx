@@ -55,6 +55,7 @@ interface EntityBroker {
   assigned_date: string;
   custodian_account_number?: string;
   custodian_account_name?: string;
+  custodian_account_fee?: number;
   broker_account_number?: string;
   bank_account_number?: string;
   currency?: string;
@@ -98,6 +99,7 @@ export function Entities() {
     notes: '',
     custodian_account_number: '',
     custodian_account_name: '',
+    custodian_account_fee: '',
     broker_account_number: '',
     bank_id: '',
     currency: 'LKR',
@@ -266,6 +268,7 @@ export function Entities() {
       notes: '',
       custodian_account_number: '',
       custodian_account_name: '',
+      custodian_account_fee: '',
       broker_account_number: '',
       bank_id: '',
       currency: 'LKR',
@@ -283,21 +286,21 @@ export function Entities() {
     try {
       const insertData: any = {
         entity_id: selectedEntityId,
-        broker_id: brokerFormData.broker_id,
+        broker_id: brokerFormData.relationship_type === 'Custodian' ? null : (brokerFormData.broker_id || null),
         relationship_type: brokerFormData.relationship_type,
         assigned_date: brokerFormData.assigned_date,
         notes: brokerFormData.notes || null,
         bank_id: brokerFormData.bank_id || null,
         currency: brokerFormData.currency,
-        bank_account_number: brokerFormData.bank_account_number || null,
-        facility_limit: brokerFormData.facility_limit ? parseFloat(brokerFormData.facility_limit) : null,
         is_active: true
       };
 
       if (brokerFormData.relationship_type === 'Custodian') {
         insertData.custodian_account_number = brokerFormData.custodian_account_number || null;
         insertData.custodian_account_name = brokerFormData.custodian_account_name || null;
-        insertData.broker_name_id = brokerFormData.broker_name_id || null;
+        insertData.custodian_account_fee = brokerFormData.custodian_account_fee ? parseFloat(brokerFormData.custodian_account_fee) : null;
+        insertData.bank_account_number = brokerFormData.bank_account_number || null;
+        insertData.facility_limit = brokerFormData.facility_limit ? parseFloat(brokerFormData.facility_limit) : null;
       } else {
         insertData.broker_account_number = brokerFormData.broker_account_number || null;
         insertData.broker_text = brokerFormData.broker_text || null;
@@ -315,6 +318,7 @@ export function Entities() {
         notes: '',
         custodian_account_number: '',
         custodian_account_name: '',
+        custodian_account_fee: '',
         broker_account_number: '',
         bank_id: '',
         currency: 'LKR',
@@ -738,22 +742,6 @@ export function Entities() {
                   {isCustodian && (
                     <>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Broker Name *</label>
-                        <select
-                          required
-                          value={brokerFormData.broker_name_id}
-                          onChange={(e) => setBrokerFormData({...brokerFormData, broker_name_id: e.target.value, broker_id: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Select broker</option>
-                          {brokers.map((broker) => (
-                            <option key={broker.id} value={broker.id}>
-                              {broker.broker_name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Number *</label>
                         <input
                           type="text"
@@ -844,29 +832,42 @@ export function Entities() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account Number *</label>
-                    <input
-                      type="text"
-                      required
-                      value={brokerFormData.bank_account_number}
-                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_account_number: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter bank account number"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={brokerFormData.facility_limit}
-                      onChange={(e) => setBrokerFormData({...brokerFormData, facility_limit: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Enter facility limit"
-                    />
-                  </div>
+                  {isCustodian && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account Number</label>
+                        <input
+                          type="text"
+                          value={brokerFormData.bank_account_number}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, bank_account_number: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter bank account number"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={brokerFormData.facility_limit}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, facility_limit: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter facility limit"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Fee %</label>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          value={brokerFormData.custodian_account_fee}
+                          onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_fee: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter fee percentage"
+                        />
+                      </div>
+                    </>
+                  )}
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Assigned Date *</label>
@@ -928,15 +929,16 @@ export function Entities() {
                                 <>
                                   <div><span className="font-medium">Account Number:</span> {eb.custodian_account_number}</div>
                                   <div><span className="font-medium">Account Name:</span> {eb.custodian_account_name}</div>
+                                  {eb.custodian_account_fee != null && <div><span className="font-medium">Account Fee:</span> {eb.custodian_account_fee}%</div>}
+                                  {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
+                                  {eb.facility_limit != null && <div><span className="font-medium">Facility Limit:</span> Rs. {eb.facility_limit.toLocaleString()}</div>}
                                 </>
                               )}
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
                                 <div><span className="font-medium">Broker Account:</span> {eb.broker_account_number}</div>
                               )}
                               {eb.banks && <div><span className="font-medium">Bank:</span> {eb.banks.name}</div>}
-                              {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
                               {eb.currency && <div><span className="font-medium">Currency:</span> {eb.currency}</div>}
-                              {eb.facility_limit && <div><span className="font-medium">Facility Limit:</span> Rs. {eb.facility_limit.toLocaleString()}</div>}
                               <div><span className="font-medium">Assigned:</span> {eb.assigned_date}</div>
                             </div>
                           </div>
