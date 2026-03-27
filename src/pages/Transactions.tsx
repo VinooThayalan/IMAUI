@@ -134,6 +134,7 @@ export function Transactions() {
     relationship_type: 'Broker',
     entity_broker_id: '',
     selected_broker_name_id: '',
+    selected_bank_id: '',
     share_id: '',
     transaction_type: 'BUY',
     order_type: 'DAY',
@@ -377,6 +378,7 @@ export function Transactions() {
       relationship_type: 'Broker',
       entity_broker_id: '',
       selected_broker_name_id: '',
+      selected_bank_id: '',
       share_id: '',
       transaction_type: 'BUY',
       order_type: 'DAY',
@@ -412,7 +414,7 @@ export function Transactions() {
       const { error } = await supabase.from('transactions').insert({
         entity_id: formData.entity_id,
         broker_id: selectedEntityBroker?.broker_id || null,
-        bank_id: null,
+        bank_id: formData.selected_bank_id || null,
         cds_account_id: selectedEntityBroker?.relationship_type === 'Custodian'
           ? selectedEntityBroker?.custodian_account_number
           : selectedEntityBroker?.broker_account_number,
@@ -1271,7 +1273,7 @@ export function Transactions() {
                     </label>
                     <select
                       value={formData.entity_id}
-                      onChange={(e) => setFormData({ ...formData, entity_id: e.target.value, entity_broker_id: '' })}
+                      onChange={(e) => setFormData({ ...formData, entity_id: e.target.value, entity_broker_id: '', selected_bank_id: '' })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       required
                     >
@@ -1284,27 +1286,53 @@ export function Transactions() {
 
                   {entityBankAccounts.length > 0 && (
                     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Entity Bank Accounts</h3>
+                      <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Select Bank Account for Transaction</h3>
                       <div className="grid grid-cols-3 gap-3">
-                        {entityBankAccounts.map(bank => (
-                          <div key={bank.id} className="bg-white rounded-lg border border-gray-200 p-3">
-                            <p className="text-sm font-bold text-gray-900">{bank.name}</p>
-                            {bank.account_number && <p className="text-xs text-gray-500 mt-0.5">{bank.account_number}</p>}
-                            <div className="mt-2 space-y-1">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-gray-500">Balance</span>
-                                <span className="font-semibold text-green-700">LKR {Number(bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        {entityBankAccounts.map(bank => {
+                          const isSelected = formData.selected_bank_id === bank.id;
+                          return (
+                            <button
+                              type="button"
+                              key={bank.id}
+                              onClick={() => setFormData({ ...formData, selected_bank_id: isSelected ? '' : bank.id })}
+                              className={`text-left rounded-lg border-2 p-3 transition-all ${
+                                isSelected
+                                  ? 'bg-blue-50 border-blue-500 ring-2 ring-blue-200'
+                                  : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-sm font-bold text-gray-900">{bank.name}</p>
+                                {isSelected && (
+                                  <span className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  </span>
+                                )}
                               </div>
-                              {bank.facility_limit != null && (
+                              {bank.account_number && <p className="text-xs text-gray-500">{bank.account_number}</p>}
+                              <div className="mt-2 space-y-1">
                                 <div className="flex justify-between text-xs">
-                                  <span className="text-gray-500">Facility Limit</span>
-                                  <span className="font-semibold text-blue-700">LKR {Number(bank.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-gray-500">Balance</span>
+                                  <span className="font-semibold text-green-700">LKR {Number(bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                                 </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                                {bank.facility_limit != null && (
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-gray-500">Facility Limit</span>
+                                    <span className="font-semibold text-blue-700">LKR {Number(bank.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
+                      {formData.selected_bank_id && (
+                        <p className="text-xs text-blue-600 font-medium mt-2">
+                          Selected: {entityBankAccounts.find(b => b.id === formData.selected_bank_id)?.name}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -1402,6 +1430,12 @@ export function Transactions() {
                                   </p>
                                 </div>
                               </>
+                            )}
+                            {selectedEntityBroker.bank_account_number && (
+                              <div>
+                                <p className="text-xs text-gray-600">Bank Account Number</p>
+                                <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank_account_number}</p>
+                              </div>
                             )}
                           </>
                         ) : (

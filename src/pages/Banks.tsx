@@ -385,17 +385,6 @@ export function Banks() {
                     placeholder="Enter interest rate"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Charges Per Transaction</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.charges_per_transaction}
-                    onChange={e => setFormData(prev => ({ ...prev, charges_per_transaction: e.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Enter charges per transaction"
-                  />
-                </div>
               </div>
             </div>
             <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">

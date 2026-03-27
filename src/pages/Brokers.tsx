@@ -11,6 +11,8 @@ interface Broker {
   contact_person_phone: string | null;
   contact_person_mobile: string | null;
   contact_person_designation: string | null;
+  settlement_bank_account: string | null;
+  broker_cds_account: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -47,6 +49,8 @@ export function Brokers() {
     contact_person_phone: '',
     contact_person_mobile: '',
     contact_person_designation: '',
+    settlement_bank_account: '',
+    broker_cds_account: '',
     is_active: true
   });
   const [entityFormData, setEntityFormData] = useState({
@@ -126,6 +130,8 @@ export function Brokers() {
         contact_person_phone: broker.contact_person_phone || '',
         contact_person_mobile: broker.contact_person_mobile || '',
         contact_person_designation: broker.contact_person_designation || '',
+        settlement_bank_account: broker.settlement_bank_account || '',
+        broker_cds_account: broker.broker_cds_account || '',
         is_active: broker.is_active
       });
     } else {
@@ -137,6 +143,8 @@ export function Brokers() {
         contact_person_phone: '',
         contact_person_mobile: '',
         contact_person_designation: '',
+        settlement_bank_account: '',
+        broker_cds_account: '',
         is_active: true
       });
     }
@@ -153,6 +161,8 @@ export function Brokers() {
       contact_person_phone: '',
       contact_person_mobile: '',
       contact_person_designation: '',
+      settlement_bank_account: '',
+      broker_cds_account: '',
       is_active: true
     });
   }
@@ -171,6 +181,8 @@ export function Brokers() {
             contact_person_phone: formData.contact_person_phone || null,
             contact_person_mobile: formData.contact_person_mobile || null,
             contact_person_designation: formData.contact_person_designation || null,
+            settlement_bank_account: formData.settlement_bank_account || null,
+            broker_cds_account: formData.broker_cds_account || null,
             is_active: formData.is_active,
             updated_at: new Date().toISOString()
           })
@@ -187,6 +199,8 @@ export function Brokers() {
             contact_person_phone: formData.contact_person_phone || null,
             contact_person_mobile: formData.contact_person_mobile || null,
             contact_person_designation: formData.contact_person_designation || null,
+            settlement_bank_account: formData.settlement_bank_account || null,
+            broker_cds_account: formData.broker_cds_account || null,
             is_active: formData.is_active
           }]);
 
@@ -512,6 +526,32 @@ export function Brokers() {
                       onChange={(e) => setFormData({ ...formData, contact_person_mobile: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="+94 77 123 4567"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-4 mt-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Account Details</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Settlement Bank Account</label>
+                    <input
+                      type="text"
+                      value={formData.settlement_bank_account}
+                      onChange={(e) => setFormData({ ...formData, settlement_bank_account: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter settlement bank account number"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Broker CDS Account</label>
+                    <input
+                      type="text"
+                      value={formData.broker_cds_account}
+                      onChange={(e) => setFormData({ ...formData, broker_cds_account: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter broker CDS account number"
                     />
                   </div>
                 </div>
