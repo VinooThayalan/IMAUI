@@ -25,14 +25,34 @@ import { ShareBuybacks } from './pages/ShareBuybacks';
 import { ShareSubdivisions } from './pages/ShareSubdivisions';
 import { IpoTransactions } from './pages/IpoTransactions';
 import { UserManagement } from './pages/UserManagement';
+import { MenuAccess } from './pages/MenuAccess';
+import { EntityAccess } from './pages/EntityAccess';
 import { EntityTypes } from './pages/EntityTypes';
 import { IndustryTypes } from './pages/IndustryTypes';
 import { SectorTypes } from './pages/SectorTypes';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
+import { Shield } from 'lucide-react';
+
+function AccessDenied() {
+  return (
+    <div className="flex items-center justify-center h-full p-8">
+      <div className="text-center">
+        <Shield className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+        <h2 className="text-xl font-bold text-gray-900">Access Denied</h2>
+        <p className="text-gray-500 mt-2">You do not have permission to access this page.</p>
+        <a href="#dashboard" className="inline-block mt-4 text-blue-600 hover:text-blue-800 font-medium text-sm">
+          Go to Dashboard
+        </a>
+      </div>
+    </div>
+  );
+}
+
+const adminPages = new Set(['user-management', 'menu-access', 'entity-access']);
 
 function App() {
-  const { user, appUser, loading } = useAuth();
+  const { user, appUser, loading, hasMenuAccess, isAdmin } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   useEffect(() => {
@@ -48,6 +68,14 @@ function App() {
   }, []);
 
   const renderPage = () => {
+    if (adminPages.has(currentPage) && !isAdmin) {
+      return <AccessDenied />;
+    }
+
+    if (!adminPages.has(currentPage) && currentPage !== 'settings' && !hasMenuAccess(currentPage)) {
+      return <AccessDenied />;
+    }
+
     switch (currentPage) {
       case 'entities':
         return <Entities />;
@@ -103,8 +131,12 @@ function App() {
         return <Settings />;
       case 'user-management':
         return <UserManagement />;
+      case 'menu-access':
+        return <MenuAccess />;
+      case 'entity-access':
+        return <EntityAccess />;
       default:
-        return <Dashboard />;
+        return hasMenuAccess('dashboard') ? <Dashboard /> : <AccessDenied />;
     }
   };
 

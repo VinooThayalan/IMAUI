@@ -1,5 +1,6 @@
-import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers } from 'lucide-react';
+import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers, Shield, Menu, MapPin } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface NavItem {
   icon: React.ElementType;
@@ -13,6 +14,7 @@ interface NavSection {
   title: string;
   icon?: React.ElementType;
   items: NavItem[];
+  adminOnly?: boolean;
 }
 
 const navSections: NavSection[] = [
@@ -62,13 +64,23 @@ const navSections: NavSection[] = [
       { icon: FileText, label: 'Reports', href: '#reports', menuName: 'reports' },
       { icon: PieChart, label: 'Portfolio Summary', href: '#portfolio-summary', menuName: 'portfolio-summary' },
       { icon: Settings, label: 'Settings', href: '#settings', menuName: 'settings' },
+    ]
+  },
+  {
+    title: 'Admin',
+    icon: Shield,
+    adminOnly: true,
+    items: [
       { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management' },
+      { icon: Menu, label: 'Menu Access', href: '#menu-access', menuName: 'menu-access' },
+      { icon: MapPin, label: 'Entity Access', href: '#entity-access', menuName: 'entity-access' },
     ]
   }
 ];
 
 export function Sidebar() {
   const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
+  const { appUser, isAdmin, hasMenuAccess } = useAuth();
 
   function toggleSection(title: string) {
     setCollapsedSections(prev =>
@@ -77,6 +89,21 @@ export function Sidebar() {
         : [...prev, title]
     );
   }
+
+  const filteredSections = navSections
+    .filter(section => {
+      if (section.adminOnly && !isAdmin) return false;
+      return true;
+    })
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => hasMenuAccess(item.menuName))
+    }))
+    .filter(section => section.items.length > 0);
+
+  const initials = appUser?.full_name
+    ? appUser.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : 'U';
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
@@ -93,7 +120,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
-        {navSections.map((section) => (
+        {filteredSections.map((section) => (
           <div key={section.title}>
             <button
               onClick={() => toggleSection(section.title)}
@@ -137,11 +164,11 @@ export function Sidebar() {
       <div className="p-4 border-t border-gray-200">
         <div className="flex items-center space-x-3 px-4 py-3">
           <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-            <span className="text-sm font-semibold text-gray-700">JD</span>
+            <span className="text-sm font-semibold text-gray-700">{initials}</span>
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-gray-900">John Doe</p>
-            <p className="text-xs text-gray-500">Administrator</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{appUser?.full_name || 'User'}</p>
+            <p className="text-xs text-gray-500 capitalize">{appUser?.role || 'User'}</p>
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export function Header() {
-  const { appUser, signOut } = useAuth();
+  const { appUser, signOut, isAdmin } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   async function handleLogout() {
@@ -50,7 +50,7 @@ export function Header() {
                   {appUser?.full_name || 'User'}
                 </div>
                 <div className="text-xs text-gray-500">
-                  {appUser?.email}
+                  {isAdmin ? 'Admin' : 'User'}
                 </div>
               </div>
             </button>
