@@ -309,32 +309,25 @@ export function EntityAccess() {
                     </div>
                   ) : (
                     filteredEntities.map(entity => (
-                      <label
+                      <div
                         key={entity.id}
-                        className="flex items-center justify-between px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors border border-transparent hover:border-gray-200"
+                        onClick={() => toggleEntity(entity.id)}
+                        className="flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors border border-transparent hover:border-gray-200"
                       >
-                        <div className="flex items-center space-x-3">
-                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                            pendingChanges.has(entity.id)
-                              ? 'bg-[#3e5a7d] border-[#3e5a7d]'
-                              : 'border-gray-300'
-                          }`}>
-                            {pendingChanges.has(entity.id) && <Check className="w-3 h-3 text-white" />}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{entity.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {entity.entity_id} - {entity.entity_types?.name || entity.type}
-                            </p>
-                          </div>
+                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${
+                          pendingChanges.has(entity.id)
+                            ? 'bg-[#3e5a7d] border-[#3e5a7d]'
+                            : 'border-gray-300'
+                        }`}>
+                          {pendingChanges.has(entity.id) && <Check className="w-3 h-3 text-white" />}
                         </div>
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={pendingChanges.has(entity.id)}
-                          onChange={() => toggleEntity(entity.id)}
-                        />
-                      </label>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{entity.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {entity.entity_id} - {entity.entity_types?.name || entity.type}
+                          </p>
+                        </div>
+                      </div>
                     ))
                   )}
                 </div>

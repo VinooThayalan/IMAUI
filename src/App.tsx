@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Layout } from './components/Layout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Dashboard } from './pages/Dashboard';
 import { Entities } from './pages/Entities';
 import { Shares } from './pages/Shares';
@@ -154,7 +155,9 @@ function App() {
 
   return (
     <Layout>
-      {renderPage()}
+      <ErrorBoundary>
+        {renderPage()}
+      </ErrorBoundary>
     </Layout>
   );
 }
