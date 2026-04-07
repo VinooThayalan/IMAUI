@@ -372,7 +372,9 @@ export function Entities() {
     }
 
     try {
-      const { data: newEntity, error } = await supabase.from('entities').insert({
+      const newId = crypto.randomUUID();
+      const { error } = await supabase.from('entities').insert({
+        id: newId,
         name: entityFormData.name,
         entity_type_id: entityFormData.entity_type_id || null,
         tax_name: entityFormData.tax_name || null,
@@ -384,14 +386,14 @@ export function Entities() {
         contact_mobile: entityFormData.contact_mobile || null,
         contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
         current_balance: 0
-      }).select('id').single();
+      });
 
       if (error) throw error;
 
-      if (newEntity && user) {
+      if (user) {
         await supabase.from('user_entity_access').insert({
           user_id: user.id,
-          entity_id: newEntity.id
+          entity_id: newId
         });
         await refreshPermissions();
       }
