@@ -1,6 +1,7 @@
 import { Plus, Search, Filter, MoreVertical, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Entity {
   id: string;
@@ -67,6 +68,7 @@ interface EntityBroker {
 }
 
 export function Entities() {
+  const { user, refreshPermissions } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showBrokerModal, setShowBrokerModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
@@ -370,7 +372,7 @@ export function Entities() {
     }
 
     try {
-      const { error } = await supabase.from('entities').insert({
+      const { data: newEntity, error } = await supabase.from('entities').insert({
         name: entityFormData.name,
         entity_type_id: entityFormData.entity_type_id || null,
         tax_name: entityFormData.tax_name || null,
@@ -382,9 +384,17 @@ export function Entities() {
         contact_mobile: entityFormData.contact_mobile || null,
         contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
         current_balance: 0
-      });
+      }).select('id').single();
 
       if (error) throw error;
+
+      if (newEntity && user) {
+        await supabase.from('user_entity_access').insert({
+          user_id: user.id,
+          entity_id: newEntity.id
+        });
+        await refreshPermissions();
+      }
 
       alert('Entity created successfully!');
       setShowModal(false);
