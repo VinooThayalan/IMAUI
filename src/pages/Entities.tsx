@@ -69,7 +69,6 @@ interface EntityBroker {
   bank_account_number?: string;
   bank_name?: string;
   currency?: string;
-  facility_limit?: number;
   broker_text?: string;
   brokers: Broker;
   broker_name?: Broker;
@@ -117,7 +116,6 @@ export function Entities() {
     bank_branch_id: '',
     currency: 'LKR',
     bank_account_number: '',
-    facility_limit: '',
     broker_name_id: '',
     broker_text: ''
   });
@@ -350,7 +348,6 @@ export function Entities() {
         insertData.custodian_account_name = brokerFormData.custodian_account_name || null;
         insertData.custodian_account_fee = brokerFormData.custodian_account_fee ? parseFloat(brokerFormData.custodian_account_fee) : null;
         insertData.bank_account_number = brokerFormData.bank_account_number || null;
-        insertData.facility_limit = brokerFormData.facility_limit ? parseFloat(brokerFormData.facility_limit) : null;
       } else {
         insertData.broker_account_number = brokerFormData.broker_account_number || null;
         insertData.broker_text = brokerFormData.broker_text || null;
@@ -373,7 +370,6 @@ export function Entities() {
         bank_name: '',
         currency: 'LKR',
         bank_account_number: '',
-        facility_limit: '',
         broker_name_id: '',
         broker_text: ''
       });
@@ -921,17 +917,6 @@ export function Entities() {
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={brokerFormData.facility_limit}
-                          onChange={(e) => setBrokerFormData({...brokerFormData, facility_limit: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Enter facility limit"
-                        />
-                      </div>
-                      <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Fee %</label>
                         <input
                           type="number"
@@ -1007,7 +992,6 @@ export function Entities() {
                                   <div><span className="font-medium">Account Name:</span> {eb.custodian_account_name}</div>
                                   {eb.custodian_account_fee != null && <div><span className="font-medium">Account Fee:</span> {eb.custodian_account_fee}%</div>}
                                   {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
-                                  {eb.facility_limit != null && <div><span className="font-medium">Facility Limit:</span> Rs. {eb.facility_limit.toLocaleString()}</div>}
                                 </>
                               )}
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
