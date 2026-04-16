@@ -44,7 +44,7 @@ const navSections: NavSection[] = [
     items: [
       { icon: Building2, label: 'Entities', href: '#entities', menuName: 'entities' },
       { icon: TrendingUp, label: 'Shares', href: '#shares', menuName: 'shares' },
-      { icon: Landmark, label: 'Banks', href: '#banks', menuName: 'banks' },
+      { icon: Landmark, label: 'Entity - Banks', href: '#banks', menuName: 'banks' },
       { icon: Briefcase, label: 'Brokers', href: '#brokers', menuName: 'brokers' },
     ]
   },
