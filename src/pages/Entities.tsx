@@ -33,11 +33,7 @@ interface Broker {
   broker_id: string;
   broker_name: string;
   is_active: boolean;
-}
-
-interface Bank {
-  id: string;
-  name: string;
+  settlement_bank_account: string | null;
 }
 
 interface Currency {
@@ -59,11 +55,11 @@ interface EntityBroker {
   custodian_account_fee?: number;
   broker_account_number?: string;
   bank_account_number?: string;
+  bank_name?: string;
   currency?: string;
   facility_limit?: number;
   broker_text?: string;
   brokers: Broker;
-  banks?: Bank;
   broker_name?: Broker;
 }
 
@@ -79,7 +75,6 @@ export function Entities() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
-  const [banks, setBanks] = useState<Bank[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [entityFormData, setEntityFormData] = useState({
@@ -103,7 +98,7 @@ export function Entities() {
     custodian_account_name: '',
     custodian_account_fee: '',
     broker_account_number: '',
-    bank_id: '',
+    bank_name: '',
     currency: 'LKR',
     bank_account_number: '',
     facility_limit: '',
@@ -115,7 +110,6 @@ export function Entities() {
     fetchEntities();
     fetchEntityTypes();
     fetchBrokers();
-    fetchBanks();
     fetchCurrencies();
   }, []);
 
@@ -157,7 +151,7 @@ export function Entities() {
     try {
       const { data, error } = await supabase
         .from('brokers')
-        .select('*')
+        .select('id, broker_id, broker_name, is_active, settlement_bank_account')
         .eq('is_active', true)
         .order('broker_name');
 
@@ -165,20 +159,6 @@ export function Entities() {
       setBrokers(data || []);
     } catch (error) {
       console.error('Error fetching brokers:', error);
-    }
-  }
-
-  async function fetchBanks() {
-    try {
-      const { data, error } = await supabase
-        .from('banks')
-        .select('id, name')
-        .order('name');
-
-      if (error) throw error;
-      setBanks(data || []);
-    } catch (error) {
-      console.error('Error fetching banks:', error);
     }
   }
 
@@ -207,11 +187,8 @@ export function Entities() {
             id,
             broker_id,
             broker_name,
-            is_active
-          ),
-          banks (
-            id,
-            name
+            is_active,
+            settlement_bank_account
           ),
           broker_name:broker_name_id (
             id,
@@ -272,13 +249,22 @@ export function Entities() {
       custodian_account_name: '',
       custodian_account_fee: '',
       broker_account_number: '',
-      bank_id: '',
+      bank_name: '',
       currency: 'LKR',
       bank_account_number: '',
       facility_limit: '',
       broker_name_id: '',
       broker_text: ''
     });
+  }
+
+  function handleBrokerSelect(brokerId: string) {
+    const selected = brokers.find(b => b.id === brokerId);
+    setBrokerFormData(prev => ({
+      ...prev,
+      broker_id: brokerId,
+      bank_name: selected?.settlement_bank_account || ''
+    }));
   }
 
   async function handleAssignBroker(e: React.FormEvent) {
@@ -292,7 +278,7 @@ export function Entities() {
         relationship_type: brokerFormData.relationship_type,
         assigned_date: brokerFormData.assigned_date,
         notes: brokerFormData.notes || null,
-        bank_id: brokerFormData.bank_id || null,
+        bank_name: brokerFormData.bank_name || null,
         currency: brokerFormData.currency,
         is_active: true
       };
@@ -322,7 +308,7 @@ export function Entities() {
         custodian_account_name: '',
         custodian_account_fee: '',
         broker_account_number: '',
-        bank_id: '',
+        bank_name: '',
         currency: 'LKR',
         bank_account_number: '',
         facility_limit: '',
@@ -785,7 +771,7 @@ export function Entities() {
                         <select
                           required
                           value={brokerFormData.broker_id}
-                          onChange={(e) => setBrokerFormData({...brokerFormData, broker_id: e.target.value})}
+                          onChange={(e) => handleBrokerSelect(e.target.value)}
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         >
                           <option value="">Select broker</option>
@@ -811,20 +797,17 @@ export function Entities() {
                   )}
 
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Name *</label>
-                    <select
-                      required
-                      value={brokerFormData.bank_id}
-                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_id: e.target.value})}
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Name</label>
+                    <input
+                      type="text"
+                      value={brokerFormData.bank_name}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_name: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select bank</option>
-                      {banks.map((bank) => (
-                        <option key={bank.id} value={bank.id}>
-                          {bank.name}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder={!isCustodian ? 'Auto-filled from broker profile' : 'Enter bank name'}
+                    />
+                    {!isCustodian && brokerFormData.bank_name && (
+                      <p className="text-xs text-gray-500 mt-1">Auto-filled from broker settlement bank account</p>
+                    )}
                   </div>
 
                   <div>
@@ -949,7 +932,7 @@ export function Entities() {
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
                                 <div><span className="font-medium">Broker Account:</span> {eb.broker_account_number}</div>
                               )}
-                              {eb.banks && <div><span className="font-medium">Bank:</span> {eb.banks.name}</div>}
+                              {eb.bank_name && <div><span className="font-medium">Bank:</span> {eb.bank_name}</div>}
                               {eb.currency && <div><span className="font-medium">Currency:</span> {eb.currency}</div>}
                               <div><span className="font-medium">Assigned:</span> {eb.assigned_date}</div>
                             </div>
