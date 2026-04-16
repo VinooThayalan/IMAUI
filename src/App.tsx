@@ -31,6 +31,7 @@ import { EntityAccess } from './pages/EntityAccess';
 import { EntityTypes } from './pages/EntityTypes';
 import { IndustryTypes } from './pages/IndustryTypes';
 import { SectorTypes } from './pages/SectorTypes';
+import { BankMaster } from './pages/BankMaster';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { Shield } from 'lucide-react';
@@ -126,6 +127,8 @@ function App() {
         return <IndustryTypes />;
       case 'sector-types':
         return <SectorTypes />;
+      case 'bank-master':
+        return <BankMaster />;
       case 'reports':
         return <Reports />;
       case 'settings':

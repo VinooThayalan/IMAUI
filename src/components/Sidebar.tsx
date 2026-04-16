@@ -56,6 +56,7 @@ const navSections: NavSection[] = [
       { icon: Percent, label: 'Brokerage Fee Types', href: '#brokerage-fee-types', menuName: 'brokerage-fee-types' },
       { icon: Factory, label: 'Industry Types', href: '#industry-types', menuName: 'industry-types' },
       { icon: Layers, label: 'Sector Types', href: '#sector-types', menuName: 'sector-types' },
+      { icon: Landmark, label: 'Banks', href: '#bank-master', menuName: 'bank-master' },
     ]
   },
   {

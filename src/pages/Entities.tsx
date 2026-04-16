@@ -28,6 +28,18 @@ interface EntityType {
   name: string;
 }
 
+interface BankMasterItem {
+  id: string;
+  bank_name: string;
+  bank_code: string | null;
+}
+
+interface BankBranchItem {
+  id: string;
+  bank_master_id: string;
+  branch_name: string;
+}
+
 interface Broker {
   id: string;
   broker_id: string;
@@ -76,6 +88,8 @@ export function Entities() {
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [bankMasters, setBankMasters] = useState<BankMasterItem[]>([]);
+  const [bankBranches, setBankBranches] = useState<BankBranchItem[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [entityFormData, setEntityFormData] = useState({
     name: '',
@@ -99,6 +113,8 @@ export function Entities() {
     custodian_account_fee: '',
     broker_account_number: '',
     bank_name: '',
+    bank_master_id: '',
+    bank_branch_id: '',
     currency: 'LKR',
     bank_account_number: '',
     facility_limit: '',
@@ -111,6 +127,8 @@ export function Entities() {
     fetchEntityTypes();
     fetchBrokers();
     fetchCurrencies();
+    fetchBankMasters();
+    fetchBankBranches();
   }, []);
 
   async function fetchEntities() {
@@ -174,6 +192,34 @@ export function Entities() {
       setCurrencies(data || []);
     } catch (error) {
       console.error('Error fetching currencies:', error);
+    }
+  }
+
+  async function fetchBankMasters() {
+    try {
+      const { data, error } = await supabase
+        .from('bank_master')
+        .select('id, bank_name, bank_code')
+        .eq('is_active', true)
+        .order('bank_name');
+      if (error) throw error;
+      setBankMasters(data || []);
+    } catch (error) {
+      console.error('Error fetching bank masters:', error);
+    }
+  }
+
+  async function fetchBankBranches() {
+    try {
+      const { data, error } = await supabase
+        .from('bank_branches')
+        .select('id, bank_master_id, branch_name')
+        .eq('is_active', true)
+        .order('branch_name');
+      if (error) throw error;
+      setBankBranches(data || []);
+    } catch (error) {
+      console.error('Error fetching bank branches:', error);
     }
   }
 
@@ -250,6 +296,8 @@ export function Entities() {
       custodian_account_fee: '',
       broker_account_number: '',
       bank_name: '',
+      bank_master_id: '',
+      bank_branch_id: '',
       currency: 'LKR',
       bank_account_number: '',
       facility_limit: '',
@@ -263,7 +311,19 @@ export function Entities() {
     setBrokerFormData(prev => ({
       ...prev,
       broker_id: brokerId,
-      bank_name: selected?.settlement_bank_account || ''
+      bank_name: selected?.settlement_bank_account || '',
+      bank_master_id: '',
+      bank_branch_id: ''
+    }));
+  }
+
+  function handleBankMasterSelect(bankMasterId: string) {
+    const selected = bankMasters.find(b => b.id === bankMasterId);
+    setBrokerFormData(prev => ({
+      ...prev,
+      bank_master_id: bankMasterId,
+      bank_branch_id: '',
+      bank_name: selected?.bank_name || ''
     }));
   }
 
@@ -279,6 +339,8 @@ export function Entities() {
         assigned_date: brokerFormData.assigned_date,
         notes: brokerFormData.notes || null,
         bank_name: brokerFormData.bank_name || null,
+        bank_master_id: brokerFormData.bank_master_id || null,
+        bank_branch_id: brokerFormData.bank_branch_id || null,
         currency: brokerFormData.currency,
         is_active: true
       };
@@ -798,16 +860,35 @@ export function Entities() {
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Name</label>
-                    <input
-                      type="text"
-                      value={brokerFormData.bank_name}
-                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_name: e.target.value})}
+                    <select
+                      value={brokerFormData.bank_master_id}
+                      onChange={(e) => handleBankMasterSelect(e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder={!isCustodian ? 'Auto-filled from broker profile' : 'Enter bank name'}
-                    />
-                    {!isCustodian && brokerFormData.bank_name && (
-                      <p className="text-xs text-gray-500 mt-1">Auto-filled from broker settlement bank account</p>
-                    )}
+                    >
+                      <option value="">Select bank</option>
+                      {bankMasters.map(bm => (
+                        <option key={bm.id} value={bm.id}>
+                          {bm.bank_name}{bm.bank_code ? ` (${bm.bank_code})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Branch</label>
+                    <select
+                      value={brokerFormData.bank_branch_id}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_branch_id: e.target.value})}
+                      disabled={!brokerFormData.bank_master_id}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+                    >
+                      <option value="">Select branch (optional)</option>
+                      {bankBranches
+                        .filter(b => b.bank_master_id === brokerFormData.bank_master_id)
+                        .map(br => (
+                          <option key={br.id} value={br.id}>{br.branch_name}</option>
+                        ))}
+                    </select>
                   </div>
 
                   <div>
