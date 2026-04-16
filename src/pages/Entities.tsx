@@ -343,11 +343,12 @@ export function Entities() {
         is_active: true
       };
 
+      insertData.bank_account_number = brokerFormData.bank_account_number || null;
+
       if (brokerFormData.relationship_type === 'Custodian') {
         insertData.custodian_account_number = brokerFormData.custodian_account_number || null;
         insertData.custodian_account_name = brokerFormData.custodian_account_name || null;
         insertData.custodian_account_fee = brokerFormData.custodian_account_fee ? parseFloat(brokerFormData.custodian_account_fee) : null;
-        insertData.bank_account_number = brokerFormData.bank_account_number || null;
       } else {
         insertData.broker_account_number = brokerFormData.broker_account_number || null;
         insertData.broker_text = brokerFormData.broker_text || null;
@@ -904,30 +905,29 @@ export function Entities() {
                     </select>
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account Number</label>
+                    <input
+                      type="text"
+                      value={brokerFormData.bank_account_number}
+                      onChange={(e) => setBrokerFormData({...brokerFormData, bank_account_number: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter bank account number"
+                    />
+                  </div>
+
                   {isCustodian && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Bank Account Number</label>
-                        <input
-                          type="text"
-                          value={brokerFormData.bank_account_number}
-                          onChange={(e) => setBrokerFormData({...brokerFormData, bank_account_number: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Enter bank account number"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Fee %</label>
-                        <input
-                          type="number"
-                          step="0.0001"
-                          value={brokerFormData.custodian_account_fee}
-                          onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_fee: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Enter fee percentage"
-                        />
-                      </div>
-                    </>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Fee %</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={brokerFormData.custodian_account_fee}
+                        onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_fee: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter fee percentage"
+                      />
+                    </div>
                   )}
 
                   <div>
@@ -991,12 +991,12 @@ export function Entities() {
                                   <div><span className="font-medium">Account Number:</span> {eb.custodian_account_number}</div>
                                   <div><span className="font-medium">Account Name:</span> {eb.custodian_account_name}</div>
                                   {eb.custodian_account_fee != null && <div><span className="font-medium">Account Fee:</span> {eb.custodian_account_fee}%</div>}
-                                  {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
                                 </>
                               )}
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (
                                 <div><span className="font-medium">Broker Account:</span> {eb.broker_account_number}</div>
                               )}
+                              {eb.bank_account_number && <div><span className="font-medium">Bank Acc No:</span> {eb.bank_account_number}</div>}
                               {eb.bank_name && <div><span className="font-medium">Bank:</span> {eb.bank_name}</div>}
                               {eb.currency && <div><span className="font-medium">Currency:</span> {eb.currency}</div>}
                               <div><span className="font-medium">Assigned:</span> {eb.assigned_date}</div>
