@@ -97,6 +97,25 @@ interface ExtractedData {
   net_amount: string;
   settlement: string;
   foreign_brokerage: string;
+  account_no?: string;
+  broker_name?: string;
+  buyer_name?: string;
+}
+
+interface ExtractedRow {
+  contract_no: string;
+  qty: number;
+  security: string;
+  rate: number;
+  gross_value: number;
+  brokerage: number;
+  cds_fees: number;
+  cse_fees: number;
+  sec: number;
+  stl: number;
+  clearing_fee: number;
+  foreign_br: number;
+  amount: number;
 }
 
 export function BuyAndSellNotes() {
@@ -110,6 +129,7 @@ export function BuyAndSellNotes() {
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
+  const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -237,6 +257,72 @@ export function BuyAndSellNotes() {
     };
   }
 
+  function feeRates(txn: Transaction) {
+    const feeType = brokerageFeeTypes.find(ft => ft.id === txn.brokerage_fee_type_id);
+    const items = feeType?.fee_breakdown_items || [];
+    const findRate = (patterns: string[]) => {
+      const item = items.find(it => patterns.some(p => it.name?.toLowerCase().includes(p)));
+      return item ? Number(item.rate) || 0 : 0;
+    };
+    return {
+      brokerage: findRate(['brokerage']),
+      sec: findRate(['sec cess', 'sec ']),
+      cse: findRate(['cse', 'exchange']),
+      cds: findRate(['cds']),
+      stl: findRate(['iovy', 'cess', 'gov']),
+      clearing: findRate(['clearing']),
+    };
+  }
+
+  function buildRows(txn: Transaction, share: Share | undefined): ExtractedRow[] {
+    const totalShares = Number(txn.no_of_shares) || 0;
+    const rate = Number(txn.price_per_share) || 0;
+    const rates = feeRates(txn);
+    const security = (share?.ticker || 'SEC') + '.N0000';
+
+    const chunkCount = Math.min(5, Math.max(1, Math.ceil(totalShares / Math.max(1, Math.floor(totalShares / 3)))));
+    const n = Math.min(5, Math.max(1, chunkCount));
+    const baseChunk = Math.floor(totalShares / n);
+    const chunks: number[] = [];
+    let remaining = totalShares;
+    for (let i = 0; i < n - 1; i += 1) {
+      const qty = Math.max(1, Math.min(remaining - (n - 1 - i), baseChunk));
+      chunks.push(qty);
+      remaining -= qty;
+    }
+    chunks.push(remaining);
+
+    const baseContractNo = Date.now();
+    return chunks.map((qty, idx) => {
+      const gross = qty * rate;
+      const brokerage = (gross * rates.brokerage) / 100;
+      const cds_fees = (gross * rates.cds) / 100;
+      const cse_fees = (gross * rates.cse) / 100;
+      const sec = (gross * rates.sec) / 100;
+      const stl = (gross * rates.stl) / 100;
+      const clearing_fee = (gross * rates.clearing) / 100;
+      const foreign_br = 0;
+      const totalFees = brokerage + cds_fees + cse_fees + sec + stl + clearing_fee + foreign_br;
+      const isBuy = txn.transaction_type?.toUpperCase() === 'BUY';
+      const amount = isBuy ? gross + totalFees : gross - totalFees;
+      return {
+        contract_no: String(baseContractNo + idx),
+        qty,
+        security,
+        rate,
+        gross_value: gross,
+        brokerage,
+        cds_fees,
+        cse_fees,
+        sec,
+        stl,
+        clearing_fee,
+        foreign_br,
+        amount,
+      };
+    });
+  }
+
   function simulateDataExtraction() {
     setIsExtracting(true);
     const selectedTxn = transactions.find(t => t.id === formData.transaction_id);
@@ -247,12 +333,21 @@ export function BuyAndSellNotes() {
         return;
       }
 
-      const gross = Number(selectedTxn.total_amount_gross ?? selectedTxn.total_amount ?? 0);
-      const fees = getExpectedFees(selectedTxn);
-      const totalFees = fees.brokerage + fees.sec + fees.exchange + fees.cds + fees.gov_cess + fees.clearing_fees;
-      const netAmount = selectedTxn.transaction_type?.toUpperCase() === 'BUY'
-        ? gross + totalFees
-        : gross - totalFees;
+      const share = shares.find(s => s.id === selectedTxn.share_id);
+      const rows = buildRows(selectedTxn, share);
+      const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
+
+      const totalShares = sum(r => r.qty);
+      const totalGross = sum(r => r.gross_value);
+      const totalBrokerage = sum(r => r.brokerage);
+      const totalCds = sum(r => r.cds_fees);
+      const totalCse = sum(r => r.cse_fees);
+      const totalSec = sum(r => r.sec);
+      const totalStl = sum(r => r.stl);
+      const totalClearing = sum(r => r.clearing_fee);
+      const totalForeign = sum(r => r.foreign_br);
+      const totalAmount = sum(r => r.amount);
+      const avgRate = totalShares > 0 ? totalGross / totalShares : Number(selectedTxn.price_per_share) || 0;
 
       const today = new Date();
       const settleDate = new Date(today);
@@ -260,21 +355,25 @@ export function BuyAndSellNotes() {
 
       const extracted: ExtractedData = {
         trade_date: selectedTxn.transaction_date || today.toISOString().split('T')[0],
-        contract_no: 'CN' + Math.floor(Math.random() * 900000 + 100000),
-        no_of_shares: String(selectedTxn.no_of_shares ?? ''),
-        price_avg: Number(selectedTxn.price_per_share ?? 0).toFixed(2),
-        gross_amount: gross.toFixed(2),
-        brokerage: fees.brokerage.toFixed(2),
-        sec: fees.sec.toFixed(2),
-        exchange: fees.exchange.toFixed(2),
-        cds: fees.cds.toFixed(2),
-        gov_cess: fees.gov_cess.toFixed(2),
-        clearing_fees: fees.clearing_fees.toFixed(2),
-        net_amount: netAmount.toFixed(2),
+        contract_no: rows[0]?.contract_no || '',
+        no_of_shares: String(totalShares),
+        price_avg: avgRate.toFixed(2),
+        gross_amount: totalGross.toFixed(2),
+        brokerage: totalBrokerage.toFixed(2),
+        sec: totalSec.toFixed(2),
+        exchange: totalCse.toFixed(2),
+        cds: totalCds.toFixed(2),
+        gov_cess: totalStl.toFixed(2),
+        clearing_fees: totalClearing.toFixed(2),
+        net_amount: totalAmount.toFixed(2),
         settlement: settleDate.toISOString().split('T')[0],
-        foreign_brokerage: '0.00',
+        foreign_brokerage: totalForeign.toFixed(2),
+        account_no: 'DSA-' + Math.floor(1000 + Math.random() * 9000) + '-LC/00',
+        broker_name: 'Capital TRUST Securities (Private) Limited',
+        buyer_name: entities.find(e => e.id === selectedTxn.entity_id)?.name || '',
       };
 
+      setExtractedRows(rows);
       setExtractedData(extracted);
       setFormData(prev => ({ ...prev, settlement_date: extracted.settlement }));
       setIsExtracting(false);
@@ -505,6 +604,7 @@ export function BuyAndSellNotes() {
     });
     setValidationIssues([]);
     setFieldCompare({});
+    setExtractedRows([]);
     setTotals({
       total_shares: 0,
       total_price_avg: 0,
@@ -862,6 +962,74 @@ export function BuyAndSellNotes() {
                         These mismatches require approval before processing
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {extractedRows.length > 0 && (
+                <div className="border border-gray-300 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-800">Extracted Line Items</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {extractedData.broker_name}{extractedData.account_no ? ` · Account: ${extractedData.account_no}` : ''}
+                    </p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Contract No</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Qty</th>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Security</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Rate</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Gross Value</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Brokerage</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">CDS Fees</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">CSE Fees</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">SEC</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">STL</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Clearing Fee</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Foreign Br.</th>
+                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {extractedRows.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2 text-gray-800">{row.contract_no}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.qty.toLocaleString()}</td>
+                            <td className="px-3 py-2 text-gray-800">{row.security}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.rate.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.gross_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.brokerage.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.cds_fees.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.cse_fees.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.sec.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.stl.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.clearing_fee.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right text-gray-800">{row.foreign_br.toFixed(2)}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-gray-900">{row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50">
+                        <tr className="border-t-2 border-gray-300 font-semibold">
+                          <td className="px-3 py-2 text-gray-900" colSpan={1}>Total</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
+                          <td className="px-3 py-2"></td>
+                          <td className="px-3 py-2"></td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.gross_value, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.brokerage, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.cds_fees, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.cse_fees, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.sec, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.stl, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.clearing_fee, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.foreign_br, 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
                 </div>
               )}
