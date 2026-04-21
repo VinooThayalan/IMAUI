@@ -369,8 +369,11 @@ export function Entities() {
         custodian_account_fee: '',
         broker_account_number: '',
         bank_name: '',
+        bank_master_id: '',
+        bank_branch_id: '',
         currency: 'LKR',
         bank_account_number: '',
+        facility_limit: '',
         broker_name_id: '',
         broker_text: ''
       });
@@ -379,8 +382,10 @@ export function Entities() {
       console.error('Error assigning broker:', error);
       if (error.code === '23505') {
         alert('This broker is already assigned to this entity.');
+      } else if (error.code === '42501') {
+        alert('Permission denied. You do not have access to assign brokers to this entity.');
       } else {
-        alert('Failed to assign broker. Please try again.');
+        alert(`Failed to assign broker: ${error.message || 'Please try again.'}`);
       }
     }
   }
