@@ -29,6 +29,7 @@ const navSections: NavSection[] = [
       { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals', menuName: 'buy-sell-approvals' },
       { icon: Wallet, label: 'Cash Balance', href: '#cash-balance', menuName: 'cash-balance' },
       { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry', menuName: 'scrip-entry' },
+      { icon: Wallet, label: 'Opening Balances', href: '#opening-balances', menuName: 'opening-balances' },
       { icon: DollarSign, label: 'Dividends', href: '#dividends', menuName: 'dividends' },
       { icon: GitBranch, label: 'Rights Issues', href: '#rights-issues', menuName: 'rights-issues' },
       { icon: GitMerge, label: 'Amalgamations', href: '#amalgamations', menuName: 'amalgamations' },
