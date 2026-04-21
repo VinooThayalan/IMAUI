@@ -328,9 +328,10 @@ export function OpeningBalances() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto">
+          <div className="min-h-full flex items-start sm:items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl my-8 flex flex-col max-h-[calc(100vh-4rem)]">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
               <h2 className="text-2xl font-bold text-gray-900">
                 {editingId ? 'Edit Opening Balance' : 'Add Opening Balance'}
               </h2>
@@ -338,7 +339,7 @@ export function OpeningBalances() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
               {error && (
                 <div className="px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm font-medium">{error}</div>
               )}
@@ -445,7 +446,7 @@ export function OpeningBalances() {
                 </div>
               )}
             </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3">
+            <div className="p-6 border-t border-gray-200 flex justify-end space-x-3 flex-shrink-0">
               <button
                 onClick={() => setShowModal(false)}
                 className="px-5 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -461,6 +462,7 @@ export function OpeningBalances() {
                 <span>{saving ? 'Saving...' : editingId ? 'Update' : 'Save'}</span>
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}
