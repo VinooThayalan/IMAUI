@@ -1,6 +1,7 @@
 import { Plus, Search, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Entity {
   id: string;
@@ -18,11 +19,13 @@ interface Bank {
   account_number: string;
   branch: string;
   balance: number;
+  facility_limit?: number | null;
 }
 
 type FilterView = 'all' | 'entity' | 'entity-bank';
 
 export function CashBalance() {
+  const { appUser, user } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [filterView, setFilterView] = useState<FilterView>('all');
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
@@ -38,10 +41,8 @@ export function CashBalance() {
     bankId: '',
     code: '',
     amount: '',
-    onHoldAmount: '0',
     description: '',
     date: new Date().toISOString().split('T')[0],
-    createdBy: ''
   });
 
   useEffect(() => {
@@ -109,10 +110,12 @@ export function CashBalance() {
   async function handleAddTransaction(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!formData.entityId || !formData.amount || !formData.description || !formData.createdBy) {
+    if (!formData.entityId || !formData.amount || !formData.description) {
       alert('Please fill in all required fields');
       return;
     }
+
+    const createdBy = appUser?.full_name || appUser?.email || user?.email || 'Unknown';
 
     try {
       const entity = entities.find(e => e.id === formData.entityId);
@@ -131,8 +134,6 @@ export function CashBalance() {
         ? lastBalance + amount
         : lastBalance - amount;
 
-      const onHoldAmount = parseFloat(formData.onHoldAmount) || 0;
-
       const { error } = await supabase
         .from('cash_balance_ledger')
         .insert({
@@ -142,10 +143,10 @@ export function CashBalance() {
           amount: amount,
           date: formData.date,
           running_balance: newBalance,
-          on_hold_amount: onHoldAmount,
+          on_hold_amount: 0,
           entity_id: formData.entityId,
           bank_id: formData.bankId || null,
-          created_by: formData.createdBy
+          created_by: createdBy
         });
 
       if (error) throw error;
@@ -163,10 +164,8 @@ export function CashBalance() {
         bankId: '',
         code: '',
         amount: '',
-        onHoldAmount: '0',
         description: '',
         date: new Date().toISOString().split('T')[0],
-        createdBy: ''
       });
     } catch (error) {
       console.error('Error adding transaction:', error);
@@ -601,12 +600,14 @@ export function CashBalance() {
 
                 {formData.entityId && (() => {
                   const selectedEntity = entities.find(e => e.id === formData.entityId);
+                  const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
+                  const facilityLimit = Number(selectedBank?.facility_limit ?? selectedEntity?.od_limit ?? 0);
                   return selectedEntity ? (
                     <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit (OD Limit)</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
                       <input
                         type="text"
-                        value={`Rs. ${selectedEntity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        value={`Rs. ${facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
                         disabled
                       />
@@ -722,18 +723,6 @@ export function CashBalance() {
                   );
                 })()}
 
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">On Hold Amount (LKR)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.onHoldAmount}
-                    onChange={(e) => setFormData({ ...formData, onHoldAmount: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="0.00"
-                  />
-                </div>
-
                 {formData.entityId && formData.amount && (() => {
                   const entity = entities.find(e => e.entity_id === formData.entityId);
                   if (!entity) return null;
@@ -751,8 +740,9 @@ export function CashBalance() {
                     ? lastBalance + amount
                     : lastBalance - amount;
 
-                  const onHoldAmount = parseFloat(formData.onHoldAmount) || 0;
-                  const availableBalance = closingBalance + entity.od_limit - onHoldAmount;
+                  const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
+                  const facilityLimit = Number(selectedBank?.facility_limit ?? entity.od_limit ?? 0);
+                  const availableBalance = closingBalance + facilityLimit;
 
                   return (
                     <div className="col-span-2">
@@ -789,17 +779,6 @@ export function CashBalance() {
                     value={formData.date}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Created By *</label>
-                  <input
-                    type="text"
-                    value={formData.createdBy}
-                    onChange={(e) => setFormData({ ...formData, createdBy: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Your name"
                     required
                   />
                 </div>
