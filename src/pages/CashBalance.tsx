@@ -373,9 +373,12 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button
-                        onClick={() => {
-                          setSelectedEntity(entity);
-                          setSelectedBank(null);
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEntityClick(entity);
+                          setTimeout(() => {
+                            document.getElementById('transaction-ledger')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }, 50);
                         }}
                         className="text-blue-600 hover:text-blue-700 font-medium text-sm flex items-center space-x-1"
                       >
@@ -391,7 +394,7 @@ export function CashBalance() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200">
+      <div id="transaction-ledger" className="bg-white rounded-xl border border-gray-200 scroll-mt-6">
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-900">Transaction Ledger</h2>
