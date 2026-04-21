@@ -1,145 +1,227 @@
-import { Plus, Search, Filter, Calendar, TrendingUp, CheckCircle, XCircle, Clock } from 'lucide-react';
-import { useState } from 'react';
+import { Search, Calendar, TrendingUp, TrendingDown, Save, Minus, CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
-const dailyPrices = [
-  {
-    id: 1,
-    dateEntered: '2024-01-15 09:30 AM',
-    effectiveDate: '2024-01-15',
-    shareId: 'JKH',
-    sharePrice: 'Rs. 175.00',
-    enteredBy: 'Ravi Fernando',
-    approvedBy: 'Priya Silva',
-    status: 'Approved'
-  },
-  {
-    id: 2,
-    dateEntered: '2024-01-15 10:15 AM',
-    effectiveDate: '2024-01-15',
-    shareId: 'NDB',
-    sharePrice: 'Rs. 134.00',
-    enteredBy: 'Nuwan Perera',
-    approvedBy: null,
-    status: 'Pending'
-  },
-  {
-    id: 3,
-    dateEntered: '2024-01-15 11:00 AM',
-    effectiveDate: '2024-01-15',
-    shareId: 'Sampath',
-    sharePrice: 'Rs. 375.00',
-    enteredBy: 'Tharindu Jayasinghe',
-    approvedBy: 'Chathura Wijesinghe',
-    status: 'Approved'
-  },
-  {
-    id: 4,
-    dateEntered: '2024-01-14 02:30 PM',
-    effectiveDate: '2024-01-14',
-    shareId: 'Dialog',
-    sharePrice: 'Rs. 250.00',
-    enteredBy: 'Dilshan Rajapaksa',
-    approvedBy: 'Priya Silva',
-    status: 'Approved'
-  },
-  {
-    id: 5,
-    dateEntered: '2024-01-14 03:45 PM',
-    effectiveDate: '2024-01-14',
-    shareId: 'ADL',
-    sharePrice: 'Rs. 148.50',
-    enteredBy: 'Ravi Fernando',
-    approvedBy: null,
-    status: 'Rejected'
-  },
-];
+interface Share {
+  id: string;
+  ticker: string;
+  name: string | null;
+}
 
-const statusConfig = {
-  Approved: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100' },
-  Pending: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100' },
-  Rejected: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100' },
-};
+interface PriceRow {
+  share_id: string;
+  ticker: string;
+  name: string | null;
+  previousPrice: number | null;
+  existingId: string | null;
+  newPrice: string;
+}
 
 export function DailyPrices() {
-  const [showModal, setShowModal] = useState(false);
+  const { appUser, user } = useAuth();
+  const [effectiveDate, setEffectiveDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [rows, setRows] = useState<PriceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const pendingCount = dailyPrices.filter(p => p.status === 'Pending').length;
-  const approvedToday = dailyPrices.filter(p =>
-    p.status === 'Approved' && p.effectiveDate === '2024-01-15'
-  ).length;
+  useEffect(() => {
+    loadData();
+  }, [effectiveDate]);
+
+  async function loadData() {
+    try {
+      setLoading(true);
+
+      const { data: sharesData, error: sharesError } = await supabase
+        .from('shares')
+        .select('id, ticker, name, is_active')
+        .order('ticker');
+      if (sharesError) throw sharesError;
+
+      const activeShares = (sharesData || []).filter((s: any) => s.is_active !== false) as Share[];
+
+      const { data: todaysPrices, error: todayError } = await supabase
+        .from('daily_share_prices')
+        .select('id, share_id, share_price')
+        .eq('effective_date', effectiveDate);
+      if (todayError) throw todayError;
+
+      const { data: history, error: histError } = await supabase
+        .from('daily_share_prices')
+        .select('share_id, share_price, effective_date')
+        .lt('effective_date', effectiveDate)
+        .order('effective_date', { ascending: false });
+      if (histError) throw histError;
+
+      const previousByShare = new Map<string, number>();
+      (history || []).forEach((r: any) => {
+        if (!previousByShare.has(r.share_id)) {
+          previousByShare.set(r.share_id, Number(r.share_price));
+        }
+      });
+
+      const existingByShare = new Map<string, { id: string; price: number }>();
+      (todaysPrices || []).forEach((r: any) => {
+        existingByShare.set(r.share_id, { id: r.id, price: Number(r.share_price) });
+      });
+
+      const nextRows: PriceRow[] = activeShares.map((s) => {
+        const existing = existingByShare.get(s.id);
+        return {
+          share_id: s.id,
+          ticker: s.ticker,
+          name: s.name,
+          previousPrice: previousByShare.get(s.id) ?? null,
+          existingId: existing?.id ?? null,
+          newPrice: existing ? String(existing.price) : '',
+        };
+      });
+
+      setRows(nextRows);
+    } catch (error) {
+      console.error('Error loading daily prices:', error);
+      setFeedback({ type: 'error', message: 'Failed to load prices' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateRow(share_id: string, value: string) {
+    setRows((prev) => prev.map((r) => (r.share_id === share_id ? { ...r, newPrice: value } : r)));
+  }
+
+  async function handleSaveAll() {
+    const createdBy = appUser?.full_name || appUser?.email || user?.email || 'Unknown';
+    const toUpsert = rows
+      .filter((r) => r.newPrice.trim() !== '' && !Number.isNaN(parseFloat(r.newPrice)))
+      .map((r) => ({
+        id: r.existingId || undefined,
+        share_id: r.share_id,
+        effective_date: effectiveDate,
+        share_price: parseFloat(r.newPrice),
+        entered_by: createdBy,
+        status: 'Approved' as const,
+      }));
+
+    if (toUpsert.length === 0) {
+      setFeedback({ type: 'error', message: 'Enter at least one price before saving' });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setFeedback(null);
+
+      const newRecords = toUpsert.filter((r) => !r.id).map(({ id: _id, ...rest }) => rest);
+      const updates = toUpsert.filter((r) => r.id);
+
+      if (newRecords.length > 0) {
+        const { error } = await supabase.from('daily_share_prices').insert(newRecords);
+        if (error) throw error;
+      }
+
+      for (const u of updates) {
+        const { id, ...rest } = u;
+        const { error } = await supabase.from('daily_share_prices').update(rest).eq('id', id);
+        if (error) throw error;
+      }
+
+      setFeedback({ type: 'success', message: `Saved ${toUpsert.length} price${toUpsert.length > 1 ? 's' : ''}` });
+      await loadData();
+    } catch (error) {
+      console.error('Error saving prices:', error);
+      setFeedback({ type: 'error', message: 'Failed to save prices' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      (r) => r.ticker.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q)
+    );
+  }, [rows, search]);
+
+  const enteredCount = rows.filter((r) => r.newPrice.trim() !== '').length;
+  const savedCount = rows.filter((r) => r.existingId !== null).length;
+  const pendingCount = rows.length - savedCount;
+
+  function changeIndicator(row: PriceRow) {
+    const newVal = parseFloat(row.newPrice);
+    if (Number.isNaN(newVal) || row.previousPrice === null) return null;
+    const diff = newVal - row.previousPrice;
+    if (diff === 0) return { Icon: Minus, color: 'text-gray-500', label: '0.00%' };
+    const pct = (diff / row.previousPrice) * 100;
+    const up = diff > 0;
+    return {
+      Icon: up ? TrendingUp : TrendingDown,
+      color: up ? 'text-green-600' : 'text-red-600',
+      label: `${up ? '+' : ''}${pct.toFixed(2)}%`,
+    };
+  }
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Daily Share Prices</h1>
-          <p className="text-gray-500 mt-1">Enter and manage daily share price data</p>
+          <p className="text-gray-500 mt-1">Bulk update prices for all active shares</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Price Entry</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 px-3 py-2 bg-white border border-gray-300 rounded-lg">
+            <Calendar className="w-5 h-5 text-gray-500" />
+            <input
+              type="date"
+              value={effectiveDate}
+              onChange={(e) => setEffectiveDate(e.target.value)}
+              className="outline-none text-sm font-medium text-gray-900"
+            />
+          </div>
+          <button
+            onClick={handleSaveAll}
+            disabled={saving || loading || enteredCount === 0}
+            className="flex items-center space-x-2 px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Save className="w-5 h-5" />
+            <span className="font-medium">{saving ? 'Saving...' : `Save ${enteredCount || ''}`.trim()}</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Today's Entries</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{approvedToday}</p>
-              <p className="text-sm text-gray-500 mt-2">Approved prices</p>
-            </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Calendar className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Pending Approval</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{pendingCount}</p>
-              <p className="text-sm text-gray-500 mt-2">Awaiting review</p>
-            </div>
-            <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <Clock className="w-6 h-6 text-yellow-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Active Shares</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">5</p>
-              <p className="text-sm text-gray-500 mt-2">Tracked symbols</p>
-            </div>
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-green-600" />
-            </div>
-          </div>
-        </div>
+        <StatCard label="Active Shares" value={rows.length} sub="Tracked symbols" icon={TrendingUp} tone="blue" />
+        <StatCard label="Prices Set Today" value={savedCount} sub="Already saved" icon={CheckCircle2} tone="green" />
+        <StatCard label="Awaiting Entry" value={pendingCount} sub="No price for this date" icon={Calendar} tone="yellow" />
       </div>
 
+      {feedback && (
+        <div
+          className={`px-4 py-3 rounded-lg text-sm font-medium ${
+            feedback.type === 'success'
+              ? 'bg-green-50 border border-green-200 text-green-800'
+              : 'bg-red-50 border border-red-200 text-red-800'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search by ticker, entered by, or date..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-            <button className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter className="w-5 h-5 text-gray-500" />
-              <span className="font-medium text-gray-700">Filter</span>
-            </button>
+        <div className="p-4 border-b border-gray-200">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by ticker or share name..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
         </div>
 
@@ -147,125 +229,124 @@ export function DailyPrices() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date Entered</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Effective Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ticker</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share Price</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entered By</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Approved By</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share Name</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Previous Price</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-56">New Price (LKR)</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Change</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {dailyPrices.map((price) => {
-                const StatusIcon = statusConfig[price.status as keyof typeof statusConfig].icon;
-                return (
-                  <tr key={price.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{price.dateEntered}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{price.effectiveDate}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-blue-600">{price.shareId}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-semibold text-gray-900">{price.sharePrice}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{price.enteredBy}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{price.approvedBy || '-'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusConfig[price.status as keyof typeof statusConfig].bg} ${statusConfig[price.status as keyof typeof statusConfig].color}`}>
-                        <StatusIcon className="w-3 h-3 mr-1" />
-                        {price.status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                    Loading shares...
+                  </td>
+                </tr>
+              ) : filteredRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                    No shares found
+                  </td>
+                </tr>
+              ) : (
+                filteredRows.map((row) => {
+                  const change = changeIndicator(row);
+                  return (
+                    <tr key={row.share_id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-3 whitespace-nowrap">
+                        <span className="text-sm font-bold text-blue-600">{row.ticker}</span>
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap">
+                        <span className="text-sm text-gray-900">{row.name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-right">
+                        <span className="text-sm text-gray-700">
+                          {row.previousPrice !== null
+                            ? `Rs. ${row.previousPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={row.newPrice}
+                          onChange={(e) => updateRow(row.share_id, e.target.value)}
+                          placeholder="0.00"
+                          className="w-40 px-3 py-1.5 border border-gray-300 rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-right">
+                        {change ? (
+                          <span className={`inline-flex items-center text-sm font-semibold ${change.color}`}>
+                            <change.Icon className="w-4 h-4 mr-1" />
+                            {change.label}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-3 whitespace-nowrap text-center">
+                        {row.existingId ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Saved
+                          </span>
+                        ) : row.newPrice.trim() !== '' ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                            Unsaved
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+                            Empty
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-900">Add Daily Price Entry</h2>
-            </div>
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Effective Date</label>
-                  <input
-                    type="date"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    defaultValue={new Date().toISOString().split('T')[0]}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Ticker</label>
-                  <input
-                    type="text"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., JKH"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Share Price (LKR)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Entered By</label>
-                  <input
-                    type="text"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Your name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Approved By (Optional)</label>
-                  <input
-                    type="text"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Approver name"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (Optional)</label>
-                  <textarea
-                    rows={3}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Add any additional notes..."
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end space-x-4">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                Add Entry
-              </button>
-            </div>
-          </div>
+function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  sub: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: 'blue' | 'green' | 'yellow';
+}) {
+  const tones = {
+    blue: 'bg-blue-100 text-blue-600',
+    green: 'bg-green-100 text-green-600',
+    yellow: 'bg-yellow-100 text-yellow-600',
+  };
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-500">{label}</p>
+          <p className="text-2xl font-bold text-gray-900 mt-2">{value}</p>
+          <p className="text-sm text-gray-500 mt-2">{sub}</p>
         </div>
-      )}
+        <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${tones[tone]}`}>
+          <Icon className="w-6 h-6" />
+        </div>
+      </div>
     </div>
   );
 }
