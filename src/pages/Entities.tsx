@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, MoreVertical, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -78,6 +78,7 @@ export function Entities() {
   const { user, refreshPermissions } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showBrokerModal, setShowBrokerModal] = useState(false);
+  const [editingBrokerId, setEditingBrokerId] = useState<string | null>(null);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
@@ -279,11 +280,58 @@ export function Entities() {
     setShowEditModal(true);
   }
 
+  function handleEditBroker(eb: EntityBroker) {
+    setEditingBrokerId(eb.id);
+    setBrokerFormData({
+      broker_id: eb.broker_id || '',
+      relationship_type: eb.relationship_type,
+      assigned_date: eb.assigned_date || new Date().toISOString().split('T')[0],
+      notes: (eb as any).notes || '',
+      custodian_account_number: eb.custodian_account_number || '',
+      custodian_account_name: eb.custodian_account_name || '',
+      custodian_account_fee: eb.custodian_account_fee != null ? String(eb.custodian_account_fee) : '',
+      broker_account_number: eb.broker_account_number || '',
+      bank_name: eb.bank_name || '',
+      bank_master_id: '',
+      bank_branch_id: '',
+      currency: eb.currency || 'LKR',
+      bank_account_number: eb.bank_account_number || '',
+      facility_limit: '',
+      broker_name_id: '',
+      broker_text: eb.broker_text || ''
+    });
+    const target = document.getElementById('broker-form-top');
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function handleCancelEditBroker() {
+    setEditingBrokerId(null);
+    setBrokerFormData({
+      broker_id: '',
+      relationship_type: 'Custodian',
+      assigned_date: new Date().toISOString().split('T')[0],
+      notes: '',
+      custodian_account_number: '',
+      custodian_account_name: '',
+      custodian_account_fee: '',
+      broker_account_number: '',
+      bank_name: '',
+      bank_master_id: '',
+      bank_branch_id: '',
+      currency: 'LKR',
+      bank_account_number: '',
+      facility_limit: '',
+      broker_name_id: '',
+      broker_text: ''
+    });
+  }
+
   function handleCloseBrokerModal() {
     setShowBrokerModal(false);
     setSelectedEntityId(null);
     setSelectedEntityName('');
     setEntityBrokers([]);
+    setEditingBrokerId(null);
     setBrokerFormData({
       broker_id: '',
       relationship_type: 'Custodian',
@@ -354,10 +402,17 @@ export function Entities() {
         insertData.broker_text = brokerFormData.broker_text || null;
       }
 
-      const { error } = await supabase.from('entity_brokers').insert(insertData);
+      let error;
+      if (editingBrokerId) {
+        ({ error } = await supabase.from('entity_brokers').update(insertData).eq('id', editingBrokerId));
+      } else {
+        ({ error } = await supabase.from('entity_brokers').insert(insertData));
+      }
 
       if (error) throw error;
 
+      const wasEditing = !!editingBrokerId;
+      setEditingBrokerId(null);
       await fetchEntityBrokers(selectedEntityId);
       setBrokerFormData({
         broker_id: '',
@@ -377,7 +432,7 @@ export function Entities() {
         broker_name_id: '',
         broker_text: ''
       });
-      alert('Broker/Custodian assigned successfully!');
+      alert(wasEditing ? 'Broker/Custodian updated successfully!' : 'Broker/Custodian assigned successfully!');
     } catch (error: any) {
       console.error('Error assigning broker:', error);
       if (error.code === '23505') {
@@ -784,7 +839,7 @@ export function Entities() {
             </div>
 
             <div className="p-6 space-y-6">
-              <form onSubmit={handleAssignBroker} className="space-y-4 p-4 bg-gray-50 rounded-lg">
+              <form id="broker-form-top" onSubmit={handleAssignBroker} className="space-y-4 p-4 bg-gray-50 rounded-lg">
                 <h3 className="text-lg font-semibold text-gray-900">Assign New {isCustodian ? 'Custodian' : 'Broker'} Account</h3>
 
                 <div className="grid grid-cols-3 gap-4">
@@ -958,13 +1013,23 @@ export function Entities() {
                   </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end space-x-2">
+                  {editingBrokerId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditBroker}
+                      className="flex items-center space-x-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>Cancel Edit</span>
+                    </button>
+                  )}
                   <button
                     type="submit"
                     className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                   >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Assign {isCustodian ? 'Custodian' : 'Broker'}</span>
+                    {editingBrokerId ? <Pencil className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                    <span>{editingBrokerId ? `Update ${isCustodian ? 'Custodian' : 'Broker'}` : `Assign ${isCustodian ? 'Custodian' : 'Broker'}`}</span>
                   </button>
                 </div>
               </form>
@@ -1009,13 +1074,24 @@ export function Entities() {
                               <div><span className="font-medium">Assigned:</span> {eb.assigned_date}</div>
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleRemoveBroker(eb.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Remove"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center space-x-1">
+                            <button
+                              onClick={() => handleEditBroker(eb)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit"
+                              type="button"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveBroker(eb.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Remove"
+                              type="button"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
