@@ -1470,12 +1470,6 @@ export function Transactions() {
                               <p className="text-sm font-semibold text-gray-900">{selectedEntityBroker.bank_account_number || 'N/A'}</p>
                             </div>
                             <div>
-                              <p className="text-xs text-gray-600">Facility Limit</p>
-                              <p className="text-sm font-semibold text-gray-900">
-                                LKR {selectedEntityBroker.facility_limit ? Number(selectedEntityBroker.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
-                              </p>
-                            </div>
-                            <div>
                               <p className="text-xs text-gray-600">Available Balance</p>
                               <p className="text-sm font-bold text-green-700">
                                 LKR {selectedEntityBroker.bank?.balance ? Number(selectedEntityBroker.bank.balance).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
