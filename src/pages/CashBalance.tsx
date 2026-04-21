@@ -578,7 +578,7 @@ export function CashBalance() {
                       })
                       .map((bank) => (
                         <option key={bank.id} value={bank.id}>
-                          {bank.name} - {bank.branch}
+                          {bank.name} - {bank.account_number}
                         </option>
                       ))}
                   </select>
