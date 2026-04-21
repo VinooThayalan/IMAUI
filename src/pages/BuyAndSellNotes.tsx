@@ -39,6 +39,21 @@ interface Transaction {
   no_of_shares: number;
   price_per_share: number;
   total_amount: number;
+  total_amount_gross?: number;
+  fees?: number;
+  brokerage_fee_type_id?: string;
+  brokerage_fee_rate?: number;
+}
+
+interface BrokerageFeeType {
+  id: string;
+  name: string;
+  fee_breakdown_items: { name: string; rate: number }[];
+}
+
+interface FieldCompare {
+  expected: number | null;
+  matches: boolean;
 }
 
 interface Entity {
@@ -93,6 +108,8 @@ export function BuyAndSellNotes() {
   const [shares, setShares] = useState<Share[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
+  const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
+  const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -146,13 +163,14 @@ export function BuyAndSellNotes() {
     try {
       setLoading(true);
 
-      const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, entityBrokersRes] = await Promise.all([
+      const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, entityBrokersRes, feeTypesRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').eq('approval_status', 'APPROVED').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
         supabase.from('shares').select('id, ticker, name').order('name'),
         supabase.from('brokers').select('id, broker_id, broker_name').eq('is_active', true).order('broker_name'),
-        supabase.from('entity_brokers').select('*')
+        supabase.from('entity_brokers').select('*'),
+        supabase.from('brokerage_fee_types').select('id, name, fee_breakdown_items')
       ]);
 
       if (notesRes.error) throw notesRes.error;
@@ -167,6 +185,7 @@ export function BuyAndSellNotes() {
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
       setEntityBrokers(entityBrokersRes.data || []);
+      setBrokerageFeeTypes(feeTypesRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -177,39 +196,89 @@ export function BuyAndSellNotes() {
 
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file && file.type === 'application/pdf') {
-      setUploadedFile(file);
-      simulateDataExtraction();
-    } else {
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
       alert('Please upload a PDF file');
+      return;
     }
+    if (!formData.transaction_id) {
+      alert('Please select a transaction before uploading the contract note.');
+      e.target.value = '';
+      return;
+    }
+    setUploadedFile(file);
+    simulateDataExtraction();
+  }
+
+  function getExpectedFees(txn: Transaction) {
+    const gross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const feeType = brokerageFeeTypes.find(ft => ft.id === txn.brokerage_fee_type_id);
+    const items = feeType?.fee_breakdown_items || [];
+
+    const findRate = (patterns: string[]) => {
+      const item = items.find(it => patterns.some(p => it.name?.toLowerCase().includes(p)));
+      return item ? Number(item.rate) || 0 : 0;
+    };
+
+    const brokerageRate = findRate(['brokerage']);
+    const secRate = findRate(['sec cess', 'sec ']);
+    const exchangeRate = findRate(['cse', 'exchange']);
+    const cdsRate = findRate(['cds']);
+    const govRate = findRate(['iovy', 'cess', 'gov']);
+    const clearingRate = findRate(['clearing']);
+
+    return {
+      brokerage: (gross * brokerageRate) / 100,
+      sec: (gross * secRate) / 100,
+      exchange: (gross * exchangeRate) / 100,
+      cds: (gross * cdsRate) / 100,
+      gov_cess: (gross * govRate) / 100,
+      clearing_fees: (gross * clearingRate) / 100,
+    };
   }
 
   function simulateDataExtraction() {
     setIsExtracting(true);
+    const selectedTxn = transactions.find(t => t.id === formData.transaction_id);
 
     setTimeout(() => {
-      const dummyData: ExtractedData = {
-        trade_date: '2024-01-15',
+      if (!selectedTxn) {
+        setIsExtracting(false);
+        return;
+      }
+
+      const gross = Number(selectedTxn.total_amount_gross ?? selectedTxn.total_amount ?? 0);
+      const fees = getExpectedFees(selectedTxn);
+      const totalFees = fees.brokerage + fees.sec + fees.exchange + fees.cds + fees.gov_cess + fees.clearing_fees;
+      const netAmount = selectedTxn.transaction_type?.toUpperCase() === 'BUY'
+        ? gross + totalFees
+        : gross - totalFees;
+
+      const today = new Date();
+      const settleDate = new Date(today);
+      settleDate.setDate(settleDate.getDate() + 2);
+
+      const extracted: ExtractedData = {
+        trade_date: selectedTxn.transaction_date || today.toISOString().split('T')[0],
         contract_no: 'CN' + Math.floor(Math.random() * 900000 + 100000),
-        no_of_shares: '1000',
-        price_avg: '125.50',
-        gross_amount: '125500.00',
-        brokerage: '878.50',
-        sec: '250.00',
-        exchange: '100.00',
-        cds: '50.00',
-        gov_cess: '150.00',
-        clearing_fees: '75.00',
-        net_amount: '127003.50',
-        settlement: '2024-01-17',
-        foreign_brokerage: '0.00'
+        no_of_shares: String(selectedTxn.no_of_shares ?? ''),
+        price_avg: Number(selectedTxn.price_per_share ?? 0).toFixed(2),
+        gross_amount: gross.toFixed(2),
+        brokerage: fees.brokerage.toFixed(2),
+        sec: fees.sec.toFixed(2),
+        exchange: fees.exchange.toFixed(2),
+        cds: fees.cds.toFixed(2),
+        gov_cess: fees.gov_cess.toFixed(2),
+        clearing_fees: fees.clearing_fees.toFixed(2),
+        net_amount: netAmount.toFixed(2),
+        settlement: settleDate.toISOString().split('T')[0],
+        foreign_brokerage: '0.00',
       };
 
-      setExtractedData(dummyData);
-      setFormData({ ...formData, settlement_date: dummyData.settlement });
+      setExtractedData(extracted);
+      setFormData(prev => ({ ...prev, settlement_date: extracted.settlement }));
       setIsExtracting(false);
-    }, 2000);
+    }, 1200);
   }
 
   function calculateTotals() {
@@ -246,79 +315,48 @@ export function BuyAndSellNotes() {
 
   function validateExtractedData() {
     const issues: string[] = [];
+    const compare: Record<string, FieldCompare> = {};
 
     if (!formData.transaction_id) {
       issues.push('Please select a transaction');
       setValidationIssues(issues);
+      setFieldCompare({});
       return false;
     }
 
-    const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
-    if (!selectedTransaction) {
+    const txn = transactions.find(t => t.id === formData.transaction_id);
+    if (!txn) {
       issues.push('Selected transaction not found');
       setValidationIssues(issues);
+      setFieldCompare({});
       return false;
     }
 
-    const uploadedShares = parseFloat(extractedData.no_of_shares) || 0;
-    const uploadedPrice = parseFloat(extractedData.price_avg) || 0;
-    const uploadedGross = parseFloat(extractedData.gross_amount) || 0;
+    const expectedGross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const expectedFees = getExpectedFees(txn);
 
-    if (Math.abs(uploadedShares - selectedTransaction.no_of_shares) > 0.01) {
-      issues.push(`No of Shares mismatch: Expected ${selectedTransaction.no_of_shares}, but PDF shows ${uploadedShares}`);
-    }
+    const check = (key: string, label: string, actual: number, expected: number, tolerance: number) => {
+      const matches = Math.abs(actual - expected) <= tolerance;
+      compare[key] = { expected, matches };
+      if (!matches) {
+        issues.push(`${label} mismatch: Expected ${expected.toFixed(2)}, but PDF shows ${actual.toFixed(2)}`);
+      }
+    };
 
-    if (Math.abs(uploadedPrice - selectedTransaction.price_per_share) > 0.01) {
-      issues.push(`Price/Avg mismatch: Expected ${selectedTransaction.price_per_share.toFixed(2)}, but PDF shows ${uploadedPrice}`);
-    }
+    check('no_of_shares', 'No of Shares', parseFloat(extractedData.no_of_shares) || 0, Number(txn.no_of_shares) || 0, 0.01);
+    check('price_avg', 'Price/Avg', parseFloat(extractedData.price_avg) || 0, Number(txn.price_per_share) || 0, 0.01);
+    check('gross_amount', 'Gross Amount', parseFloat(extractedData.gross_amount) || 0, expectedGross, 0.5);
+    check('brokerage', 'Brokerage', parseFloat(extractedData.brokerage) || 0, expectedFees.brokerage, 1);
+    check('sec', 'SEC', parseFloat(extractedData.sec) || 0, expectedFees.sec, 1);
+    check('exchange', 'Exchange', parseFloat(extractedData.exchange) || 0, expectedFees.exchange, 1);
+    check('cds', 'CDS', parseFloat(extractedData.cds) || 0, expectedFees.cds, 1);
+    check('gov_cess', 'GOV CESS', parseFloat(extractedData.gov_cess) || 0, expectedFees.gov_cess, 1);
+    check('clearing_fees', 'Clearing Fees', parseFloat(extractedData.clearing_fees) || 0, expectedFees.clearing_fees, 1);
 
-    if (Math.abs(uploadedGross - selectedTransaction.total_amount) > 0.01) {
-      issues.push(`Gross Amount mismatch: Expected ${selectedTransaction.total_amount.toFixed(2)}, but PDF shows ${uploadedGross}`);
-    }
-
-    const expectedBrokerage = calculateExpectedBrokerage(uploadedGross);
-    const uploadedBrokerage = parseFloat(extractedData.brokerage) || 0;
-    if (Math.abs(uploadedBrokerage - expectedBrokerage) > 1) {
-      issues.push(`Brokerage mismatch: Expected ~${expectedBrokerage.toFixed(2)}, but PDF shows ${uploadedBrokerage}`);
-    }
-
-    const expectedSec = uploadedGross * 0.002;
-    const uploadedSec = parseFloat(extractedData.sec) || 0;
-    if (Math.abs(uploadedSec - expectedSec) > 1) {
-      issues.push(`SEC mismatch: Expected ~${expectedSec.toFixed(2)}, but PDF shows ${uploadedSec}`);
-    }
-
-    const expectedExchange = uploadedGross * 0.0008;
-    const uploadedExchange = parseFloat(extractedData.exchange) || 0;
-    if (Math.abs(uploadedExchange - expectedExchange) > 1) {
-      issues.push(`Exchange mismatch: Expected ~${expectedExchange.toFixed(2)}, but PDF shows ${uploadedExchange}`);
-    }
-
-    const expectedCds = uploadedGross * 0.0004;
-    const uploadedCds = parseFloat(extractedData.cds) || 0;
-    if (Math.abs(uploadedCds - expectedCds) > 1) {
-      issues.push(`CDS mismatch: Expected ~${expectedCds.toFixed(2)}, but PDF shows ${uploadedCds}`);
-    }
-
-    const expectedGovCess = uploadedGross * 0.0012;
-    const uploadedGovCess = parseFloat(extractedData.gov_cess) || 0;
-    if (Math.abs(uploadedGovCess - expectedGovCess) > 1) {
-      issues.push(`GOV CESS mismatch: Expected ~${expectedGovCess.toFixed(2)}, but PDF shows ${uploadedGovCess}`);
-    }
-
-    const expectedClearing = uploadedGross * 0.0006;
-    const uploadedClearing = parseFloat(extractedData.clearing_fees) || 0;
-    if (Math.abs(uploadedClearing - expectedClearing) > 1) {
-      issues.push(`Clearing Fees mismatch: Expected ~${expectedClearing.toFixed(2)}, but PDF shows ${uploadedClearing}`);
-    }
-
+    setFieldCompare(compare);
     setValidationIssues(issues);
     calculateTotals();
     return issues.length === 0;
-  }
-
-  function calculateExpectedBrokerage(grossAmount: number): number {
-    return grossAmount * 0.007;
   }
 
   function handleProcessClick() {
@@ -466,6 +504,7 @@ export function BuyAndSellNotes() {
       remarks: ''
     });
     setValidationIssues([]);
+    setFieldCompare({});
     setTotals({
       total_shares: 0,
       total_price_avg: 0,
@@ -827,121 +866,81 @@ export function BuyAndSellNotes() {
                 </div>
               )}
 
-              <div className="border border-gray-300 rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700">Field Name</th>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700">Value</th>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700">Comments</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    <tr className={validationIssues.some(i => i.includes('Trade Date')) ? 'bg-yellow-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Trade Date</td>
-                      <td className="px-4 py-2 text-gray-700">{extractedData.trade_date || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Contract No')) ? 'bg-yellow-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Contract No</td>
-                      <td className="px-4 py-2 text-gray-700">{extractedData.contract_no || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('No of Shares')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">No of Shares</td>
-                      <td className="px-4 py-2 text-gray-700">{extractedData.no_of_shares || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('No of Shares'))
-                          ? 'If this is not equal with original amount it should be highlighted and provide option to reject'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Price')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Price/Avg</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.price_avg || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('Price'))
-                          ? 'If this is not equal with original amount it should be highlighted and provide option to reject'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Gross')) ? 'bg-yellow-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Gross Amount</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.gross_amount || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Brokerage')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Brokerage</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.brokerage || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('Brokerage'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('SEC')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">SEC</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.sec || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('SEC'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Exchange')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Exchange</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.exchange || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('Exchange'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('CDS')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">CDS</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.cds || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('CDS'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('GOV CESS')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">GOV CESS</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.gov_cess || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('GOV CESS'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr className={validationIssues.some(i => i.includes('Clearing')) ? 'bg-red-50' : ''}>
-                      <td className="px-4 py-2 font-medium text-gray-900">Clearing Fees</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.clearing_fees || '-'}</td>
-                      <td className="px-4 py-2 text-red-600 text-xs">
-                        {validationIssues.some(i => i.includes('Clearing'))
-                          ? 'If this is not equal with the applicable rate it should be highlighted and send this upload for approval'
-                          : 'Front the file'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-2 font-medium text-gray-900">Net Amount</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.net_amount || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-2 font-medium text-gray-900">Settlement</td>
-                      <td className="px-4 py-2 text-gray-700">{extractedData.settlement || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-2 font-medium text-gray-900">Foreign Brokerage</td>
-                      <td className="px-4 py-2 text-gray-700">Rs. {extractedData.foreign_brokerage || '-'}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">Front the file</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const pdfOnlyRows: { label: string; value: string }[] = [
+                  { label: 'Trade Date', value: extractedData.trade_date || '-' },
+                  { label: 'Contract No', value: extractedData.contract_no || '-' },
+                  { label: 'Net Amount', value: extractedData.net_amount ? `Rs. ${extractedData.net_amount}` : '-' },
+                  { label: 'Settlement', value: extractedData.settlement || '-' },
+                  { label: 'Foreign Brokerage', value: extractedData.foreign_brokerage ? `Rs. ${extractedData.foreign_brokerage}` : '-' },
+                ];
+
+                const comparedRows: { key: string; label: string; value: string; isAmount: boolean }[] = [
+                  { key: 'no_of_shares', label: 'No of Shares', value: extractedData.no_of_shares || '-', isAmount: false },
+                  { key: 'price_avg', label: 'Price/Avg', value: extractedData.price_avg ? `Rs. ${extractedData.price_avg}` : '-', isAmount: true },
+                  { key: 'gross_amount', label: 'Gross Amount', value: extractedData.gross_amount ? `Rs. ${extractedData.gross_amount}` : '-', isAmount: true },
+                  { key: 'brokerage', label: 'Brokerage', value: extractedData.brokerage ? `Rs. ${extractedData.brokerage}` : '-', isAmount: true },
+                  { key: 'sec', label: 'SEC', value: extractedData.sec ? `Rs. ${extractedData.sec}` : '-', isAmount: true },
+                  { key: 'exchange', label: 'Exchange', value: extractedData.exchange ? `Rs. ${extractedData.exchange}` : '-', isAmount: true },
+                  { key: 'cds', label: 'CDS', value: extractedData.cds ? `Rs. ${extractedData.cds}` : '-', isAmount: true },
+                  { key: 'gov_cess', label: 'GOV CESS', value: extractedData.gov_cess ? `Rs. ${extractedData.gov_cess}` : '-', isAmount: true },
+                  { key: 'clearing_fees', label: 'Clearing Fees', value: extractedData.clearing_fees ? `Rs. ${extractedData.clearing_fees}` : '-', isAmount: true },
+                ];
+
+                return (
+                  <div className="border border-gray-300 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Field Name</th>
+                          <th className="px-4 py-2 text-left font-semibold text-gray-700">PDF Value</th>
+                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Expected (from transaction)</th>
+                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {comparedRows.map(row => {
+                          const cmp = fieldCompare[row.key];
+                          const matches = cmp?.matches;
+                          const expectedText = cmp?.expected != null
+                            ? (row.isAmount ? `Rs. ${Number(cmp.expected).toFixed(2)}` : String(Number(cmp.expected)))
+                            : '-';
+                          return (
+                            <tr key={row.key} className={cmp ? (matches ? 'bg-green-50' : 'bg-red-50') : ''}>
+                              <td className="px-4 py-2 font-medium text-gray-900">{row.label}</td>
+                              <td className="px-4 py-2 text-gray-700">{row.value}</td>
+                              <td className="px-4 py-2 text-gray-700">{expectedText}</td>
+                              <td className="px-4 py-2">
+                                {cmp ? (
+                                  matches ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                                      <CheckCircle className="w-3 h-3 mr-1" /> Matching
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                                      <XCircle className="w-3 h-3 mr-1" /> Mismatch
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-xs text-gray-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {pdfOnlyRows.map(row => (
+                          <tr key={row.label}>
+                            <td className="px-4 py-2 font-medium text-gray-900">{row.label}</td>
+                            <td className="px-4 py-2 text-gray-700">{row.value}</td>
+                            <td className="px-4 py-2 text-gray-400 text-xs">From PDF</td>
+                            <td className="px-4 py-2 text-gray-400 text-xs">Not compared</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
 
               <div className="bg-green-50 border border-green-300 rounded-lg p-4">
                 <h3 className="font-semibold text-green-800 mb-3">Total Figures</h3>
