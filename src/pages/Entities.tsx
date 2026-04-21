@@ -984,7 +984,9 @@ export function Entities() {
                             <div className="flex items-center space-x-3 mb-2">
                               <Building2 className="w-5 h-5 text-blue-600" />
                               <div>
-                                <div className="font-semibold text-gray-900">{eb.brokers.broker_name}</div>
+                                <div className="font-semibold text-gray-900">
+                                  {eb.brokers?.broker_name || eb.custodian_account_name || eb.bank_name || eb.relationship_type}
+                                </div>
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
                                   {eb.relationship_type}
                                 </span>
