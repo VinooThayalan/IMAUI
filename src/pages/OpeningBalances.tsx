@@ -32,7 +32,7 @@ interface FormState {
   share_id: string;
   opening_shares: string;
   effective_date: string;
-  average_purchase_cost: string;
+  total_portfolio_value: string;
   notes: string;
 }
 
@@ -41,9 +41,16 @@ const emptyForm: FormState = {
   share_id: '',
   opening_shares: '',
   effective_date: new Date().toISOString().split('T')[0],
-  average_purchase_cost: '',
+  total_portfolio_value: '',
   notes: '',
 };
+
+function computeAvgCost(shares: string, total: string): number {
+  const s = parseFloat(shares);
+  const t = parseFloat(total);
+  if (!s || Number.isNaN(s) || Number.isNaN(t)) return 0;
+  return t / s;
+}
 
 export function OpeningBalances() {
   const { user } = useAuth();
@@ -98,12 +105,13 @@ export function OpeningBalances() {
 
   function openEdit(b: OpeningBalance) {
     setEditingId(b.id);
+    const total = Number(b.opening_shares) * Number(b.average_purchase_cost);
     setForm({
       entity_id: b.entity_id,
       share_id: b.share_id,
       opening_shares: String(b.opening_shares),
       effective_date: b.effective_date,
-      average_purchase_cost: String(b.average_purchase_cost),
+      total_portfolio_value: total ? String(total) : '',
       notes: b.notes || '',
     });
     setError(null);
@@ -116,15 +124,16 @@ export function OpeningBalances() {
       return;
     }
     const shares_num = parseFloat(form.opening_shares);
-    const cost_num = parseFloat(form.average_purchase_cost);
-    if (Number.isNaN(shares_num) || shares_num < 0) {
-      setError('Opening shares must be a non-negative number');
+    const total_num = parseFloat(form.total_portfolio_value);
+    if (Number.isNaN(shares_num) || shares_num <= 0) {
+      setError('Opening shares must be greater than zero');
       return;
     }
-    if (Number.isNaN(cost_num) || cost_num < 0) {
-      setError('Average purchase cost must be a non-negative number');
+    if (Number.isNaN(total_num) || total_num < 0) {
+      setError('Total portfolio value must be a non-negative number');
       return;
     }
+    const cost_num = total_num / shares_num;
     if (!form.effective_date) {
       setError('Effective date is required');
       return;
@@ -388,16 +397,24 @@ export function OpeningBalances() {
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Average Purchase Cost (LKR)</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Total Portfolio Value (LKR)</label>
                   <input
                     type="number"
                     min="0"
-                    step="0.0001"
-                    value={form.average_purchase_cost}
-                    onChange={(e) => setForm({ ...form, average_purchase_cost: e.target.value })}
+                    step="0.01"
+                    value={form.total_portfolio_value}
+                    onChange={(e) => setForm({ ...form, total_portfolio_value: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="0.00"
                   />
+                  <p className="text-xs text-gray-500 mt-1">The total amount paid for all opening shares. Average cost is calculated from this.</p>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Average Purchase Cost (Calculated)</label>
+                  <div className="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-900 font-semibold">
+                    Rs. {computeAvgCost(form.opening_shares, form.total_portfolio_value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                    <span className="text-gray-500 font-normal ml-2 text-xs">per share</span>
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Notes (Optional)</label>
@@ -411,12 +428,20 @@ export function OpeningBalances() {
                 </div>
               </div>
 
-              {form.opening_shares && form.average_purchase_cost && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm">
-                  <span className="text-gray-600">Opening Value: </span>
-                  <span className="font-bold text-blue-700">
-                    Rs. {(parseFloat(form.opening_shares) * parseFloat(form.average_purchase_cost) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
+              {form.opening_shares && form.total_portfolio_value && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm flex items-center justify-between">
+                  <div>
+                    <span className="text-gray-600">Total Value: </span>
+                    <span className="font-bold text-blue-700">
+                      Rs. {(parseFloat(form.total_portfolio_value) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Avg Cost: </span>
+                    <span className="font-bold text-blue-700">
+                      Rs. {computeAvgCost(form.opening_shares, form.total_portfolio_value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
