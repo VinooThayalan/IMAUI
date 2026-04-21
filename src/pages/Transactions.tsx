@@ -191,14 +191,15 @@ export function Transactions() {
     try {
       setLoading(true);
 
-      const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes] = await Promise.all([
+      const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, name, ticker').order('name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
-        supabase.from('entity_brokers').select('*, bank:banks(name, balance)').eq('is_active', true)
+        supabase.from('entity_brokers').select('*, bank:banks(id, name, balance)').eq('is_active', true),
+        supabase.from('cash_balance_ledger').select('bank_id, type, amount')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -209,13 +210,33 @@ export function Transactions() {
       if (brokerageRes.error) throw brokerageRes.error;
       if (entityBrokersRes.error) throw entityBrokersRes.error;
 
+      const bankBalanceMap = new Map<string, number>();
+      (ledgerRes.data || []).forEach((entry: any) => {
+        if (!entry.bank_id) return;
+        const delta = entry.type === 'Addition' ? Number(entry.amount) : -Number(entry.amount);
+        bankBalanceMap.set(entry.bank_id, (bankBalanceMap.get(entry.bank_id) || 0) + delta);
+      });
+
+      const banksWithBalance = (banksRes.data || []).map((b: any) => ({
+        ...b,
+        balance: bankBalanceMap.has(b.id) ? bankBalanceMap.get(b.id) : Number(b.balance || 0)
+      }));
+
+      const entityBrokersWithBalance = (entityBrokersRes.data || []).map((eb: any) => ({
+        ...eb,
+        bank: eb.bank ? {
+          ...eb.bank,
+          balance: eb.bank.id && bankBalanceMap.has(eb.bank.id) ? bankBalanceMap.get(eb.bank.id) : Number(eb.bank.balance || 0)
+        } : eb.bank
+      }));
+
       setTransactions(transactionsRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
-      setBanks(banksRes.data || []);
+      setBanks(banksWithBalance);
       setBrokers(brokersRes.data || []);
       setBrokerageFeeTypes(brokerageRes.data || []);
-      setEntityBrokers(entityBrokersRes.data || []);
+      setEntityBrokers(entityBrokersWithBalance);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
