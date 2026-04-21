@@ -372,7 +372,13 @@ export function CashBalance() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <button className="text-blue-600 hover:text-blue-700 font-medium text-sm flex items-center space-x-1">
+                      <button
+                        onClick={() => {
+                          setSelectedEntity(entity);
+                          setSelectedBank(null);
+                        }}
+                        className="text-blue-600 hover:text-blue-700 font-medium text-sm flex items-center space-x-1"
+                      >
                         <span>View Transactions</span>
                         <ChevronRight className="w-4 h-4" />
                       </button>
