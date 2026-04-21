@@ -227,7 +227,7 @@ export function Entities() {
         .from('entity_brokers')
         .select(`
           *,
-          brokers (
+          brokers:broker_id (
             id,
             broker_id,
             broker_name,
