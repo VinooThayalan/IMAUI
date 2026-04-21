@@ -247,18 +247,33 @@ export function Transactions() {
 
   async function calculateShareBalance(entityId: string, shareId: string) {
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('transaction_type, no_of_shares, price_per_share')
-        .eq('entity_id', entityId)
-        .eq('share_id', shareId);
+      const [txnRes, openingRes] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select('transaction_type, no_of_shares, price_per_share')
+          .eq('entity_id', entityId)
+          .eq('share_id', shareId),
+        supabase
+          .from('entity_share_opening_balances')
+          .select('opening_shares, average_purchase_cost')
+          .eq('entity_id', entityId)
+          .eq('share_id', shareId)
+          .maybeSingle(),
+      ]);
 
-      if (error) throw error;
+      if (txnRes.error) throw txnRes.error;
 
       let totalShares = 0;
       let totalCost = 0;
 
-      (data || []).forEach(txn => {
+      if (openingRes.data) {
+        const openShares = Number(openingRes.data.opening_shares) || 0;
+        const openCost = Number(openingRes.data.average_purchase_cost) || 0;
+        totalShares += openShares;
+        totalCost += openShares * openCost;
+      }
+
+      (txnRes.data || []).forEach(txn => {
         const shares = Number(txn.no_of_shares) || 0;
         const price = Number(txn.price_per_share) || 0;
 
@@ -266,7 +281,13 @@ export function Transactions() {
           totalShares += shares;
           totalCost += shares * price;
         } else if (txn.transaction_type === 'SELL') {
+          const avgBefore = totalShares > 0 ? totalCost / totalShares : 0;
           totalShares -= shares;
+          totalCost -= shares * avgBefore;
+          if (totalShares <= 0) {
+            totalShares = Math.max(0, totalShares);
+            totalCost = 0;
+          }
         }
       });
 
