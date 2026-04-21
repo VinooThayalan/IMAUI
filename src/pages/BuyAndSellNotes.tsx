@@ -278,7 +278,10 @@ export function BuyAndSellNotes() {
     const totalShares = Number(txn.no_of_shares) || 0;
     const rate = Number(txn.price_per_share) || 0;
     const rates = feeRates(txn);
-    const security = (share?.ticker || 'SEC') + '.N0000';
+    const ticker = share?.ticker?.trim() || '';
+    const security = ticker
+      ? (ticker.includes('.') ? ticker : `${ticker}.N0000`)
+      : 'DFCC.N0000';
 
     const chunkCount = Math.min(5, Math.max(1, Math.ceil(totalShares / Math.max(1, Math.floor(totalShares / 3)))));
     const n = Math.min(5, Math.max(1, chunkCount));
