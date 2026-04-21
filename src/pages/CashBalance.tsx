@@ -652,7 +652,7 @@ export function CashBalance() {
                       }`}
                     >
                       <TrendingUp className="w-5 h-5 mx-auto mb-1" />
-                      Cash Add / Sell
+                      Cash In
                     </button>
                     <button
                       type="button"
@@ -664,7 +664,7 @@ export function CashBalance() {
                       }`}
                     >
                       <TrendingDown className="w-5 h-5 mx-auto mb-1" />
-                      Buy
+                      Cash Out
                     </button>
                   </div>
                 </div>
