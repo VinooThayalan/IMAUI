@@ -1,10 +1,22 @@
 import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorkerSrc from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
+function loadPdfjs(): Promise<PdfJsModule> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = (async () => {
+      const [lib, workerUrlMod] = await Promise.all([
+        import('pdfjs-dist/legacy/build/pdf.mjs'),
+        import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'),
+      ]);
+      lib.GlobalWorkerOptions.workerSrc = workerUrlMod.default;
+      return lib;
+    })();
+  }
+  return pdfjsPromise;
+}
 
 interface BuyAndSellNote {
   id: string;
@@ -241,6 +253,7 @@ export function BuyAndSellNotes() {
   }
 
   async function extractPdfText(file: File): Promise<{ items: { str: string; x: number; y: number; page: number }[]; rawText: string }> {
+    const pdfjsLib = await loadPdfjs();
     const buffer = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
     const items: { str: string; x: number; y: number; page: number }[] = [];
