@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
-          await loadAppUser(session.user.id);
+          await loadAppUser(session.user.id, session.user.email);
         } else {
           setAppUser(null);
           setMenuAccess([]);
@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
 
       if (session?.user) {
-        void loadAppUser(session.user.id);
+        void loadAppUser(session.user.id, session.user.email);
       }
     } catch (error) {
       console.error('Error checking user session:', error);
@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function loadAppUser(userId: string) {
+  async function loadAppUser(userId: string, userEmail?: string) {
     try {
       const { data: appUserData, error: appUserError } = await withTimeout(
         supabase.from('app_users').select('*').eq('id', userId).maybeSingle(),
@@ -97,9 +97,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (appUserData) {
         setAppUser(appUserData as AppUser);
         void loadPermissions(userId, appUserData.role);
+        return;
       }
+      setAppUser({
+        id: userId,
+        email: userEmail ?? '',
+        full_name: null,
+        role: 'user',
+        is_active: true,
+      });
     } catch (error) {
       console.error('Error loading app user:', error);
+      setAppUser({
+        id: userId,
+        email: userEmail ?? '',
+        full_name: null,
+        role: 'user',
+        is_active: true,
+      });
     }
   }
 
