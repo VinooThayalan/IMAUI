@@ -85,14 +85,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function loadAppUser(userId: string) {
-    try {
-      const { data: appUserData, error: appUserError } = await withTimeout(
+    const attempt = async () => {
+      const { data, error } = await withTimeout(
         supabase.from('app_users').select('*').eq('id', userId).maybeSingle(),
-        5000,
+        8000,
         'loadAppUser'
       );
-
-      if (appUserError) throw appUserError;
+      if (error) throw error;
+      return data;
+    };
+    try {
+      let appUserData = null;
+      let lastError: unknown = null;
+      for (let i = 0; i < 3; i += 1) {
+        try {
+          appUserData = await attempt();
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          await new Promise(r => setTimeout(r, 500 * (i + 1)));
+        }
+      }
+      if (lastError) throw lastError;
 
       if (appUserData) {
         setAppUser(appUserData as AppUser);
