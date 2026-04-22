@@ -1,41 +1,50 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Dashboard } from './pages/Dashboard';
-import { Entities } from './pages/Entities';
-import { Shares } from './pages/Shares';
-import { Banks } from './pages/Banks';
-import { Brokers } from './pages/Brokers';
-import { Transactions } from './pages/Transactions';
-import { TransactionApprovals } from './pages/TransactionApprovals';
-import { ScripEntry } from './pages/ScripEntry';
-import { BuyAndSellNotes } from './pages/BuyAndSellNotes';
-import { BuyAndSellApprovals } from './pages/BuyAndSellApprovals';
-import { Dividends } from './pages/Dividends';
-import { Portfolio } from './pages/Portfolio';
-import { Reports } from './pages/Reports';
-import { Settings } from './pages/Settings';
-import { DailyPrices } from './pages/DailyPrices';
-import { CashBalance } from './pages/CashBalance';
-import { ShareAnalytics } from './pages/ShareAnalytics';
-import { PortfolioSummary } from './pages/PortfolioSummary';
-import { BrokerageFeeTypes } from './pages/BrokerageFeeTypes';
-import { RightsIssues } from './pages/RightsIssues';
-import { Amalgamations } from './pages/Amalgamations';
-import { ShareBuybacks } from './pages/ShareBuybacks';
-import { ShareSubdivisions } from './pages/ShareSubdivisions';
-import { IpoTransactions } from './pages/IpoTransactions';
-import { UserManagement } from './pages/UserManagement';
-import { MenuAccess } from './pages/MenuAccess';
-import { EntityAccess } from './pages/EntityAccess';
-import { EntityTypes } from './pages/EntityTypes';
-import { IndustryTypes } from './pages/IndustryTypes';
-import { SectorTypes } from './pages/SectorTypes';
-import { BankMaster } from './pages/BankMaster';
-import { OpeningBalances } from './pages/OpeningBalances';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { Shield } from 'lucide-react';
+
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const Entities = lazy(() => import('./pages/Entities').then(m => ({ default: m.Entities })));
+const Shares = lazy(() => import('./pages/Shares').then(m => ({ default: m.Shares })));
+const Banks = lazy(() => import('./pages/Banks').then(m => ({ default: m.Banks })));
+const Brokers = lazy(() => import('./pages/Brokers').then(m => ({ default: m.Brokers })));
+const Transactions = lazy(() => import('./pages/Transactions').then(m => ({ default: m.Transactions })));
+const TransactionApprovals = lazy(() => import('./pages/TransactionApprovals').then(m => ({ default: m.TransactionApprovals })));
+const ScripEntry = lazy(() => import('./pages/ScripEntry').then(m => ({ default: m.ScripEntry })));
+const BuyAndSellNotes = lazy(() => import('./pages/BuyAndSellNotes').then(m => ({ default: m.BuyAndSellNotes })));
+const BuyAndSellApprovals = lazy(() => import('./pages/BuyAndSellApprovals').then(m => ({ default: m.BuyAndSellApprovals })));
+const Dividends = lazy(() => import('./pages/Dividends').then(m => ({ default: m.Dividends })));
+const Portfolio = lazy(() => import('./pages/Portfolio').then(m => ({ default: m.Portfolio })));
+const Reports = lazy(() => import('./pages/Reports').then(m => ({ default: m.Reports })));
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
+const DailyPrices = lazy(() => import('./pages/DailyPrices').then(m => ({ default: m.DailyPrices })));
+const CashBalance = lazy(() => import('./pages/CashBalance').then(m => ({ default: m.CashBalance })));
+const ShareAnalytics = lazy(() => import('./pages/ShareAnalytics').then(m => ({ default: m.ShareAnalytics })));
+const PortfolioSummary = lazy(() => import('./pages/PortfolioSummary').then(m => ({ default: m.PortfolioSummary })));
+const BrokerageFeeTypes = lazy(() => import('./pages/BrokerageFeeTypes').then(m => ({ default: m.BrokerageFeeTypes })));
+const RightsIssues = lazy(() => import('./pages/RightsIssues').then(m => ({ default: m.RightsIssues })));
+const Amalgamations = lazy(() => import('./pages/Amalgamations').then(m => ({ default: m.Amalgamations })));
+const ShareBuybacks = lazy(() => import('./pages/ShareBuybacks').then(m => ({ default: m.ShareBuybacks })));
+const ShareSubdivisions = lazy(() => import('./pages/ShareSubdivisions').then(m => ({ default: m.ShareSubdivisions })));
+const IpoTransactions = lazy(() => import('./pages/IpoTransactions').then(m => ({ default: m.IpoTransactions })));
+const UserManagement = lazy(() => import('./pages/UserManagement').then(m => ({ default: m.UserManagement })));
+const MenuAccess = lazy(() => import('./pages/MenuAccess').then(m => ({ default: m.MenuAccess })));
+const EntityAccess = lazy(() => import('./pages/EntityAccess').then(m => ({ default: m.EntityAccess })));
+const EntityTypes = lazy(() => import('./pages/EntityTypes').then(m => ({ default: m.EntityTypes })));
+const IndustryTypes = lazy(() => import('./pages/IndustryTypes').then(m => ({ default: m.IndustryTypes })));
+const SectorTypes = lazy(() => import('./pages/SectorTypes').then(m => ({ default: m.SectorTypes })));
+const BankMaster = lazy(() => import('./pages/BankMaster').then(m => ({ default: m.BankMaster })));
+const OpeningBalances = lazy(() => import('./pages/OpeningBalances').then(m => ({ default: m.OpeningBalances })));
+
+function PageFallback() {
+  return (
+    <div className="flex items-center justify-center h-full p-8">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+    </div>
+  );
+}
 
 function AccessDenied() {
   return (
@@ -162,7 +171,9 @@ function App() {
   return (
     <Layout>
       <ErrorBoundary>
-        {renderPage()}
+        <Suspense fallback={<PageFallback />}>
+          {renderPage()}
+        </Suspense>
       </ErrorBoundary>
     </Layout>
   );
