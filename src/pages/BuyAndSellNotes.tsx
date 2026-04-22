@@ -158,6 +158,7 @@ export function BuyAndSellNotes() {
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
+  const [debugRawText, setDebugRawText] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -376,6 +377,67 @@ export function BuyAndSellNotes() {
     return result;
   }
 
+  function parseRowsFromRawText(rawText: string): ExtractedRow[] {
+    const out: ExtractedRow[] = [];
+    const NUM = '[\\d,]+(?:\\.\\d+)?';
+    const TICKER = '[A-Z][A-Z0-9]{0,9}(?:\\.[A-Z0-9]+)+';
+    const pattern = new RegExp(
+      `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
+      'g'
+    );
+
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(rawText)) !== null) {
+      out.push({
+        contract_no: m[1],
+        qty: parseNumber(m[2]),
+        security: m[3],
+        rate: parseNumber(m[4]),
+        gross_value: parseNumber(m[5]),
+        brokerage: parseNumber(m[6]),
+        cds_fees: parseNumber(m[7]),
+        cse_fees: parseNumber(m[8]),
+        sec: parseNumber(m[9]),
+        stl: parseNumber(m[10]),
+        clearing_fee: parseNumber(m[11]),
+        foreign_br: parseNumber(m[12]),
+        amount: parseNumber(m[13]),
+      });
+    }
+
+    if (out.length > 0) return out;
+
+    const looser = new RegExp(
+      `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})((?:\\s+${NUM}){8,12})`,
+      'g'
+    );
+    while ((m = looser.exec(rawText)) !== null) {
+      const nums = m[4].trim().split(/\s+/).map(parseNumber);
+      if (nums.length < 8) continue;
+      const amount = nums[nums.length - 1];
+      const [rate, gross, brokerage, cds, cse, sec, stl, clearing] = nums;
+      const foreign = nums.length >= 10 ? nums[nums.length - 2] : 0;
+      out.push({
+        contract_no: m[1],
+        qty: parseNumber(m[2]),
+        security: m[3],
+        rate: rate ?? 0,
+        gross_value: gross ?? 0,
+        brokerage: brokerage ?? 0,
+        cds_fees: cds ?? 0,
+        cse_fees: cse ?? 0,
+        sec: sec ?? 0,
+        stl: stl ?? 0,
+        clearing_fee: clearing ?? 0,
+        foreign_br: foreign ?? 0,
+        amount: amount ?? 0,
+      });
+    }
+    return out;
+  }
+
   function parseRowsByXColumns(items: { str: string; x: number; y: number; page: number }[]): ExtractedRow[] {
     const allRows = items.reduce<{ [key: string]: typeof items }>((acc, it) => {
       const key = `${it.page}:${Math.round(it.y)}`;
@@ -508,16 +570,16 @@ export function BuyAndSellNotes() {
       const { items, rawText } = await extractPdfText(file);
       const grouped = groupIntoRows(items);
       let rows = parseBoughtNoteRows(grouped);
-      if (rows.length === 0) {
-        rows = parseRowsByXColumns(items);
-      }
+      if (rows.length === 0) rows = parseRowsByXColumns(items);
+      if (rows.length === 0) rows = parseRowsFromRawText(rawText);
 
       if (rows.length === 0) {
-        console.warn('PDF raw text (no rows parsed):', rawText.slice(0, 2000));
-        alert('Could not extract line items from this PDF. The document may use a non-standard layout. The raw text has been logged to the console for debugging.');
+        console.warn('PDF raw text (no rows parsed):', rawText);
+        setDebugRawText(rawText);
         setExtractedRows([]);
         return;
       }
+      setDebugRawText('');
 
       const header = extractHeader(rawText, grouped);
 
@@ -826,6 +888,7 @@ export function BuyAndSellNotes() {
     setValidationIssues([]);
     setFieldCompare({});
     setExtractedRows([]);
+    setDebugRawText('');
     setTotals({
       total_shares: 0,
       total_price_avg: 0,
@@ -1119,10 +1182,28 @@ export function BuyAndSellNotes() {
                 {isExtracting && (
                   <div className="mt-2 text-sm text-blue-600">Extracting data from PDF...</div>
                 )}
-                {uploadedFile && !isExtracting && (
+                {uploadedFile && !isExtracting && extractedRows.length > 0 && (
                   <div className="mt-2 text-sm text-green-600 flex items-center">
                     <CheckCircle className="w-4 h-4 mr-1" />
-                    File uploaded: {uploadedFile.name}
+                    File uploaded: {uploadedFile.name} &mdash; {extractedRows.length} line item{extractedRows.length === 1 ? '' : 's'} extracted
+                  </div>
+                )}
+                {uploadedFile && !isExtracting && extractedRows.length === 0 && debugRawText && (
+                  <div className="mt-3 bg-amber-50 border border-amber-300 rounded-lg p-3">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-amber-900">Could not auto-extract line items</p>
+                        <p className="text-xs text-amber-700 mt-1">
+                          The PDF text layout does not match expected patterns. Copy the text below and share it so we can tune the parser, or continue manually.
+                        </p>
+                        <textarea
+                          readOnly
+                          value={debugRawText}
+                          className="mt-2 w-full h-40 text-xs font-mono p-2 border border-amber-300 rounded bg-white text-gray-700"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
