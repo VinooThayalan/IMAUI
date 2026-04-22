@@ -122,7 +122,12 @@ interface ExtractedData {
   foreign_brokerage: string;
   account_no?: string;
   broker_name?: string;
+  broker_address?: string;
   buyer_name?: string;
+  buyer_address?: string;
+  note_type?: 'Buy' | 'Sell';
+  page_total?: string;
+  grand_total?: string;
 }
 
 interface ExtractedRow {
@@ -296,36 +301,29 @@ export function BuyAndSellNotes() {
     return rows.map(row => row.sort((a, b) => a.x - b.x).map(({ str, x }) => ({ str, x })));
   }
 
+  const NUMERIC_TOKEN = /^-?[\d,]+(?:\.\d+)?$/;
+  const SECURITY_TOKEN = /^[A-Z0-9]{2,8}\.[A-Z]\d{4}$/;
+  const CONTRACT_TOKEN = /^\d{9,}$/;
+
   function parseBoughtNoteRows(rows: { str: string; x: number }[][]): ExtractedRow[] {
     const result: ExtractedRow[] = [];
     for (const row of rows) {
       if (row.length < 10) continue;
       const tokens = row.map(c => c.str);
-      const first = tokens[0];
-      if (!/^\d{7,}$/.test(first)) continue;
-      const securityIdx = tokens.findIndex(t => /^[A-Z]{2,6}\.[A-Z]\d{4}$/.test(t));
-      if (securityIdx < 2) continue;
+      const contractIdx = tokens.findIndex(t => CONTRACT_TOKEN.test(t));
+      if (contractIdx === -1) continue;
+      const securityIdx = tokens.findIndex((t, i) => i > contractIdx && SECURITY_TOKEN.test(t));
+      if (securityIdx === -1 || securityIdx <= contractIdx + 1) continue;
 
-      const qty = parseNumber(tokens.slice(1, securityIdx).join(''));
+      const qty = parseNumber(tokens.slice(contractIdx + 1, securityIdx).filter(t => NUMERIC_TOKEN.test(t)).join(''));
       const security = tokens[securityIdx];
-      const numeric = tokens.slice(securityIdx + 1).filter(t => /^[\d,.]+$/.test(t)).map(parseNumber);
-      if (numeric.length < 8) continue;
+      const numeric = tokens.slice(securityIdx + 1).filter(t => NUMERIC_TOKEN.test(t)).map(parseNumber);
+      if (numeric.length < 10) continue;
 
-      const [rate, gross_value, brokerage, cds_fees, cse_fees, sec, stl, clearing_fee, foreign_br, amount] = [
-        numeric[0] ?? 0,
-        numeric[1] ?? 0,
-        numeric[2] ?? 0,
-        numeric[3] ?? 0,
-        numeric[4] ?? 0,
-        numeric[5] ?? 0,
-        numeric[6] ?? 0,
-        numeric[7] ?? 0,
-        numeric[8] ?? 0,
-        numeric[numeric.length - 1] ?? 0,
-      ];
+      const [rate, gross_value, brokerage, cds_fees, cse_fees, sec, stl, clearing_fee, foreign_br, amount] = numeric;
 
       result.push({
-        contract_no: first,
+        contract_no: tokens[contractIdx],
         qty,
         security,
         rate,
@@ -343,15 +341,50 @@ export function BuyAndSellNotes() {
     return result;
   }
 
-  function extractHeader(rawText: string) {
-    const accountMatch = rawText.match(/Account\s*No\s*([A-Z0-9\-\/]+)/i);
+  function extractHeader(rawText: string, rows: { str: string; x: number }[][]) {
+    const accountMatch = rawText.match(/Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i);
     const txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
     const settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+    const pageTotalMatch = rawText.match(/Page\s*Total\s*([\d,]+(?:\.\d+)?)/i);
+    const totalMatch = rawText.match(/\bTotal\b\s*([\d,]+\.\d+)\s*$/i)
+      || rawText.match(/\bTotal\b\s+([\d,]+\.\d+)(?!\S)/i);
+
+    const noteType: 'Buy' | 'Sell' = /\bSOLD\s*Note\b/i.test(rawText) ? 'Sell' : 'Buy';
     const toIso = (d: string | undefined) => d ? d.replace(/\//g, '-') : '';
+
+    const firstPageRows = rows.slice(0, 12);
+    const brokerRow = firstPageRows.find(r => /\b(securities|brokers?|stock|capital|financial)\b/i.test(r.map(c => c.str).join(' ')));
+    const broker_name = brokerRow ? brokerRow.map(c => c.str).join(' ').trim() : '';
+
+    const addressRow = firstPageRows.find(r => {
+      const text = r.map(c => c.str).join(' ');
+      return /\b(Sri\s*Lanka|Colombo|Mawatha|Road|Street|Lane)\b/i.test(text) && text !== broker_name;
+    });
+    const broker_address = addressRow ? addressRow.map(c => c.str).join(' ').trim() : '';
+
+    const buyerStartIdx = rows.findIndex(r => /Name\s*&\s*Address\s*of\s*(Buyer|Seller)/i.test(r.map(c => c.str).join(' ')));
+    let buyer_name = '';
+    const buyer_address_parts: string[] = [];
+    if (buyerStartIdx !== -1) {
+      for (let i = buyerStartIdx + 1; i < Math.min(buyerStartIdx + 6, rows.length); i += 1) {
+        const line = rows[i].map(c => c.str).join(' ').trim();
+        if (!line || /Account\s*No/i.test(line) || /Bought\s+by\s+order/i.test(line)) break;
+        if (!buyer_name) buyer_name = line;
+        else buyer_address_parts.push(line);
+      }
+    }
+
     return {
       account_no: accountMatch?.[1]?.trim() || '',
       trade_date: toIso(txnDateMatch?.[1]),
       settlement: toIso(settleMatch?.[1]),
+      broker_name,
+      broker_address,
+      buyer_name,
+      buyer_address: buyer_address_parts.join(', '),
+      note_type: noteType,
+      page_total: pageTotalMatch?.[1]?.trim() || '',
+      grand_total: totalMatch?.[1]?.trim() || '',
     };
   }
 
@@ -359,16 +392,16 @@ export function BuyAndSellNotes() {
     setIsExtracting(true);
     try {
       const { items, rawText } = await extractPdfText(file);
-      const rows = parseBoughtNoteRows(groupIntoRows(items));
+      const grouped = groupIntoRows(items);
+      const rows = parseBoughtNoteRows(grouped);
 
       if (rows.length === 0) {
-        alert('Could not extract line items from this PDF. Please verify it matches the standard BOUGHT Note format.');
+        alert('Could not extract line items from this PDF. Please verify it matches the standard BOUGHT/SOLD Note format.');
         setExtractedRows([]);
         return;
       }
 
-      const header = extractHeader(rawText);
-      const brokerLine = items.find(i => /securities|broker/i.test(i.str))?.str || '';
+      const header = extractHeader(rawText, grouped);
 
       const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
       const totalShares = sum(r => r.qty);
@@ -400,8 +433,13 @@ export function BuyAndSellNotes() {
         settlement: header.settlement || today,
         foreign_brokerage: totalForeign.toFixed(2),
         account_no: header.account_no,
-        broker_name: brokerLine,
-        buyer_name: '',
+        broker_name: header.broker_name,
+        broker_address: header.broker_address,
+        buyer_name: header.buyer_name,
+        buyer_address: header.buyer_address,
+        note_type: header.note_type,
+        page_total: header.page_total,
+        grand_total: header.grand_total,
       };
 
       setExtractedRows(rows);
@@ -1033,11 +1071,40 @@ export function BuyAndSellNotes() {
 
               {extractedRows.length > 0 && (
                 <div className="border border-gray-300 rounded-lg overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-800">Extracted Line Items</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">
-                      {extractedData.broker_name}{extractedData.account_no ? ` · Account: ${extractedData.account_no}` : ''}
-                    </p>
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-sm font-semibold text-gray-800">Extracted Line Items</h3>
+                        {extractedData.note_type && (
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            extractedData.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {extractedData.note_type === 'Buy' ? 'BOUGHT Note' : 'SOLD Note'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-700 mt-1 font-medium">
+                        {extractedData.broker_name || 'Broker'}
+                      </p>
+                      {extractedData.broker_address && (
+                        <p className="text-xs text-gray-500">{extractedData.broker_address}</p>
+                      )}
+                    </div>
+                    <div className="text-xs">
+                      {extractedData.buyer_name && (
+                        <p className="text-gray-700 font-medium">
+                          {extractedData.note_type === 'Sell' ? 'Seller' : 'Buyer'}: {extractedData.buyer_name}
+                        </p>
+                      )}
+                      {extractedData.buyer_address && (
+                        <p className="text-gray-500">{extractedData.buyer_address}</p>
+                      )}
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
+                        {extractedData.account_no && <span>Account: <span className="font-semibold text-gray-800">{extractedData.account_no}</span></span>}
+                        {extractedData.trade_date && <span>Trade: <span className="font-semibold text-gray-800">{extractedData.trade_date}</span></span>}
+                        {extractedData.settlement && <span>Settlement: <span className="font-semibold text-gray-800">{extractedData.settlement}</span></span>}
+                      </div>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -1093,6 +1160,13 @@ export function BuyAndSellNotes() {
                           <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.foreign_br, 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                         </tr>
+                        {(extractedData.page_total || extractedData.grand_total) && (
+                          <tr>
+                            <td colSpan={11} className="px-3 py-2 text-right text-gray-500">From PDF &mdash; PageTotal / Total</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{extractedData.page_total || '-'}</td>
+                            <td className="px-3 py-2 text-right font-bold text-gray-900">{extractedData.grand_total || '-'}</td>
+                          </tr>
+                        )}
                       </tfoot>
                     </table>
                   </div>
