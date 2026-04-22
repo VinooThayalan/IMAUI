@@ -36,7 +36,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAdmin = appUser?.role === 'admin';
 
   useEffect(() => {
-    checkUser();
+    const hardTimeout = setTimeout(() => setLoading(false), 4000);
+    checkUser().finally(() => clearTimeout(hardTimeout));
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       (async () => {
