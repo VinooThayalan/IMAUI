@@ -1,17 +1,24 @@
 import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
-let pdfjsPromise: Promise<PdfJsModule> | null = null;
+interface PdfJsLib {
+  GlobalWorkerOptions: { workerSrc: string };
+  getDocument: (src: { data: ArrayBuffer }) => { promise: Promise<PdfDocument> };
+}
+interface PdfDocument { numPages: number; getPage: (n: number) => Promise<PdfPage>; }
+interface PdfPage { getTextContent: () => Promise<{ items: Array<{ str: string; transform: number[] }> }>; }
 
-function loadPdfjs(): Promise<PdfJsModule> {
+const PDFJS_VERSION = '4.0.379';
+const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.min.mjs`;
+const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/legacy/build/pdf.worker.min.mjs`;
+
+let pdfjsPromise: Promise<PdfJsLib> | null = null;
+
+function loadPdfjs(): Promise<PdfJsLib> {
   if (!pdfjsPromise) {
     pdfjsPromise = (async () => {
-      const [lib, workerUrlMod] = await Promise.all([
-        import('pdfjs-dist/legacy/build/pdf.mjs'),
-        import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'),
-      ]);
-      lib.GlobalWorkerOptions.workerSrc = workerUrlMod.default;
+      const lib = (await import(/* @vite-ignore */ PDFJS_MODULE_URL)) as PdfJsLib;
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
       return lib;
     })();
   }
