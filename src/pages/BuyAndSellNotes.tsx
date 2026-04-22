@@ -792,24 +792,53 @@ export function BuyAndSellNotes() {
       }
     });
 
-    const firstTxnId = rowTransactionMap[0];
-    const firstTxn = firstTxnId ? transactions.find(t => t.id === firstTxnId) : undefined;
-    if (firstTxn) {
-      const expectedGross = Number(firstTxn.total_amount_gross ?? firstTxn.total_amount ?? 0);
-      const expectedFees = getExpectedFees(firstTxn);
+    const mappedTxns = extractedRows
+      .map((_, idx) => transactions.find(t => t.id === rowTransactionMap[idx]))
+      .filter((t): t is Transaction => !!t);
+
+    if (mappedTxns.length > 0) {
+      const expectedGross = mappedTxns.reduce(
+        (s, t) => s + Number(t.total_amount_gross ?? t.total_amount ?? 0),
+        0
+      );
+      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
+      const expectedFeesTotals = mappedTxns.reduce(
+        (acc, t) => {
+          const f = getExpectedFees(t);
+          acc.brokerage += f.brokerage;
+          acc.sec += f.sec;
+          acc.exchange += f.exchange;
+          acc.cds += f.cds;
+          acc.gov_cess += f.gov_cess;
+          acc.clearing_fees += f.clearing_fees;
+          return acc;
+        },
+        { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 }
+      );
+      const expectedAvgPrice = expectedShares > 0 ? expectedGross / expectedShares : 0;
+
+      const pdfShares = extractedRows.reduce((s, r) => s + r.qty, 0);
+      const pdfGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
+      const pdfBrokerage = extractedRows.reduce((s, r) => s + r.brokerage, 0);
+      const pdfSec = extractedRows.reduce((s, r) => s + r.sec, 0);
+      const pdfExchange = extractedRows.reduce((s, r) => s + r.cse_fees, 0);
+      const pdfCds = extractedRows.reduce((s, r) => s + r.cds_fees, 0);
+      const pdfStl = extractedRows.reduce((s, r) => s + r.stl, 0);
+      const pdfClearing = extractedRows.reduce((s, r) => s + r.clearing_fee, 0);
+      const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
+
       const check = (key: string, actual: number, expected: number, tolerance: number) => {
         compare[key] = { expected, matches: Math.abs(actual - expected) <= tolerance };
       };
-      const firstRow = extractedRows[0];
-      check('no_of_shares', firstRow.qty, Number(firstTxn.no_of_shares) || 0, 0.01);
-      check('price_avg', firstRow.rate, Number(firstTxn.price_per_share) || 0, 0.01);
-      check('gross_amount', firstRow.gross_value, expectedGross, 0.5);
-      check('brokerage', firstRow.brokerage, expectedFees.brokerage, 1);
-      check('sec', firstRow.sec, expectedFees.sec, 1);
-      check('exchange', firstRow.cse_fees, expectedFees.exchange, 1);
-      check('cds', firstRow.cds_fees, expectedFees.cds, 1);
-      check('gov_cess', firstRow.stl, expectedFees.gov_cess, 1);
-      check('clearing_fees', firstRow.clearing_fee, expectedFees.clearing_fees, 1);
+      check('no_of_shares', pdfShares, expectedShares, 0.01);
+      check('price_avg', pdfAvgPrice, expectedAvgPrice, 0.01);
+      check('gross_amount', pdfGross, expectedGross, 0.5);
+      check('brokerage', pdfBrokerage, expectedFeesTotals.brokerage, 1);
+      check('sec', pdfSec, expectedFeesTotals.sec, 1);
+      check('exchange', pdfExchange, expectedFeesTotals.exchange, 1);
+      check('cds', pdfCds, expectedFeesTotals.cds, 1);
+      check('gov_cess', pdfStl, expectedFeesTotals.gov_cess, 1);
+      check('clearing_fees', pdfClearing, expectedFeesTotals.clearing_fees, 1);
     }
 
     setFieldCompare(compare);
@@ -1506,7 +1535,7 @@ export function BuyAndSellNotes() {
                   { key: 'sec', label: 'SEC', value: extractedData.sec ? `Rs. ${extractedData.sec}` : '-', isAmount: true },
                   { key: 'exchange', label: 'Exchange', value: extractedData.exchange ? `Rs. ${extractedData.exchange}` : '-', isAmount: true },
                   { key: 'cds', label: 'CDS', value: extractedData.cds ? `Rs. ${extractedData.cds}` : '-', isAmount: true },
-                  { key: 'gov_cess', label: 'GOV CESS', value: extractedData.gov_cess ? `Rs. ${extractedData.gov_cess}` : '-', isAmount: true },
+                  { key: 'gov_cess', label: 'Share Transaction Levy (Gov Cess)', value: extractedData.gov_cess ? `Rs. ${extractedData.gov_cess}` : '-', isAmount: true },
                   { key: 'clearing_fees', label: 'Clearing Fees', value: extractedData.clearing_fees ? `Rs. ${extractedData.clearing_fees}` : '-', isAmount: true },
                 ];
 
