@@ -302,25 +302,60 @@ export function BuyAndSellNotes() {
   }
 
   const NUMERIC_TOKEN = /^-?[\d,]+(?:\.\d+)?$/;
-  const SECURITY_TOKEN = /^[A-Z0-9]{2,8}\.[A-Z]\d{4}$/;
-  const CONTRACT_TOKEN = /^\d{9,}$/;
+  const SECURITY_TOKEN = /^[A-Z0-9]{1,10}(?:\.[A-Z0-9]+)+$/;
+  const CONTRACT_TOKEN = /^\d{7,}$/;
+
+  function mergeAdjacentTokens(tokens: string[]): string[] {
+    const merged: string[] = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const prev = merged[merged.length - 1];
+      const cur = tokens[i];
+      if (prev && /[\d,.]$/.test(prev) && /^[\d,.]/.test(cur) && (prev + cur).match(/^[\d,]+(?:\.\d+)?$/)) {
+        merged[merged.length - 1] = prev + cur;
+      } else {
+        merged.push(cur);
+      }
+    }
+    return merged;
+  }
 
   function parseBoughtNoteRows(rows: { str: string; x: number }[][]): ExtractedRow[] {
     const result: ExtractedRow[] = [];
     for (const row of rows) {
-      if (row.length < 10) continue;
-      const tokens = row.map(c => c.str);
+      if (row.length < 5) continue;
+      const rawTokens = row.map(c => c.str).filter(Boolean);
+      const tokens = mergeAdjacentTokens(rawTokens);
       const contractIdx = tokens.findIndex(t => CONTRACT_TOKEN.test(t));
       if (contractIdx === -1) continue;
-      const securityIdx = tokens.findIndex((t, i) => i > contractIdx && SECURITY_TOKEN.test(t));
-      if (securityIdx === -1 || securityIdx <= contractIdx + 1) continue;
 
-      const qty = parseNumber(tokens.slice(contractIdx + 1, securityIdx).filter(t => NUMERIC_TOKEN.test(t)).join(''));
+      let securityIdx = tokens.findIndex((t, i) => i > contractIdx && SECURITY_TOKEN.test(t));
+      if (securityIdx === -1) {
+        securityIdx = tokens.findIndex((t, i) => i > contractIdx && /^[A-Z][A-Z0-9.]{2,}$/.test(t) && !NUMERIC_TOKEN.test(t));
+      }
+      if (securityIdx === -1 || securityIdx <= contractIdx) continue;
+
+      const qtyTokens = tokens.slice(contractIdx + 1, securityIdx).filter(t => NUMERIC_TOKEN.test(t));
+      if (qtyTokens.length === 0) continue;
+      const qty = parseNumber(qtyTokens.join(''));
+
       const security = tokens[securityIdx];
       const numeric = tokens.slice(securityIdx + 1).filter(t => NUMERIC_TOKEN.test(t)).map(parseNumber);
-      if (numeric.length < 10) continue;
+      if (numeric.length < 6) continue;
 
-      const [rate, gross_value, brokerage, cds_fees, cse_fees, sec, stl, clearing_fee, foreign_br, amount] = numeric;
+      const pad = (idx: number) => numeric[idx] ?? 0;
+      const amount = numeric[numeric.length - 1] ?? 0;
+      const head = numeric.slice(0, numeric.length - 1);
+      const [rate, gross_value, brokerage, cds_fees, cse_fees, sec, stl, clearing_fee, foreign_br] = [
+        head[0] ?? pad(0),
+        head[1] ?? pad(1),
+        head[2] ?? pad(2),
+        head[3] ?? pad(3),
+        head[4] ?? pad(4),
+        head[5] ?? pad(5),
+        head[6] ?? pad(6),
+        head[7] ?? pad(7),
+        head[8] ?? 0,
+      ];
 
       result.push({
         contract_no: tokens[contractIdx],
@@ -339,6 +374,85 @@ export function BuyAndSellNotes() {
       });
     }
     return result;
+  }
+
+  function parseRowsByXColumns(items: { str: string; x: number; y: number; page: number }[]): ExtractedRow[] {
+    const allRows = items.reduce<{ [key: string]: typeof items }>((acc, it) => {
+      const key = `${it.page}:${Math.round(it.y)}`;
+      (acc[key] = acc[key] || []).push(it);
+      return acc;
+    }, {});
+    const rowList = Object.values(allRows)
+      .map(r => [...r].sort((a, b) => a.x - b.x))
+      .sort((a, b) => (a[0].page - b[0].page) || (b[0].y - a[0].y));
+
+    const headerRow = rowList.find(r => {
+      const text = r.map(i => i.str).join(' ').toLowerCase();
+      return text.includes('contract') && text.includes('qty') && text.includes('security');
+    });
+    if (!headerRow) return [];
+
+    const colX: Record<string, number> = {};
+    for (let i = 0; i < headerRow.length; i += 1) {
+      const s = headerRow[i].str.toLowerCase();
+      if (s.startsWith('contract')) colX.contract = headerRow[i].x;
+      else if (s === 'qty') colX.qty = headerRow[i].x;
+      else if (s.startsWith('security')) colX.security = headerRow[i].x;
+      else if (s === 'rate') colX.rate = headerRow[i].x;
+      else if (s.startsWith('gross')) colX.gross = headerRow[i].x;
+      else if (s.startsWith('brokerage')) colX.brokerage = headerRow[i].x;
+      else if (s.startsWith('cds')) colX.cds = headerRow[i].x;
+      else if (s.startsWith('cse')) colX.cse = headerRow[i].x;
+      else if (s === 'sec') colX.sec = headerRow[i].x;
+      else if (s === 'stl') colX.stl = headerRow[i].x;
+      else if (s.startsWith('clearing')) colX.clearing = headerRow[i].x;
+      else if (s.startsWith('foreign')) colX.foreign = headerRow[i].x;
+      else if (s.startsWith('amount')) colX.amount = headerRow[i].x;
+    }
+
+    const headerY = headerRow[0].y;
+    const headerPage = headerRow[0].page;
+    const out: ExtractedRow[] = [];
+
+    const nearest = (row: typeof headerRow, x: number, tolerance = 40) => {
+      let best: typeof headerRow[number] | null = null;
+      let bestDist = Infinity;
+      for (const it of row) {
+        const d = Math.abs(it.x - x);
+        if (d < bestDist && d <= tolerance) {
+          best = it;
+          bestDist = d;
+        }
+      }
+      return best?.str ?? '';
+    };
+
+    for (const row of rowList) {
+      if (row[0].page < headerPage) continue;
+      if (row[0].page === headerPage && row[0].y >= headerY) continue;
+      const joined = row.map(i => i.str).join(' ');
+      if (!/^\s*\d{7,}/.test(joined)) continue;
+
+      const contract = nearest(row, colX.contract ?? row[0].x, 60);
+      if (!CONTRACT_TOKEN.test(contract)) continue;
+
+      out.push({
+        contract_no: contract,
+        qty: parseNumber(nearest(row, colX.qty ?? 0, 60)),
+        security: nearest(row, colX.security ?? 0, 60),
+        rate: parseNumber(nearest(row, colX.rate ?? 0, 60)),
+        gross_value: parseNumber(nearest(row, colX.gross ?? 0, 80)),
+        brokerage: parseNumber(nearest(row, colX.brokerage ?? 0, 60)),
+        cds_fees: parseNumber(nearest(row, colX.cds ?? 0, 60)),
+        cse_fees: parseNumber(nearest(row, colX.cse ?? 0, 60)),
+        sec: parseNumber(nearest(row, colX.sec ?? 0, 60)),
+        stl: parseNumber(nearest(row, colX.stl ?? 0, 60)),
+        clearing_fee: parseNumber(nearest(row, colX.clearing ?? 0, 60)),
+        foreign_br: parseNumber(nearest(row, colX.foreign ?? 0, 60)),
+        amount: parseNumber(nearest(row, colX.amount ?? 0, 80)),
+      });
+    }
+    return out;
   }
 
   function extractHeader(rawText: string, rows: { str: string; x: number }[][]) {
@@ -393,10 +507,14 @@ export function BuyAndSellNotes() {
     try {
       const { items, rawText } = await extractPdfText(file);
       const grouped = groupIntoRows(items);
-      const rows = parseBoughtNoteRows(grouped);
+      let rows = parseBoughtNoteRows(grouped);
+      if (rows.length === 0) {
+        rows = parseRowsByXColumns(items);
+      }
 
       if (rows.length === 0) {
-        alert('Could not extract line items from this PDF. Please verify it matches the standard BOUGHT/SOLD Note format.');
+        console.warn('PDF raw text (no rows parsed):', rawText.slice(0, 2000));
+        alert('Could not extract line items from this PDF. The document may use a non-standard layout. The raw text has been logged to the console for debugging.');
         setExtractedRows([]);
         return;
       }
