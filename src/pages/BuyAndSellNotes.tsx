@@ -1,6 +1,10 @@
 import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import pdfWorkerSrc from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 interface BuyAndSellNote {
   id: string;
@@ -227,7 +231,171 @@ export function BuyAndSellNotes() {
       return;
     }
     setUploadedFile(file);
-    simulateDataExtraction();
+    void extractFromPdf(file);
+  }
+
+  function parseNumber(raw: string): number {
+    const cleaned = raw.replace(/,/g, '').trim();
+    const value = parseFloat(cleaned);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  async function extractPdfText(file: File): Promise<{ items: { str: string; x: number; y: number; page: number }[]; rawText: string }> {
+    const buffer = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+    const items: { str: string; x: number; y: number; page: number }[] = [];
+    const textParts: string[] = [];
+
+    for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
+      const page = await doc.getPage(pageNum);
+      const content = await page.getTextContent();
+      for (const item of content.items as Array<{ str: string; transform: number[] }>) {
+        const str = (item.str || '').trim();
+        if (!str) continue;
+        const x = item.transform[4];
+        const y = item.transform[5];
+        items.push({ str, x, y, page: pageNum });
+        textParts.push(str);
+      }
+    }
+    return { items, rawText: textParts.join(' ') };
+  }
+
+  function groupIntoRows(items: { str: string; x: number; y: number; page: number }[]): { str: string; x: number }[][] {
+    const sorted = [...items].sort((a, b) => (a.page - b.page) || (b.y - a.y) || (a.x - b.x));
+    const rows: { str: string; x: number; y: number; page: number }[][] = [];
+    const tolerance = 3;
+    for (const item of sorted) {
+      const last = rows[rows.length - 1];
+      if (last && last[0].page === item.page && Math.abs(last[0].y - item.y) <= tolerance) {
+        last.push(item);
+      } else {
+        rows.push([item]);
+      }
+    }
+    return rows.map(row => row.sort((a, b) => a.x - b.x).map(({ str, x }) => ({ str, x })));
+  }
+
+  function parseBoughtNoteRows(rows: { str: string; x: number }[][]): ExtractedRow[] {
+    const result: ExtractedRow[] = [];
+    for (const row of rows) {
+      if (row.length < 10) continue;
+      const tokens = row.map(c => c.str);
+      const first = tokens[0];
+      if (!/^\d{7,}$/.test(first)) continue;
+      const securityIdx = tokens.findIndex(t => /^[A-Z]{2,6}\.[A-Z]\d{4}$/.test(t));
+      if (securityIdx < 2) continue;
+
+      const qty = parseNumber(tokens.slice(1, securityIdx).join(''));
+      const security = tokens[securityIdx];
+      const numeric = tokens.slice(securityIdx + 1).filter(t => /^[\d,.]+$/.test(t)).map(parseNumber);
+      if (numeric.length < 8) continue;
+
+      const [rate, gross_value, brokerage, cds_fees, cse_fees, sec, stl, clearing_fee, foreign_br, amount] = [
+        numeric[0] ?? 0,
+        numeric[1] ?? 0,
+        numeric[2] ?? 0,
+        numeric[3] ?? 0,
+        numeric[4] ?? 0,
+        numeric[5] ?? 0,
+        numeric[6] ?? 0,
+        numeric[7] ?? 0,
+        numeric[8] ?? 0,
+        numeric[numeric.length - 1] ?? 0,
+      ];
+
+      result.push({
+        contract_no: first,
+        qty,
+        security,
+        rate,
+        gross_value,
+        brokerage,
+        cds_fees,
+        cse_fees,
+        sec,
+        stl,
+        clearing_fee,
+        foreign_br,
+        amount,
+      });
+    }
+    return result;
+  }
+
+  function extractHeader(rawText: string) {
+    const accountMatch = rawText.match(/Account\s*No\s*([A-Z0-9\-\/]+)/i);
+    const txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+    const settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+    const toIso = (d: string | undefined) => d ? d.replace(/\//g, '-') : '';
+    return {
+      account_no: accountMatch?.[1]?.trim() || '',
+      trade_date: toIso(txnDateMatch?.[1]),
+      settlement: toIso(settleMatch?.[1]),
+    };
+  }
+
+  async function extractFromPdf(file: File) {
+    setIsExtracting(true);
+    try {
+      const { items, rawText } = await extractPdfText(file);
+      const rows = parseBoughtNoteRows(groupIntoRows(items));
+
+      if (rows.length === 0) {
+        alert('Could not extract line items from this PDF. Please verify it matches the standard BOUGHT Note format.');
+        setExtractedRows([]);
+        return;
+      }
+
+      const header = extractHeader(rawText);
+      const brokerLine = items.find(i => /securities|broker/i.test(i.str))?.str || '';
+
+      const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
+      const totalShares = sum(r => r.qty);
+      const totalGross = sum(r => r.gross_value);
+      const totalBrokerage = sum(r => r.brokerage);
+      const totalCds = sum(r => r.cds_fees);
+      const totalCse = sum(r => r.cse_fees);
+      const totalSec = sum(r => r.sec);
+      const totalStl = sum(r => r.stl);
+      const totalClearing = sum(r => r.clearing_fee);
+      const totalForeign = sum(r => r.foreign_br);
+      const totalAmount = sum(r => r.amount);
+      const avgRate = totalShares > 0 ? totalGross / totalShares : 0;
+
+      const today = new Date().toISOString().split('T')[0];
+      const extracted: ExtractedData = {
+        trade_date: header.trade_date || today,
+        contract_no: rows[0]?.contract_no || '',
+        no_of_shares: String(totalShares),
+        price_avg: avgRate.toFixed(2),
+        gross_amount: totalGross.toFixed(2),
+        brokerage: totalBrokerage.toFixed(2),
+        sec: totalSec.toFixed(2),
+        exchange: totalCse.toFixed(2),
+        cds: totalCds.toFixed(2),
+        gov_cess: totalStl.toFixed(2),
+        clearing_fees: totalClearing.toFixed(2),
+        net_amount: totalAmount.toFixed(2),
+        settlement: header.settlement || today,
+        foreign_brokerage: totalForeign.toFixed(2),
+        account_no: header.account_no,
+        broker_name: brokerLine,
+        buyer_name: '',
+      };
+
+      setExtractedRows(rows);
+      setExtractedData(extracted);
+      setFormData(prev => ({
+        ...prev,
+        settlement_date: extracted.settlement || prev.settlement_date,
+      }));
+    } catch (err) {
+      console.error('PDF extraction failed', err);
+      alert('Failed to read the PDF. Please try another file.');
+    } finally {
+      setIsExtracting(false);
+    }
   }
 
   function getExpectedFees(txn: Transaction) {
@@ -255,132 +423,6 @@ export function BuyAndSellNotes() {
       gov_cess: (gross * govRate) / 100,
       clearing_fees: (gross * clearingRate) / 100,
     };
-  }
-
-  function feeRates(txn: Transaction) {
-    const feeType = brokerageFeeTypes.find(ft => ft.id === txn.brokerage_fee_type_id);
-    const items = feeType?.fee_breakdown_items || [];
-    const findRate = (patterns: string[]) => {
-      const item = items.find(it => patterns.some(p => it.name?.toLowerCase().includes(p)));
-      return item ? Number(item.rate) || 0 : 0;
-    };
-    return {
-      brokerage: findRate(['brokerage']),
-      sec: findRate(['sec cess', 'sec ']),
-      cse: findRate(['cse', 'exchange']),
-      cds: findRate(['cds']),
-      stl: findRate(['iovy', 'cess', 'gov']),
-      clearing: findRate(['clearing']),
-    };
-  }
-
-  function buildRows(txn: Transaction, share: Share | undefined): ExtractedRow[] {
-    const totalShares = Number(txn.no_of_shares) || 0;
-    const rate = Number(txn.price_per_share) || 0;
-    const rates = feeRates(txn);
-    const ticker = share?.ticker?.trim() || '';
-    const security = ticker
-      ? (ticker.includes('.') ? ticker : `${ticker}.N0000`)
-      : 'DFCC.N0000';
-
-    const chunkCount = Math.min(5, Math.max(1, Math.ceil(totalShares / Math.max(1, Math.floor(totalShares / 3)))));
-    const n = Math.min(5, Math.max(1, chunkCount));
-    const baseChunk = Math.floor(totalShares / n);
-    const chunks: number[] = [];
-    let remaining = totalShares;
-    for (let i = 0; i < n - 1; i += 1) {
-      const qty = Math.max(1, Math.min(remaining - (n - 1 - i), baseChunk));
-      chunks.push(qty);
-      remaining -= qty;
-    }
-    chunks.push(remaining);
-
-    const baseContractNo = Date.now();
-    return chunks.map((qty, idx) => {
-      const gross = qty * rate;
-      const brokerage = (gross * rates.brokerage) / 100;
-      const cds_fees = (gross * rates.cds) / 100;
-      const cse_fees = (gross * rates.cse) / 100;
-      const sec = (gross * rates.sec) / 100;
-      const stl = (gross * rates.stl) / 100;
-      const clearing_fee = (gross * rates.clearing) / 100;
-      const foreign_br = 0;
-      const totalFees = brokerage + cds_fees + cse_fees + sec + stl + clearing_fee + foreign_br;
-      const isBuy = txn.transaction_type?.toUpperCase() === 'BUY';
-      const amount = isBuy ? gross + totalFees : gross - totalFees;
-      return {
-        contract_no: String(baseContractNo + idx),
-        qty,
-        security,
-        rate,
-        gross_value: gross,
-        brokerage,
-        cds_fees,
-        cse_fees,
-        sec,
-        stl,
-        clearing_fee,
-        foreign_br,
-        amount,
-      };
-    });
-  }
-
-  function simulateDataExtraction() {
-    setIsExtracting(true);
-    const selectedTxn = transactions.find(t => t.id === formData.transaction_id);
-
-    setTimeout(() => {
-      if (!selectedTxn) {
-        setIsExtracting(false);
-        return;
-      }
-
-      const share = shares.find(s => s.id === selectedTxn.share_id);
-      const rows = buildRows(selectedTxn, share);
-      const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
-
-      const totalShares = sum(r => r.qty);
-      const totalGross = sum(r => r.gross_value);
-      const totalBrokerage = sum(r => r.brokerage);
-      const totalCds = sum(r => r.cds_fees);
-      const totalCse = sum(r => r.cse_fees);
-      const totalSec = sum(r => r.sec);
-      const totalStl = sum(r => r.stl);
-      const totalClearing = sum(r => r.clearing_fee);
-      const totalForeign = sum(r => r.foreign_br);
-      const totalAmount = sum(r => r.amount);
-      const avgRate = totalShares > 0 ? totalGross / totalShares : Number(selectedTxn.price_per_share) || 0;
-
-      const today = new Date();
-      const settleDate = new Date(today);
-      settleDate.setDate(settleDate.getDate() + 2);
-
-      const extracted: ExtractedData = {
-        trade_date: selectedTxn.transaction_date || today.toISOString().split('T')[0],
-        contract_no: rows[0]?.contract_no || '',
-        no_of_shares: String(totalShares),
-        price_avg: avgRate.toFixed(2),
-        gross_amount: totalGross.toFixed(2),
-        brokerage: totalBrokerage.toFixed(2),
-        sec: totalSec.toFixed(2),
-        exchange: totalCse.toFixed(2),
-        cds: totalCds.toFixed(2),
-        gov_cess: totalStl.toFixed(2),
-        clearing_fees: totalClearing.toFixed(2),
-        net_amount: totalAmount.toFixed(2),
-        settlement: settleDate.toISOString().split('T')[0],
-        foreign_brokerage: totalForeign.toFixed(2),
-        account_no: 'DSA-' + Math.floor(1000 + Math.random() * 9000) + '-LC/00',
-        broker_name: 'Capital TRUST Securities (Private) Limited',
-        buyer_name: entities.find(e => e.id === selectedTxn.entity_id)?.name || '',
-      };
-
-      setExtractedRows(rows);
-      setExtractedData(extracted);
-      setFormData(prev => ({ ...prev, settlement_date: extracted.settlement }));
-      setIsExtracting(false);
-    }, 1200);
   }
 
   function calculateTotals() {
