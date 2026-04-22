@@ -158,6 +158,7 @@ export function BuyAndSellNotes() {
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
+  const [rowTransactionMap, setRowTransactionMap] = useState<Record<number, string>>({});
   const [debugRawText, setDebugRawText] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -248,11 +249,6 @@ export function BuyAndSellNotes() {
     if (!file) return;
     if (file.type !== 'application/pdf') {
       alert('Please upload a PDF file');
-      return;
-    }
-    if (!formData.transaction_id) {
-      alert('Please select a transaction before uploading the contract note.');
-      e.target.value = '';
       return;
     }
     setUploadedFile(file);
@@ -668,8 +664,34 @@ export function BuyAndSellNotes() {
 
       setExtractedRows(rows);
       setExtractedData(extracted);
+
+      const usedTxnIds = new Set<string>();
+      const autoMap: Record<number, string> = {};
+      rows.forEach((row, idx) => {
+        const ticker = row.security.split('.')[0].toUpperCase();
+        const share = shares.find(s => s.ticker?.toUpperCase() === ticker);
+        const matchType = extracted.note_type || undefined;
+        const candidate = transactions.find(t =>
+          !usedTxnIds.has(t.id) &&
+          (!share || t.share_id === share.id) &&
+          (!matchType || t.transaction_type === matchType) &&
+          Math.abs(Number(t.no_of_shares) - row.qty) < 0.01
+        ) || transactions.find(t =>
+          !usedTxnIds.has(t.id) &&
+          (!share || t.share_id === share.id) &&
+          (!matchType || t.transaction_type === matchType)
+        );
+        if (candidate) {
+          autoMap[idx] = candidate.id;
+          usedTxnIds.add(candidate.id);
+        }
+      });
+      setRowTransactionMap(autoMap);
+
+      const firstMapped = transactions.find(t => t.id === autoMap[0]);
       setFormData(prev => ({
         ...prev,
+        transaction_id: firstMapped?.id || prev.transaction_id,
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
@@ -743,41 +765,54 @@ export function BuyAndSellNotes() {
     const issues: string[] = [];
     const compare: Record<string, FieldCompare> = {};
 
-    if (!formData.transaction_id) {
-      issues.push('Please select a transaction');
+    if (extractedRows.length === 0) {
+      issues.push('No line items extracted from the PDF');
       setValidationIssues(issues);
       setFieldCompare({});
       return false;
     }
 
-    const txn = transactions.find(t => t.id === formData.transaction_id);
-    if (!txn) {
-      issues.push('Selected transaction not found');
-      setValidationIssues(issues);
-      setFieldCompare({});
-      return false;
+    const unmapped = extractedRows
+      .map((_, idx) => idx)
+      .filter(idx => !rowTransactionMap[idx]);
+    if (unmapped.length > 0) {
+      issues.push(`Please select a transaction for ${unmapped.length} line item${unmapped.length === 1 ? '' : 's'} (row${unmapped.length === 1 ? '' : 's'} ${unmapped.map(i => i + 1).join(', ')})`);
     }
 
-    const expectedGross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
-    const expectedFees = getExpectedFees(txn);
-
-    const check = (key: string, label: string, actual: number, expected: number, tolerance: number) => {
-      const matches = Math.abs(actual - expected) <= tolerance;
-      compare[key] = { expected, matches };
-      if (!matches) {
-        issues.push(`${label} mismatch: Expected ${expected.toFixed(2)}, but PDF shows ${actual.toFixed(2)}`);
+    extractedRows.forEach((row, idx) => {
+      const txnId = rowTransactionMap[idx];
+      if (!txnId) return;
+      const txn = transactions.find(t => t.id === txnId);
+      if (!txn) return;
+      const expectedQty = Number(txn.no_of_shares) || 0;
+      const expectedPrice = Number(txn.price_per_share) || 0;
+      if (Math.abs(expectedQty - row.qty) > 0.01) {
+        issues.push(`Row ${idx + 1} (${row.security}): Qty mismatch - expected ${expectedQty}, PDF shows ${row.qty}`);
       }
-    };
+      if (Math.abs(expectedPrice - row.rate) > 0.01) {
+        issues.push(`Row ${idx + 1} (${row.security}): Rate mismatch - expected ${expectedPrice.toFixed(2)}, PDF shows ${row.rate.toFixed(2)}`);
+      }
+    });
 
-    check('no_of_shares', 'No of Shares', parseFloat(extractedData.no_of_shares) || 0, Number(txn.no_of_shares) || 0, 0.01);
-    check('price_avg', 'Price/Avg', parseFloat(extractedData.price_avg) || 0, Number(txn.price_per_share) || 0, 0.01);
-    check('gross_amount', 'Gross Amount', parseFloat(extractedData.gross_amount) || 0, expectedGross, 0.5);
-    check('brokerage', 'Brokerage', parseFloat(extractedData.brokerage) || 0, expectedFees.brokerage, 1);
-    check('sec', 'SEC', parseFloat(extractedData.sec) || 0, expectedFees.sec, 1);
-    check('exchange', 'Exchange', parseFloat(extractedData.exchange) || 0, expectedFees.exchange, 1);
-    check('cds', 'CDS', parseFloat(extractedData.cds) || 0, expectedFees.cds, 1);
-    check('gov_cess', 'GOV CESS', parseFloat(extractedData.gov_cess) || 0, expectedFees.gov_cess, 1);
-    check('clearing_fees', 'Clearing Fees', parseFloat(extractedData.clearing_fees) || 0, expectedFees.clearing_fees, 1);
+    const firstTxnId = rowTransactionMap[0];
+    const firstTxn = firstTxnId ? transactions.find(t => t.id === firstTxnId) : undefined;
+    if (firstTxn) {
+      const expectedGross = Number(firstTxn.total_amount_gross ?? firstTxn.total_amount ?? 0);
+      const expectedFees = getExpectedFees(firstTxn);
+      const check = (key: string, actual: number, expected: number, tolerance: number) => {
+        compare[key] = { expected, matches: Math.abs(actual - expected) <= tolerance };
+      };
+      const firstRow = extractedRows[0];
+      check('no_of_shares', firstRow.qty, Number(firstTxn.no_of_shares) || 0, 0.01);
+      check('price_avg', firstRow.rate, Number(firstTxn.price_per_share) || 0, 0.01);
+      check('gross_amount', firstRow.gross_value, expectedGross, 0.5);
+      check('brokerage', firstRow.brokerage, expectedFees.brokerage, 1);
+      check('sec', firstRow.sec, expectedFees.sec, 1);
+      check('exchange', firstRow.cse_fees, expectedFees.exchange, 1);
+      check('cds', firstRow.cds_fees, expectedFees.cds, 1);
+      check('gov_cess', firstRow.stl, expectedFees.gov_cess, 1);
+      check('clearing_fees', firstRow.clearing_fee, expectedFees.clearing_fees, 1);
+    }
 
     setFieldCompare(compare);
     setValidationIssues(issues);
@@ -790,12 +825,10 @@ export function BuyAndSellNotes() {
       alert('Please upload a PDF first');
       return;
     }
-
-    if (!extractedData.contract_no) {
+    if (extractedRows.length === 0) {
       alert('Please wait for PDF extraction to complete');
       return;
     }
-
     validateExtractedData();
     setShowProcessModal(true);
   }
@@ -807,89 +840,104 @@ export function BuyAndSellNotes() {
     }
 
     try {
-      const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
-      if (!selectedTransaction) {
-        alert('Transaction not found');
+      if (extractedRows.length === 0) {
+        alert('No line items to process');
         return;
       }
 
-      const { data: insertedNote, error: insertError } = await supabase
-        .from('buy_sell_notes')
-        .insert({
-          transaction_id: formData.transaction_id,
-          note_type: selectedTransaction.transaction_type,
-          note_number: extractedData.contract_no,
-          broker_id: formData.broker_id,
-          dealer_name: formData.dealer_name || null,
-          transaction_date: extractedData.trade_date,
-          settlement_date: formData.settlement_date,
-          file_url: uploadedFile?.name || null,
-          remarks: formData.remarks || null,
-          trade_date: extractedData.trade_date,
-          contract_no: extractedData.contract_no,
-          no_of_shares: parseFloat(extractedData.no_of_shares),
-          price_avg: parseFloat(extractedData.price_avg),
-          gross_amount: parseFloat(extractedData.gross_amount),
-          brokerage: parseFloat(extractedData.brokerage),
-          sec: parseFloat(extractedData.sec),
-          exchange: parseFloat(extractedData.exchange),
-          cds: parseFloat(extractedData.cds),
-          gov_cess: parseFloat(extractedData.gov_cess),
-          clearing_fees: parseFloat(extractedData.clearing_fees),
-          net_amount: parseFloat(extractedData.net_amount),
-          foreign_brokerage: parseFloat(extractedData.foreign_brokerage)
-        })
-        .select()
-        .single();
+      const entityBalances: Record<string, number> = {};
 
-      if (insertError) throw insertError;
+      for (let i = 0; i < extractedRows.length; i += 1) {
+        const row = extractedRows[i];
+        const txnId = rowTransactionMap[i];
+        const selectedTransaction = transactions.find(t => t.id === txnId);
+        if (!selectedTransaction) {
+          alert(`Transaction not mapped for row ${i + 1}`);
+          return;
+        }
+        const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+        if (!entity) {
+          alert(`Entity not found for row ${i + 1}`);
+          return;
+        }
 
-      const entity = entities.find(e => e.id === selectedTransaction.entity_id);
-      if (!entity) {
-        alert('Entity not found');
-        return;
+        const rowGross = row.gross_value;
+        const rowNet = row.amount;
+
+        const { data: insertedNote, error: insertError } = await supabase
+          .from('buy_sell_notes')
+          .insert({
+            transaction_id: txnId,
+            note_type: selectedTransaction.transaction_type,
+            note_number: row.contract_no,
+            broker_id: formData.broker_id,
+            dealer_name: formData.dealer_name || null,
+            transaction_date: extractedData.trade_date,
+            settlement_date: formData.settlement_date,
+            file_url: uploadedFile?.name || null,
+            remarks: formData.remarks || null,
+            trade_date: extractedData.trade_date,
+            contract_no: row.contract_no,
+            no_of_shares: row.qty,
+            price_avg: row.rate,
+            gross_amount: rowGross,
+            brokerage: row.brokerage,
+            sec: row.sec,
+            exchange: row.cse_fees,
+            cds: row.cds_fees,
+            gov_cess: row.stl,
+            clearing_fees: row.clearing_fee,
+            net_amount: rowNet,
+            foreign_brokerage: row.foreign_br,
+          })
+          .select()
+          .maybeSingle();
+
+        if (insertError) throw insertError;
+
+        const transactionType = selectedTransaction.transaction_type === 'Buy' ? 'Deduction' : 'Addition';
+
+        if (entityBalances[entity.entity_id] === undefined) {
+          const { data: existing } = await supabase
+            .from('cash_balance_ledger')
+            .select('running_balance')
+            .eq('entity_id', entity.entity_id)
+            .order('timestamp', { ascending: false })
+            .limit(1);
+          entityBalances[entity.entity_id] = existing && existing.length > 0
+            ? Number(existing[0].running_balance)
+            : 0;
+        }
+
+        const lastBalance = entityBalances[entity.entity_id];
+        const newBalance = transactionType === 'Addition'
+          ? lastBalance + rowNet
+          : lastBalance - rowNet;
+        entityBalances[entity.entity_id] = newBalance;
+
+        const { error: ledgerError } = await supabase
+          .from('cash_balance_ledger')
+          .insert({
+            type: transactionType,
+            description: `${selectedTransaction.transaction_type} - ${row.contract_no}`,
+            code: row.contract_no,
+            amount: rowNet,
+            date: extractedData.trade_date,
+            running_balance: newBalance,
+            on_hold_amount: 0,
+            entity_id: entity.entity_id,
+            bank_id: null,
+            reference_id: insertedNote?.id || null,
+            created_by: 'System',
+            notes: formData.remarks || null,
+          });
+
+        if (ledgerError) throw ledgerError;
       }
-
-      const netAmount = parseFloat(extractedData.net_amount);
-      const transactionType = selectedTransaction.transaction_type === 'Buy' ? 'Deduction' : 'Addition';
-
-      const { data: existingTransactions } = await supabase
-        .from('cash_balance_ledger')
-        .select('running_balance')
-        .eq('entity_id', entity.entity_id)
-        .order('timestamp', { ascending: false })
-        .limit(1);
-
-      const lastBalance = existingTransactions && existingTransactions.length > 0
-        ? Number(existingTransactions[0].running_balance)
-        : 0;
-
-      const newBalance = transactionType === 'Addition'
-        ? lastBalance + netAmount
-        : lastBalance - netAmount;
-
-      const { error: ledgerError } = await supabase
-        .from('cash_balance_ledger')
-        .insert({
-          type: transactionType,
-          description: `${selectedTransaction.transaction_type} - ${extractedData.contract_no}`,
-          code: extractedData.contract_no,
-          amount: netAmount,
-          date: extractedData.trade_date,
-          running_balance: newBalance,
-          on_hold_amount: 0,
-          entity_id: entity.entity_id,
-          bank_id: null,
-          reference_id: insertedNote?.id || null,
-          created_by: 'System',
-          notes: formData.remarks || null
-        });
-
-      if (ledgerError) throw ledgerError;
 
       await loadData();
       handleCloseModals();
-      alert('Buy/Sell note processed successfully! Cash balance has been updated.');
+      alert(`${extractedRows.length} buy/sell note${extractedRows.length === 1 ? '' : 's'} processed successfully! Cash balance has been updated.`);
     } catch (error) {
       console.error('Error processing note:', error);
       alert('Failed to process note');
@@ -932,6 +980,7 @@ export function BuyAndSellNotes() {
     setValidationIssues([]);
     setFieldCompare({});
     setExtractedRows([]);
+    setRowTransactionMap({});
     setDebugRawText('');
     setTotals({
       total_shares: 0,
@@ -965,9 +1014,13 @@ export function BuyAndSellNotes() {
     note.dealer_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const availableEntityAccounts = formData.broker_id && formData.transaction_id
+  const primaryMappedTxnId = formData.transaction_id
+    || Object.values(rowTransactionMap).find(v => !!v)
+    || '';
+
+  const availableEntityAccounts = formData.broker_id && primaryMappedTxnId
     ? (() => {
-        const transaction = transactions.find(t => t.id === formData.transaction_id);
+        const transaction = transactions.find(t => t.id === primaryMappedTxnId);
         if (!transaction) return [];
         const entity = entities.find(e => e.id === transaction.entity_id);
         if (!entity) return [];
@@ -1085,27 +1138,8 @@ export function BuyAndSellNotes() {
             <div className="p-6 space-y-6">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800">
-                  This should be the list of approved buy/sell requests
+                  Upload a broker contract note PDF. Each line item will be matched to one of your approved buy/sell transactions on the next step.
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Transaction <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.transaction_id}
-                  onChange={(e) => setFormData({ ...formData, transaction_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select approved transaction</option>
-                  {transactions.map((transaction) => (
-                    <option key={transaction.id} value={transaction.id}>
-                      {getTransactionDisplay(transaction.id)}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div>
@@ -1146,15 +1180,19 @@ export function BuyAndSellNotes() {
                 </label>
                 <input
                   type="text"
-                  value={formData.transaction_id ? (() => {
-                    const transaction = transactions.find(t => t.id === formData.transaction_id);
-                    if (!transaction) return '';
-                    const entity = entities.find(e => e.id === transaction.entity_id);
-                    return entity?.name || '';
-                  })() : ''}
+                  value={(() => {
+                    const mappedIds = Array.from(new Set(Object.values(rowTransactionMap).filter(Boolean)));
+                    const names = mappedIds
+                      .map(id => transactions.find(t => t.id === id))
+                      .filter(Boolean)
+                      .map(t => entities.find(e => e.id === t!.entity_id)?.name)
+                      .filter(Boolean) as string[];
+                    const unique = Array.from(new Set(names));
+                    return unique.join(', ');
+                  })()}
                   disabled
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
-                  placeholder="Auto-filled from transaction"
+                  placeholder="Auto-filled from mapped transactions"
                 />
               </div>
 
@@ -1353,6 +1391,7 @@ export function BuyAndSellNotes() {
                     <table className="w-full text-xs">
                       <thead className="bg-gray-100">
                         <tr>
+                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Transaction</th>
                           <th className="px-3 py-2 text-left font-semibold text-gray-700">Contract No</th>
                           <th className="px-3 py-2 text-right font-semibold text-gray-700">Qty</th>
                           <th className="px-3 py-2 text-left font-semibold text-gray-700">Security</th>
@@ -1369,8 +1408,36 @@ export function BuyAndSellNotes() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {extractedRows.map((row, idx) => (
+                        {extractedRows.map((row, idx) => {
+                          const ticker = row.security.split('.')[0].toUpperCase();
+                          const share = shares.find(s => s.ticker?.toUpperCase() === ticker);
+                          const usedByOther = new Set(
+                            Object.entries(rowTransactionMap)
+                              .filter(([k]) => Number(k) !== idx)
+                              .map(([, v]) => v)
+                              .filter(Boolean)
+                          );
+                          const candidates = transactions.filter(t =>
+                            (!share || t.share_id === share.id) &&
+                            (!extractedData.note_type || t.transaction_type === extractedData.note_type) &&
+                            (!usedByOther.has(t.id) || t.id === rowTransactionMap[idx])
+                          );
+                          return (
                           <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2">
+                              <select
+                                value={rowTransactionMap[idx] || ''}
+                                onChange={(e) => setRowTransactionMap(prev => ({ ...prev, [idx]: e.target.value }))}
+                                className={`w-full px-2 py-1 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+                                  rowTransactionMap[idx] ? 'border-gray-300 bg-white' : 'border-red-300 bg-red-50'
+                                }`}
+                              >
+                                <option value="">Select transaction...</option>
+                                {candidates.map(t => (
+                                  <option key={t.id} value={t.id}>{getTransactionDisplay(t.id)}</option>
+                                ))}
+                              </select>
+                            </td>
                             <td className="px-3 py-2 text-gray-800">{row.contract_no}</td>
                             <td className="px-3 py-2 text-right text-gray-800">{row.qty.toLocaleString()}</td>
                             <td className="px-3 py-2 text-gray-800">{row.security}</td>
@@ -1385,11 +1452,12 @@ export function BuyAndSellNotes() {
                             <td className="px-3 py-2 text-right text-gray-800">{row.foreign_br.toFixed(2)}</td>
                             <td className="px-3 py-2 text-right font-semibold text-gray-900">{row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                       <tfoot className="bg-gray-50">
                         <tr className="border-t-2 border-gray-300 font-semibold">
-                          <td className="px-3 py-2 text-gray-900" colSpan={1}>Total</td>
+                          <td className="px-3 py-2 text-gray-900" colSpan={2}>Total</td>
                           <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
                           <td className="px-3 py-2"></td>
                           <td className="px-3 py-2"></td>
@@ -1405,7 +1473,7 @@ export function BuyAndSellNotes() {
                         </tr>
                         {(extractedData.page_total || extractedData.grand_total) && (
                           <tr>
-                            <td colSpan={11} className="px-3 py-2 text-right text-gray-500">From PDF &mdash; PageTotal / Total</td>
+                            <td colSpan={12} className="px-3 py-2 text-right text-gray-500">From PDF &mdash; PageTotal / Total</td>
                             <td className="px-3 py-2 text-right text-gray-700">{extractedData.page_total || '-'}</td>
                             <td className="px-3 py-2 text-right font-bold text-gray-900">{extractedData.grand_total || '-'}</td>
                           </tr>
