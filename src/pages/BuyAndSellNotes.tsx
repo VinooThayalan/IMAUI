@@ -381,15 +381,41 @@ export function BuyAndSellNotes() {
     const out: ExtractedRow[] = [];
     const NUM = '[\\d,]+(?:\\.\\d+)?';
     const TICKER = '[A-Z][A-Z0-9]{0,9}(?:\\.[A-Z0-9]+)+';
-    const pattern = new RegExp(
-      `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})\\s+` +
-      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+
+    const capitalTrustPattern = new RegExp(
+      `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})\\s+(${NUM})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
       `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
       'g'
     );
 
     let m: RegExpExecArray | null;
-    while ((m = pattern.exec(rawText)) !== null) {
+    while ((m = capitalTrustPattern.exec(rawText)) !== null) {
+      out.push({
+        contract_no: m[1],
+        security: m[2],
+        qty: parseNumber(m[3]),
+        rate: parseNumber(m[4]),
+        sec: parseNumber(m[5]),
+        cse_fees: parseNumber(m[6]),
+        cds_fees: parseNumber(m[7]),
+        stl: parseNumber(m[8]),
+        brokerage: parseNumber(m[9]),
+        amount: parseNumber(m[10]),
+        gross_value: parseNumber(m[11]),
+        foreign_br: parseNumber(m[12]),
+        clearing_fee: parseNumber(m[13]),
+      });
+    }
+    if (out.length > 0) return out;
+
+    const visualOrderPattern = new RegExp(
+      `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
+      'g'
+    );
+    while ((m = visualOrderPattern.exec(rawText)) !== null) {
       out.push({
         contract_no: m[1],
         qty: parseNumber(m[2]),
@@ -406,33 +432,29 @@ export function BuyAndSellNotes() {
         amount: parseNumber(m[13]),
       });
     }
-
     if (out.length > 0) return out;
 
     const looser = new RegExp(
-      `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})((?:\\s+${NUM}){8,12})`,
+      `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})((?:\\s+${NUM}){8,12})`,
       'g'
     );
     while ((m = looser.exec(rawText)) !== null) {
       const nums = m[4].trim().split(/\s+/).map(parseNumber);
       if (nums.length < 8) continue;
-      const amount = nums[nums.length - 1];
-      const [rate, gross, brokerage, cds, cse, sec, stl, clearing] = nums;
-      const foreign = nums.length >= 10 ? nums[nums.length - 2] : 0;
       out.push({
         contract_no: m[1],
-        qty: parseNumber(m[2]),
-        security: m[3],
-        rate: rate ?? 0,
-        gross_value: gross ?? 0,
-        brokerage: brokerage ?? 0,
-        cds_fees: cds ?? 0,
-        cse_fees: cse ?? 0,
-        sec: sec ?? 0,
-        stl: stl ?? 0,
-        clearing_fee: clearing ?? 0,
-        foreign_br: foreign ?? 0,
-        amount: amount ?? 0,
+        security: m[2],
+        qty: parseNumber(m[3]),
+        rate: nums[0] ?? 0,
+        sec: nums[1] ?? 0,
+        cse_fees: nums[2] ?? 0,
+        cds_fees: nums[3] ?? 0,
+        stl: nums[4] ?? 0,
+        brokerage: nums[5] ?? 0,
+        amount: nums[6] ?? 0,
+        gross_value: nums[7] ?? 0,
+        foreign_br: nums[8] ?? 0,
+        clearing_fee: nums[9] ?? 0,
       });
     }
     return out;
@@ -518,9 +540,23 @@ export function BuyAndSellNotes() {
   }
 
   function extractHeader(rawText: string, rows: { str: string; x: number }[][]) {
-    const accountMatch = rawText.match(/Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i);
-    const txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
-    const settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+    let accountMatch = rawText.match(/Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i);
+    let txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+    let settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
+
+    if (!txnDateMatch || !settleMatch || !accountMatch) {
+      const jumbled = rawText.match(
+        /(\d{4}[\/\-]\d{2}[\/\-]\d{2})\s+([A-Z]{2,}[A-Z0-9\-\/]+)\s+(?:Buyer|Seller)\s+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i
+      );
+      if (jumbled) {
+        txnDateMatch = txnDateMatch || ([null, jumbled[1]] as unknown as RegExpMatchArray);
+        accountMatch = accountMatch || ([null, jumbled[2]] as unknown as RegExpMatchArray);
+        settleMatch = settleMatch || ([null, jumbled[3]] as unknown as RegExpMatchArray);
+      }
+    }
+    if (!accountMatch) {
+      accountMatch = rawText.match(/\b([A-Z]{2,5}-\d{3,5}-[A-Z]{2,3}\/\d{2})\b/);
+    }
     const pageTotalMatch = rawText.match(/Page\s*Total\s*([\d,]+(?:\.\d+)?)/i);
     const totalMatch = rawText.match(/\bTotal\b\s*([\d,]+\.\d+)\s*$/i)
       || rawText.match(/\bTotal\b\s+([\d,]+\.\d+)(?!\S)/i);
@@ -547,6 +583,14 @@ export function BuyAndSellNotes() {
         if (!line || /Account\s*No/i.test(line) || /Bought\s+by\s+order/i.test(line)) break;
         if (!buyer_name) buyer_name = line;
         else buyer_address_parts.push(line);
+      }
+    }
+    if (!buyer_name) {
+      const buyerJumbled = rawText.match(/(?:Bought|Sold)\s+([A-Z][A-Z0-9\s(),.&/-]+?)\s+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/);
+      if (buyerJumbled) {
+        const parts = buyerJumbled[1].split(/\s+NO\.|,\s*NO\./i);
+        buyer_name = parts[0]?.trim() || '';
+        if (parts[1]) buyer_address_parts.push('NO.' + parts[1].trim());
       }
     }
 
