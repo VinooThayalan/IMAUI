@@ -69,54 +69,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data: { session } } = await withTimeout(
         supabase.auth.getSession(),
-        5000,
+        3000,
         'getSession'
       );
       setUser(session?.user ?? null);
+      setLoading(false);
 
       if (session?.user) {
-        await loadAppUser(session.user.id);
+        void loadAppUser(session.user.id);
       }
     } catch (error) {
       console.error('Error checking user session:', error);
-    } finally {
       setLoading(false);
     }
   }
 
   async function loadAppUser(userId: string) {
-    const attempt = async () => {
-      const { data, error } = await withTimeout(
+    try {
+      const { data: appUserData, error: appUserError } = await withTimeout(
         supabase.from('app_users').select('*').eq('id', userId).maybeSingle(),
-        8000,
+        5000,
         'loadAppUser'
       );
-      if (error) throw error;
-      return data;
-    };
-    try {
-      let appUserData = null;
-      let lastError: unknown = null;
-      for (let i = 0; i < 3; i += 1) {
-        try {
-          appUserData = await attempt();
-          lastError = null;
-          break;
-        } catch (err) {
-          lastError = err;
-          await new Promise(r => setTimeout(r, 500 * (i + 1)));
-        }
-      }
-      if (lastError) throw lastError;
+      if (appUserError) throw appUserError;
 
       if (appUserData) {
         setAppUser(appUserData as AppUser);
-        await loadPermissions(userId, appUserData.role);
+        void loadPermissions(userId, appUserData.role);
       }
     } catch (error) {
       console.error('Error loading app user:', error);
-    } finally {
-      setLoading(false);
     }
   }
 
