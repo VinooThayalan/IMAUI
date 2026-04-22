@@ -667,19 +667,17 @@ export function BuyAndSellNotes() {
 
       const usedTxnIds = new Set<string>();
       const autoMap: Record<number, string> = {};
+      const noteType = (extracted.note_type || '').toLowerCase();
       rows.forEach((row, idx) => {
         const ticker = row.security.split('.')[0].toUpperCase();
         const share = shares.find(s => s.ticker?.toUpperCase() === ticker);
-        const matchType = extracted.note_type || undefined;
+        const typeOk = (t: Transaction) => !noteType || t.transaction_type?.toLowerCase() === noteType;
+        const shareOk = (t: Transaction) => !share || t.share_id === share.id;
         const candidate = transactions.find(t =>
-          !usedTxnIds.has(t.id) &&
-          (!share || t.share_id === share.id) &&
-          (!matchType || t.transaction_type === matchType) &&
+          !usedTxnIds.has(t.id) && shareOk(t) && typeOk(t) &&
           Math.abs(Number(t.no_of_shares) - row.qty) < 0.01
         ) || transactions.find(t =>
-          !usedTxnIds.has(t.id) &&
-          (!share || t.share_id === share.id) &&
-          (!matchType || t.transaction_type === matchType)
+          !usedTxnIds.has(t.id) && shareOk(t) && typeOk(t)
         );
         if (candidate) {
           autoMap[idx] = candidate.id;
@@ -1417,11 +1415,18 @@ export function BuyAndSellNotes() {
                               .map(([, v]) => v)
                               .filter(Boolean)
                           );
-                          const candidates = transactions.filter(t =>
-                            (!share || t.share_id === share.id) &&
-                            (!extractedData.note_type || t.transaction_type === extractedData.note_type) &&
-                            (!usedByOther.has(t.id) || t.id === rowTransactionMap[idx])
-                          );
+                          const noteType = (extractedData.note_type || '').toLowerCase();
+                          const matchType = (t: Transaction) => !noteType || t.transaction_type?.toLowerCase() === noteType;
+                          const available = (t: Transaction) => !usedByOther.has(t.id) || t.id === rowTransactionMap[idx];
+                          let candidates = transactions.filter(t =>
+                            share ? t.share_id === share.id : true
+                          ).filter(matchType).filter(available);
+                          if (candidates.length === 0) {
+                            candidates = transactions.filter(matchType).filter(available);
+                          }
+                          if (candidates.length === 0) {
+                            candidates = transactions.filter(available);
+                          }
                           return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-3 py-2">
