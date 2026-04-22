@@ -56,9 +56,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+      Promise.resolve(p),
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+      ),
+    ]);
+  }
+
   async function checkUser() {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(),
+        5000,
+        'getSession'
+      );
       setUser(session?.user ?? null);
 
       if (session?.user) {
@@ -73,11 +86,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function loadAppUser(userId: string) {
     try {
-      const { data: appUserData, error: appUserError } = await supabase
-        .from('app_users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const { data: appUserData, error: appUserError } = await withTimeout(
+        supabase.from('app_users').select('*').eq('id', userId).maybeSingle(),
+        5000,
+        'loadAppUser'
+      );
 
       if (appUserError) throw appUserError;
 
