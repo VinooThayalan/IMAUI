@@ -235,7 +235,14 @@ export function BuyAndSellNotes() {
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
       setEntityBrokers(entityBrokersRes.data || []);
-      setBrokerageFeeTypes(feeTypesRes.data || []);
+      setBrokerageFeeTypes(
+        (feeTypesRes.data || []).map((ft: BrokerageFeeType) => ({
+          ...ft,
+          fee_breakdown_items: typeof ft.fee_breakdown_items === 'string'
+            ? JSON.parse(ft.fee_breakdown_items)
+            : (ft.fee_breakdown_items || []),
+        }))
+      );
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -701,20 +708,28 @@ export function BuyAndSellNotes() {
   }
 
   function getExpectedFees(txn: Transaction) {
-    const gross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const computedGross = (Number(txn.no_of_shares) || 0) * (Number(txn.price_per_share) || 0);
+    const gross = computedGross > 0 ? computedGross : Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
     const feeType = brokerageFeeTypes.find(ft => ft.id === txn.brokerage_fee_type_id);
-    const items = feeType?.fee_breakdown_items || [];
+    const rawItems = feeType?.fee_breakdown_items;
+    const items: { name: string; rate: number }[] = typeof rawItems === 'string'
+      ? JSON.parse(rawItems)
+      : (rawItems || []);
 
-    const findRate = (patterns: string[]) => {
-      const item = items.find(it => patterns.some(p => it.name?.toLowerCase().includes(p)));
+    const findRate = (patterns: string[], excludes: string[] = []) => {
+      const item = items.find(it => {
+        const name = (it.name || '').toLowerCase();
+        if (excludes.some(e => name.includes(e))) return false;
+        return patterns.some(p => name.includes(p));
+      });
       return item ? Number(item.rate) || 0 : 0;
     };
 
-    const brokerageRate = findRate(['brokerage']);
-    const secRate = findRate(['sec cess', 'sec ']);
-    const exchangeRate = findRate(['cse', 'exchange']);
-    const cdsRate = findRate(['cds']);
-    const govRate = findRate(['iovy', 'cess', 'gov']);
+    const brokerageRate = findRate(['brokerage'], ['sec', 'cse', 'cds', 'clearing', 'levy', 'cess']);
+    const secRate = findRate(['sec cess', 'sec fees', 'sec fee'], ['share transaction', 'levy']);
+    const exchangeRate = findRate(['cse fees', 'cse fee', 'cse', 'exchange']);
+    const cdsRate = findRate(['cds fees', 'cds fee', 'cds']);
+    const govRate = findRate(['share transaction levy', 'share transaction', 'stl', 'levy']);
     const clearingRate = findRate(['clearing']);
 
     return {
@@ -797,11 +812,11 @@ export function BuyAndSellNotes() {
       .filter((t): t is Transaction => !!t);
 
     if (mappedTxns.length > 0) {
+      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
       const expectedGross = mappedTxns.reduce(
-        (s, t) => s + Number(t.total_amount_gross ?? t.total_amount ?? 0),
+        (s, t) => s + (Number(t.no_of_shares) || 0) * (Number(t.price_per_share) || 0),
         0
       );
-      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
       const expectedFeesTotals = mappedTxns.reduce(
         (acc, t) => {
           const f = getExpectedFees(t);
