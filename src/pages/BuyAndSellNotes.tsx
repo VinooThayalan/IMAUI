@@ -718,11 +718,11 @@ export function BuyAndSellNotes() {
       return item ? Number(item.rate) || 0 : 0;
     };
 
-    const brokerageRate = findRate(['brokerage']);
-    const secRate = findRate(['sec cess', 'sec fee', 'sec '], ['gov', 'stl', 'share transaction']);
-    const exchangeRate = findRate(['cse', 'exchange']);
-    const cdsRate = findRate(['cds']);
-    const govRate = findRate(['stl', 'share transaction', 'gov cess', 'government', 'levy'], ['sec']);
+    const brokerageRate = findRate(['brokerage'], ['sec', 'cse', 'cds', 'clearing', 'levy', 'cess']);
+    const secRate = findRate(['sec cess', 'sec fees', 'sec fee'], ['share transaction', 'levy']);
+    const exchangeRate = findRate(['cse fees', 'cse fee', 'exchange']);
+    const cdsRate = findRate(['cds fees', 'cds fee', 'cds']);
+    const govRate = findRate(['share transaction levy', 'share transaction', 'stl', 'levy']);
     const clearingRate = findRate(['clearing']);
 
     return {
