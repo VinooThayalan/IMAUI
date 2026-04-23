@@ -158,7 +158,6 @@ export function BuyAndSellNotes() {
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
-  const [rowTransactionMap, setRowTransactionMap] = useState<Record<number, string>>({});
   const [debugRawText, setDebugRawText] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -778,59 +777,21 @@ export function BuyAndSellNotes() {
     const issues: string[] = [];
     const compare: Record<string, FieldCompare> = {};
 
-    if (extractedRows.length === 0) {
-      issues.push('No line items extracted from the PDF');
+    if (!formData.transaction_id) {
+      issues.push('Please select a transaction to map this note to');
       setValidationIssues(issues);
       setFieldCompare({});
       return false;
     }
 
-    const unmapped = extractedRows
-      .map((_, idx) => idx)
-      .filter(idx => !rowTransactionMap[idx]);
-    if (unmapped.length > 0) {
-      issues.push(`Please select a transaction for ${unmapped.length} line item${unmapped.length === 1 ? '' : 's'} (row${unmapped.length === 1 ? '' : 's'} ${unmapped.map(i => i + 1).join(', ')})`);
-    }
+    const txn = transactions.find(t => t.id === formData.transaction_id);
 
-    extractedRows.forEach((row, idx) => {
-      const txnId = rowTransactionMap[idx];
-      if (!txnId) return;
-      const txn = transactions.find(t => t.id === txnId);
-      if (!txn) return;
-      const expectedQty = Number(txn.no_of_shares) || 0;
-      const expectedPrice = Number(txn.price_per_share) || 0;
-      if (Math.abs(expectedQty - row.qty) > 0.01) {
-        issues.push(`Row ${idx + 1} (${row.security}): Qty mismatch - expected ${expectedQty}, PDF shows ${row.qty}`);
-      }
-      if (Math.abs(expectedPrice - row.rate) > 0.01) {
-        issues.push(`Row ${idx + 1} (${row.security}): Rate mismatch - expected ${expectedPrice.toFixed(2)}, PDF shows ${row.rate.toFixed(2)}`);
-      }
-    });
-
-    const mappedTxns = extractedRows
-      .map((_, idx) => transactions.find(t => t.id === rowTransactionMap[idx]))
-      .filter((t): t is Transaction => !!t);
-
-    if (mappedTxns.length > 0) {
-      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
-      const expectedGross = mappedTxns.reduce(
-        (s, t) => s + (Number(t.no_of_shares) || 0) * (Number(t.price_per_share) || 0),
-        0
-      );
-      const expectedFeesTotals = mappedTxns.reduce(
-        (acc, t) => {
-          const f = getExpectedFees(t);
-          acc.brokerage += f.brokerage;
-          acc.sec += f.sec;
-          acc.exchange += f.exchange;
-          acc.cds += f.cds;
-          acc.gov_cess += f.gov_cess;
-          acc.clearing_fees += f.clearing_fees;
-          return acc;
-        },
-        { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 }
-      );
-      const expectedAvgPrice = expectedShares > 0 ? expectedGross / expectedShares : 0;
+    if (txn) {
+      const expectedShares = Number(txn.no_of_shares) || 0;
+      const expectedGross = expectedShares * (Number(txn.price_per_share) || 0);
+      const expectedFees = getExpectedFees(txn);
+      const expectedAvgPrice = Number(txn.price_per_share) || 0;
+      const expectedNet = Number(txn.total_amount) || 0;
 
       const pdfShares = extractedRows.reduce((s, r) => s + r.qty, 0);
       const pdfGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
@@ -841,6 +802,7 @@ export function BuyAndSellNotes() {
       const pdfStl = extractedRows.reduce((s, r) => s + r.stl, 0);
       const pdfClearing = extractedRows.reduce((s, r) => s + r.clearing_fee, 0);
       const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
+      const pdfNet = extractedRows.reduce((s, r) => s + r.amount, 0);
 
       const check = (key: string, actual: number, expected: number, tolerance: number) => {
         compare[key] = { expected, matches: Math.abs(actual - expected) <= tolerance };
@@ -848,12 +810,13 @@ export function BuyAndSellNotes() {
       check('no_of_shares', pdfShares, expectedShares, 0.01);
       check('price_avg', pdfAvgPrice, expectedAvgPrice, 0.01);
       check('gross_amount', pdfGross, expectedGross, 0.5);
-      check('brokerage', pdfBrokerage, expectedFeesTotals.brokerage, 1);
-      check('sec', pdfSec, expectedFeesTotals.sec, 1);
-      check('exchange', pdfExchange, expectedFeesTotals.exchange, 1);
-      check('cds', pdfCds, expectedFeesTotals.cds, 1);
-      check('gov_cess', pdfStl, expectedFeesTotals.gov_cess, 1);
-      check('clearing_fees', pdfClearing, expectedFeesTotals.clearing_fees, 1);
+      check('brokerage', pdfBrokerage, expectedFees.brokerage, 1);
+      check('sec', pdfSec, expectedFees.sec, 1);
+      check('exchange', pdfExchange, expectedFees.exchange, 1);
+      check('cds', pdfCds, expectedFees.cds, 1);
+      check('gov_cess', pdfStl, expectedFees.gov_cess, 1);
+      check('clearing_fees', pdfClearing, expectedFees.clearing_fees, 1);
+      check('net_amount', pdfNet, expectedNet, 1);
     }
 
     setFieldCompare(compare);
@@ -877,109 +840,89 @@ export function BuyAndSellNotes() {
 
   async function handleApproval() {
     if (validationIssues.length > 0) {
-      alert('Cannot approve with validation issues. Please check the highlighted mismatches.');
+      alert('Cannot approve with validation issues. Please resolve them first.');
+      return;
+    }
+    if (!formData.transaction_id) {
+      alert('Please select a transaction');
       return;
     }
 
     try {
-      if (extractedRows.length === 0) {
-        alert('No line items to process');
-        return;
-      }
+      const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
+      if (!selectedTransaction) { alert('Selected transaction not found'); return; }
+      const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+      if (!entity) { alert('Entity not found for the selected transaction'); return; }
 
-      const entityBalances: Record<string, number> = {};
+      const totalShares = extractedRows.reduce((s, r) => s + r.qty, 0);
+      const totalGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
+      const totalNet = extractedRows.reduce((s, r) => s + r.amount, 0);
+      const avgPrice = totalShares > 0 ? totalGross / totalShares : 0;
+      const contractNo = extractedRows[0]?.contract_no || extractedData.contract_no || '';
 
-      for (let i = 0; i < extractedRows.length; i += 1) {
-        const row = extractedRows[i];
-        const txnId = rowTransactionMap[i];
-        const selectedTransaction = transactions.find(t => t.id === txnId);
-        if (!selectedTransaction) {
-          alert(`Transaction not mapped for row ${i + 1}`);
-          return;
-        }
-        const entity = entities.find(e => e.id === selectedTransaction.entity_id);
-        if (!entity) {
-          alert(`Entity not found for row ${i + 1}`);
-          return;
-        }
+      const { data: insertedNote, error: insertError } = await supabase
+        .from('buy_sell_notes')
+        .insert({
+          transaction_id: formData.transaction_id,
+          note_type: selectedTransaction.transaction_type,
+          note_number: contractNo,
+          broker_id: formData.broker_id || null,
+          dealer_name: formData.dealer_name || null,
+          transaction_date: extractedData.trade_date || null,
+          settlement_date: formData.settlement_date,
+          file_url: uploadedFile?.name || null,
+          remarks: formData.remarks || null,
+          trade_date: extractedData.trade_date || null,
+          contract_no: contractNo,
+          no_of_shares: totalShares,
+          price_avg: avgPrice,
+          gross_amount: totalGross,
+          brokerage: extractedRows.reduce((s, r) => s + r.brokerage, 0),
+          sec: extractedRows.reduce((s, r) => s + r.sec, 0),
+          exchange: extractedRows.reduce((s, r) => s + r.cse_fees, 0),
+          cds: extractedRows.reduce((s, r) => s + r.cds_fees, 0),
+          gov_cess: extractedRows.reduce((s, r) => s + r.stl, 0),
+          clearing_fees: extractedRows.reduce((s, r) => s + r.clearing_fee, 0),
+          net_amount: totalNet,
+          foreign_brokerage: extractedRows.reduce((s, r) => s + r.foreign_br, 0),
+        })
+        .select()
+        .maybeSingle();
 
-        const rowGross = row.gross_value;
-        const rowNet = row.amount;
+      if (insertError) throw insertError;
 
-        const { data: insertedNote, error: insertError } = await supabase
-          .from('buy_sell_notes')
-          .insert({
-            transaction_id: txnId,
-            note_type: selectedTransaction.transaction_type,
-            note_number: row.contract_no,
-            broker_id: formData.broker_id,
-            dealer_name: formData.dealer_name || null,
-            transaction_date: extractedData.trade_date,
-            settlement_date: formData.settlement_date,
-            file_url: uploadedFile?.name || null,
-            remarks: formData.remarks || null,
-            trade_date: extractedData.trade_date,
-            contract_no: row.contract_no,
-            no_of_shares: row.qty,
-            price_avg: row.rate,
-            gross_amount: rowGross,
-            brokerage: row.brokerage,
-            sec: row.sec,
-            exchange: row.cse_fees,
-            cds: row.cds_fees,
-            gov_cess: row.stl,
-            clearing_fees: row.clearing_fee,
-            net_amount: rowNet,
-            foreign_brokerage: row.foreign_br,
-          })
-          .select()
-          .maybeSingle();
+      const transactionType = selectedTransaction.transaction_type === 'Buy' ? 'Deduction' : 'Addition';
+      const { data: existing } = await supabase
+        .from('cash_balance_ledger')
+        .select('running_balance')
+        .eq('entity_id', entity.entity_id)
+        .order('timestamp', { ascending: false })
+        .limit(1);
+      const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
+      const newBalance = transactionType === 'Addition' ? lastBalance + totalNet : lastBalance - totalNet;
 
-        if (insertError) throw insertError;
+      const { error: ledgerError } = await supabase
+        .from('cash_balance_ledger')
+        .insert({
+          type: transactionType,
+          description: `${selectedTransaction.transaction_type} - ${contractNo}`,
+          code: contractNo,
+          amount: totalNet,
+          date: extractedData.trade_date || null,
+          running_balance: newBalance,
+          on_hold_amount: 0,
+          entity_id: entity.entity_id,
+          bank_id: null,
+          reference_id: insertedNote?.id || null,
+          created_by: 'System',
+          notes: formData.remarks || null,
+        });
 
-        const transactionType = selectedTransaction.transaction_type === 'Buy' ? 'Deduction' : 'Addition';
-
-        if (entityBalances[entity.entity_id] === undefined) {
-          const { data: existing } = await supabase
-            .from('cash_balance_ledger')
-            .select('running_balance')
-            .eq('entity_id', entity.entity_id)
-            .order('timestamp', { ascending: false })
-            .limit(1);
-          entityBalances[entity.entity_id] = existing && existing.length > 0
-            ? Number(existing[0].running_balance)
-            : 0;
-        }
-
-        const lastBalance = entityBalances[entity.entity_id];
-        const newBalance = transactionType === 'Addition'
-          ? lastBalance + rowNet
-          : lastBalance - rowNet;
-        entityBalances[entity.entity_id] = newBalance;
-
-        const { error: ledgerError } = await supabase
-          .from('cash_balance_ledger')
-          .insert({
-            type: transactionType,
-            description: `${selectedTransaction.transaction_type} - ${row.contract_no}`,
-            code: row.contract_no,
-            amount: rowNet,
-            date: extractedData.trade_date,
-            running_balance: newBalance,
-            on_hold_amount: 0,
-            entity_id: entity.entity_id,
-            bank_id: null,
-            reference_id: insertedNote?.id || null,
-            created_by: 'System',
-            notes: formData.remarks || null,
-          });
-
-        if (ledgerError) throw ledgerError;
-      }
+      if (ledgerError) throw ledgerError;
 
       await loadData();
       handleCloseModals();
-      alert(`${extractedRows.length} buy/sell note${extractedRows.length === 1 ? '' : 's'} processed successfully! Cash balance has been updated.`);
+      alert('Buy/sell note processed successfully! Cash balance has been updated.');
     } catch (error) {
       console.error('Error processing note:', error);
       alert('Failed to process note');
@@ -1022,7 +965,6 @@ export function BuyAndSellNotes() {
     setValidationIssues([]);
     setFieldCompare({});
     setExtractedRows([]);
-    setRowTransactionMap({});
     setDebugRawText('');
     setTotals({
       total_shares: 0,
@@ -1056,13 +998,9 @@ export function BuyAndSellNotes() {
     note.dealer_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const primaryMappedTxnId = formData.transaction_id
-    || Object.values(rowTransactionMap).find(v => !!v)
-    || '';
-
-  const availableEntityAccounts = formData.broker_id && primaryMappedTxnId
+  const availableEntityAccounts = formData.broker_id && formData.transaction_id
     ? (() => {
-        const transaction = transactions.find(t => t.id === primaryMappedTxnId);
+        const transaction = transactions.find(t => t.id === formData.transaction_id);
         if (!transaction) return [];
         const entity = entities.find(e => e.id === transaction.entity_id);
         if (!entity) return [];
@@ -1177,124 +1115,108 @@ export function BuyAndSellNotes() {
               <h2 className="text-xl font-bold text-gray-900">Upload Buy/Sell Note</h2>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-5">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p className="text-sm text-blue-800">
-                  Upload a broker contract note PDF. Each line item will be matched to one of your approved buy/sell transactions on the next step.
+                  Upload a broker contract note PDF, select the matching approved transaction, and process the note. The PDF totals will be compared against the transaction on the next step.
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  From - Broker <span className="text-red-500">*</span>
+                  Transaction <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={formData.broker_id}
-                  onChange={(e) => setFormData({ ...formData, broker_id: e.target.value })}
+                  value={formData.transaction_id}
+                  onChange={(e) => setFormData({ ...formData, transaction_id: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 >
-                  <option value="">Select broker</option>
-                  {brokers.map((broker) => (
-                    <option key={broker.id} value={broker.id}>
-                      {broker.broker_name}
-                    </option>
-                  ))}
+                  <option value="">Select approved transaction</option>
+                  {transactions.map((t) => {
+                    const share = shares.find(s => s.id === t.share_id);
+                    const entity = entities.find(e => e.id === t.entity_id);
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {t.transaction_type} — {share?.ticker || '?'} — {entity?.name || '?'} — {Number(t.no_of_shares).toLocaleString()} shares @ {Number(t.price_per_share).toFixed(2)}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  From - Dealer Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.dealer_name}
-                  onChange={(e) => setFormData({ ...formData, dealer_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter dealer name"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Broker <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.broker_id}
+                    onChange={(e) => setFormData({ ...formData, broker_id: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="">Select broker</option>
+                    {brokers.map((broker) => (
+                      <option key={broker.id} value={broker.id}>
+                        {broker.broker_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Dealer Name</label>
+                  <input
+                    type="text"
+                    value={formData.dealer_name}
+                    onChange={(e) => setFormData({ ...formData, dealer_name: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter dealer name"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Client A/C Number
+                  </label>
+                  <select
+                    value={formData.entity_account_number}
+                    onChange={(e) => setFormData({ ...formData, entity_account_number: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={availableEntityAccounts.length === 0}
+                  >
+                    <option value="">Select account (CDS or Broker)</option>
+                    {availableEntityAccounts.map((eb) => (
+                      <option key={eb.id} value={eb.account_number}>
+                        {eb.cds_account ? `CDS: ${eb.cds_account}` : `Broker: ${eb.account_number}`}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-blue-600 mt-1">CDS or Broker account (not bank)</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Settlement Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.settlement_date}
+                    onChange={(e) => setFormData({ ...formData, settlement_date: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                  <p className="text-xs text-red-600 mt-1">Used in reports</p>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  To / Entity <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={(() => {
-                    const mappedIds = Array.from(new Set(Object.values(rowTransactionMap).filter(Boolean)));
-                    const names = mappedIds
-                      .map(id => transactions.find(t => t.id === id))
-                      .filter(Boolean)
-                      .map(t => entities.find(e => e.id === t!.entity_id)?.name)
-                      .filter(Boolean) as string[];
-                    const unique = Array.from(new Set(names));
-                    return unique.join(', ');
-                  })()}
-                  disabled
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
-                  placeholder="Auto-filled from mapped transactions"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Client A/C Number <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.entity_account_number}
-                  onChange={(e) => setFormData({ ...formData, entity_account_number: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={availableEntityAccounts.length === 0}
-                  required
-                >
-                  <option value="">Select account (CDS or Broker)</option>
-                  {availableEntityAccounts.map((eb) => (
-                    <option key={eb.id} value={eb.account_number}>
-                      {eb.cds_account ? `CDS: ${eb.cds_account}` : `Broker: ${eb.account_number}`}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-blue-600 mt-1">
-                  Drop down from CDS or Broker Acc. list (Not the bank acc. list)
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Transaction Date
-                </label>
-                <input
-                  type="text"
-                  value={extractedData.trade_date || 'From PDF'}
-                  disabled
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Settlement Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={formData.settlement_date}
-                  onChange={(e) => setFormData({ ...formData, settlement_date: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                <p className="text-xs text-red-600 mt-1">
-                  This is the date that should be considered in the reports
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Upload buy/sell document <span className="text-red-500">*</span>
+                  Upload buy/sell document (PDF) <span className="text-red-500">*</span>
                 </label>
                 <div className="flex items-center space-x-2">
-                  <Upload className="w-5 h-5 text-gray-400" />
+                  <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
                   <input
                     type="file"
                     accept=".pdf"
@@ -1302,14 +1224,16 @@ export function BuyAndSellNotes() {
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Uploads the below pdf</p>
                 {isExtracting && (
-                  <div className="mt-2 text-sm text-blue-600">Extracting data from PDF...</div>
+                  <div className="mt-2 text-sm text-blue-600 flex items-center space-x-2">
+                    <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    <span>Extracting data from PDF...</span>
+                  </div>
                 )}
                 {uploadedFile && !isExtracting && extractedRows.length > 0 && (
-                  <div className="mt-2 text-sm text-green-600 flex items-center">
-                    <CheckCircle className="w-4 h-4 mr-1" />
-                    File uploaded: {uploadedFile.name} &mdash; {extractedRows.length} line item{extractedRows.length === 1 ? '' : 's'} extracted
+                  <div className="mt-2 text-sm text-green-600 flex items-center space-x-1">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>{uploadedFile.name} — {extractedRows.length} line item{extractedRows.length === 1 ? '' : 's'} extracted</span>
                   </div>
                 )}
                 {uploadedFile && !isExtracting && extractedRows.length === 0 && debugRawText && (
@@ -1318,9 +1242,7 @@ export function BuyAndSellNotes() {
                       <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-amber-900">Could not auto-extract line items</p>
-                        <p className="text-xs text-amber-700 mt-1">
-                          The PDF text layout does not match expected patterns. Copy the text below and share it so we can tune the parser, or continue manually.
-                        </p>
+                        <p className="text-xs text-amber-700 mt-1">PDF layout does not match expected patterns. Share the text below so the parser can be tuned.</p>
                         <textarea
                           readOnly
                           value={debugRawText}
@@ -1344,20 +1266,16 @@ export function BuyAndSellNotes() {
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={handleCloseModals}
-                  className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                >
+                <button type="button" onClick={handleCloseModals} className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleProcessClick}
-                  disabled={!uploadedFile || isExtracting}
+                  disabled={!uploadedFile || isExtracting || !formData.transaction_id}
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
-                  Process
+                  Review & Process
                 </button>
               </div>
             </div>
@@ -1365,345 +1283,239 @@ export function BuyAndSellNotes() {
         </div>
       )}
 
-      {showProcessModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <h2 className="text-xl font-bold text-gray-900">Validate & Process Contract Note</h2>
-            </div>
+      {showProcessModal && (() => {
+        const txn = transactions.find(t => t.id === formData.transaction_id);
+        const txnEntity = txn ? entities.find(e => e.id === txn.entity_id) : null;
+        const txnShare = txn ? shares.find(s => s.id === txn.share_id) : null;
 
-            <div className="p-6 space-y-6">
-              {validationIssues.length > 0 && (
-                <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
-                  <div className="flex items-start space-x-2">
-                    <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5" />
-                    <div>
-                      <h3 className="font-semibold text-red-800 mb-2">Validation Issues Detected</h3>
-                      <ul className="list-disc list-inside space-y-1 text-sm text-red-700">
-                        {validationIssues.map((issue, idx) => (
-                          <li key={idx}>{issue}</li>
-                        ))}
-                      </ul>
-                      <p className="text-xs text-red-600 mt-2 font-semibold">
-                        These mismatches require approval before processing
-                      </p>
-                    </div>
-                  </div>
+        const pdfShares = extractedRows.reduce((s, r) => s + r.qty, 0);
+        const pdfGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
+        const pdfBrokerage = extractedRows.reduce((s, r) => s + r.brokerage, 0);
+        const pdfSec = extractedRows.reduce((s, r) => s + r.sec, 0);
+        const pdfExchange = extractedRows.reduce((s, r) => s + r.cse_fees, 0);
+        const pdfCds = extractedRows.reduce((s, r) => s + r.cds_fees, 0);
+        const pdfStl = extractedRows.reduce((s, r) => s + r.stl, 0);
+        const pdfClearing = extractedRows.reduce((s, r) => s + r.clearing_fee, 0);
+        const pdfForeignBr = extractedRows.reduce((s, r) => s + r.foreign_br, 0);
+        const pdfNet = extractedRows.reduce((s, r) => s + r.amount, 0);
+        const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
+
+        const fmtAmt = (v: number) => `Rs. ${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const fmtNum = (v: number) => v.toLocaleString();
+
+        const comparedFields: { key: string; label: string; pdfValue: string; }[] = [
+          { key: 'no_of_shares', label: 'No. of Shares', pdfValue: fmtNum(pdfShares) },
+          { key: 'price_avg', label: 'Avg Price', pdfValue: fmtAmt(pdfAvgPrice) },
+          { key: 'gross_amount', label: 'Gross Amount', pdfValue: fmtAmt(pdfGross) },
+          { key: 'brokerage', label: 'Brokerage', pdfValue: fmtAmt(pdfBrokerage) },
+          { key: 'sec', label: 'SEC', pdfValue: fmtAmt(pdfSec) },
+          { key: 'exchange', label: 'CSE / Exchange', pdfValue: fmtAmt(pdfExchange) },
+          { key: 'cds', label: 'CDS Fees', pdfValue: fmtAmt(pdfCds) },
+          { key: 'gov_cess', label: 'Share Transaction Levy', pdfValue: fmtAmt(pdfStl) },
+          { key: 'clearing_fees', label: 'Clearing Fees', pdfValue: fmtAmt(pdfClearing) },
+          { key: 'net_amount', label: 'Net Amount', pdfValue: fmtAmt(pdfNet) },
+        ];
+
+        const isBuy = txn?.transaction_type === 'Buy';
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Review & Process Contract Note</h2>
+                  {txn && (
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Mapped to: <span className="font-semibold text-gray-700">{txn.transaction_type} — {txnShare?.ticker} — {txnEntity?.name} — {Number(txn.no_of_shares).toLocaleString()} shares @ {Number(txn.price_per_share).toFixed(2)}</span>
+                    </p>
+                  )}
                 </div>
-              )}
+                {extractedData.note_type && (
+                  <span className={`inline-flex px-3 py-1 rounded-full text-sm font-semibold ${
+                    extractedData.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                    {extractedData.note_type === 'Buy' ? 'BOUGHT Note' : 'SOLD Note'}
+                  </span>
+                )}
+              </div>
 
-              {extractedRows.length > 0 && (
-                <div className="border border-gray-300 rounded-lg overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="p-6 space-y-6">
+                {validationIssues.length > 0 && (
+                  <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
+                    <div className="flex items-start space-x-2">
+                      <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <h3 className="font-semibold text-red-800 mb-2">Validation Issues</h3>
+                        <ul className="list-disc list-inside space-y-1 text-sm text-red-700">
+                          {validationIssues.map((issue, idx) => <li key={idx}>{issue}</li>)}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* PDF header info */}
+                {(extractedData.broker_name || extractedData.buyer_name || extractedData.trade_date) && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <div className="flex items-center space-x-2">
-                        <h3 className="text-sm font-semibold text-gray-800">Extracted Line Items</h3>
-                        {extractedData.note_type && (
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
-                            extractedData.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {extractedData.note_type === 'Buy' ? 'BOUGHT Note' : 'SOLD Note'}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-700 mt-1 font-medium">
-                        {extractedData.broker_name || 'Broker'}
-                      </p>
-                      {extractedData.broker_address && (
-                        <p className="text-xs text-gray-500">{extractedData.broker_address}</p>
-                      )}
+                      {extractedData.broker_name && <p className="font-semibold text-gray-800">{extractedData.broker_name}</p>}
+                      {extractedData.broker_address && <p className="text-gray-500 text-xs mt-0.5">{extractedData.broker_address}</p>}
                     </div>
-                    <div className="text-xs">
-                      {extractedData.buyer_name && (
-                        <p className="text-gray-700 font-medium">
-                          {extractedData.note_type === 'Sell' ? 'Seller' : 'Buyer'}: {extractedData.buyer_name}
-                        </p>
-                      )}
-                      {extractedData.buyer_address && (
-                        <p className="text-gray-500">{extractedData.buyer_address}</p>
-                      )}
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-gray-600">
-                        {extractedData.account_no && <span>Account: <span className="font-semibold text-gray-800">{extractedData.account_no}</span></span>}
-                        {extractedData.trade_date && <span>Trade: <span className="font-semibold text-gray-800">{extractedData.trade_date}</span></span>}
-                        {extractedData.settlement && <span>Settlement: <span className="font-semibold text-gray-800">{extractedData.settlement}</span></span>}
+                    <div className="space-y-1 text-xs text-gray-600">
+                      {extractedData.buyer_name && <p><span className="text-gray-400">{extractedData.note_type === 'Sell' ? 'Seller' : 'Buyer'}:</span> <span className="font-semibold text-gray-700">{extractedData.buyer_name}</span></p>}
+                      {extractedData.account_no && <p><span className="text-gray-400">Account:</span> <span className="font-semibold text-gray-700">{extractedData.account_no}</span></p>}
+                      {extractedData.trade_date && <p><span className="text-gray-400">Trade Date:</span> <span className="font-semibold text-gray-700">{extractedData.trade_date}</span></p>}
+                      {extractedData.settlement && <p><span className="text-gray-400">Settlement:</span> <span className="font-semibold text-gray-700">{extractedData.settlement}</span></p>}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extracted PDF line items — read only */}
+                {extractedRows.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-2">Extracted Line Items from PDF</h3>
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-100">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Contract No</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-600">Security</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Qty</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Rate</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Gross Value</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Brokerage</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">CDS</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">CSE</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">SEC</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">STL</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Clearing</th>
+                              {extractedRows.some(r => r.foreign_br > 0) && <th className="px-3 py-2 text-right font-semibold text-gray-600">Foreign Br.</th>}
+                              <th className="px-3 py-2 text-right font-semibold text-gray-600">Net Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {extractedRows.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-gray-50">
+                                <td className="px-3 py-2 text-gray-700 font-mono">{row.contract_no}</td>
+                                <td className="px-3 py-2 text-gray-700 font-semibold">{row.security}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.qty.toLocaleString()}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.rate.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.gross_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.brokerage.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.cds_fees.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.cse_fees.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.sec.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.stl.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{row.clearing_fee.toFixed(2)}</td>
+                                {extractedRows.some(r => r.foreign_br > 0) && <td className="px-3 py-2 text-right text-gray-700">{row.foreign_br.toFixed(2)}</td>}
+                                <td className="px-3 py-2 text-right font-semibold text-gray-900">{row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                            <tr className="font-semibold text-gray-800">
+                              <td className="px-3 py-2" colSpan={2}>Totals</td>
+                              <td className="px-3 py-2 text-right">{pdfShares.toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right">{pdfAvgPrice.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfGross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              <td className="px-3 py-2 text-right">{pdfBrokerage.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfCds.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfExchange.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfSec.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfStl.toFixed(2)}</td>
+                              <td className="px-3 py-2 text-right">{pdfClearing.toFixed(2)}</td>
+                              {extractedRows.some(r => r.foreign_br > 0) && <td className="px-3 py-2 text-right">{pdfForeignBr.toFixed(2)}</td>}
+                              <td className="px-3 py-2 text-right">{pdfNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
                       </div>
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-100">
-                        <tr>
-                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Transaction</th>
-                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Contract No</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Qty</th>
-                          <th className="px-3 py-2 text-left font-semibold text-gray-700">Security</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Rate</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Gross Value</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Brokerage</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">CDS Fees</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">CSE Fees</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">SEC</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">STL</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Clearing Fee</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Foreign Br.</th>
-                          <th className="px-3 py-2 text-right font-semibold text-gray-700">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {extractedRows.map((row, idx) => {
-                          const ticker = row.security.split('.')[0].toUpperCase();
-                          const share = shares.find(s => s.ticker?.toUpperCase() === ticker);
-                          const usedByOther = new Set(
-                            Object.entries(rowTransactionMap)
-                              .filter(([k]) => Number(k) !== idx)
-                              .map(([, v]) => v)
-                              .filter(Boolean)
-                          );
-                          const noteType = (extractedData.note_type || '').toLowerCase();
-                          const matchType = (t: Transaction) => !noteType || t.transaction_type?.toLowerCase() === noteType;
-                          const available = (t: Transaction) => !usedByOther.has(t.id) || t.id === rowTransactionMap[idx];
-                          let candidates = transactions.filter(t =>
-                            share ? t.share_id === share.id : true
-                          ).filter(matchType).filter(available);
-                          if (candidates.length === 0) {
-                            candidates = transactions.filter(matchType).filter(available);
-                          }
-                          if (candidates.length === 0) {
-                            candidates = transactions.filter(available);
-                          }
-                          return (
-                          <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-3 py-2">
-                              <select
-                                value={rowTransactionMap[idx] || ''}
-                                onChange={(e) => setRowTransactionMap(prev => ({ ...prev, [idx]: e.target.value }))}
-                                className={`w-full px-2 py-1 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                                  rowTransactionMap[idx] ? 'border-gray-300 bg-white' : 'border-red-300 bg-red-50'
-                                }`}
-                              >
-                                <option value="">Select transaction...</option>
-                                {candidates.map(t => (
-                                  <option key={t.id} value={t.id}>{getTransactionDisplay(t.id)}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className="px-3 py-2 text-gray-800">{row.contract_no}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.qty.toLocaleString()}</td>
-                            <td className="px-3 py-2 text-gray-800">{row.security}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.rate.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.gross_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.brokerage.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.cds_fees.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.cse_fees.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.sec.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.stl.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.clearing_fee.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right text-gray-800">{row.foreign_br.toFixed(2)}</td>
-                            <td className="px-3 py-2 text-right font-semibold text-gray-900">{row.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot className="bg-gray-50">
-                        <tr className="border-t-2 border-gray-300 font-semibold">
-                          <td className="px-3 py-2 text-gray-900" colSpan={2}>Total</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.qty, 0).toLocaleString()}</td>
-                          <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2"></td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.gross_value, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.brokerage, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.cds_fees, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.cse_fees, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.sec, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.stl, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.clearing_fee, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.foreign_br, 0).toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-900">{extractedRows.reduce((s, r) => s + r.amount, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        </tr>
-                        {(extractedData.page_total || extractedData.grand_total) && (
-                          <tr>
-                            <td colSpan={12} className="px-3 py-2 text-right text-gray-500">From PDF &mdash; PageTotal / Total</td>
-                            <td className="px-3 py-2 text-right text-gray-700">{extractedData.page_total || '-'}</td>
-                            <td className="px-3 py-2 text-right font-bold text-gray-900">{extractedData.grand_total || '-'}</td>
-                          </tr>
-                        )}
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {(() => {
-                const pdfOnlyRows: { label: string; value: string }[] = [
-                  { label: 'Trade Date', value: extractedData.trade_date || '-' },
-                  { label: 'Contract No', value: extractedData.contract_no || '-' },
-                  { label: 'Net Amount', value: extractedData.net_amount ? `Rs. ${extractedData.net_amount}` : '-' },
-                  { label: 'Settlement', value: extractedData.settlement || '-' },
-                  { label: 'Foreign Brokerage', value: extractedData.foreign_brokerage ? `Rs. ${extractedData.foreign_brokerage}` : '-' },
-                ];
-
-                const comparedRows: { key: string; label: string; value: string; isAmount: boolean }[] = [
-                  { key: 'no_of_shares', label: 'No of Shares', value: extractedData.no_of_shares || '-', isAmount: false },
-                  { key: 'price_avg', label: 'Price/Avg', value: extractedData.price_avg ? `Rs. ${extractedData.price_avg}` : '-', isAmount: true },
-                  { key: 'gross_amount', label: 'Gross Amount', value: extractedData.gross_amount ? `Rs. ${extractedData.gross_amount}` : '-', isAmount: true },
-                  { key: 'brokerage', label: 'Brokerage', value: extractedData.brokerage ? `Rs. ${extractedData.brokerage}` : '-', isAmount: true },
-                  { key: 'sec', label: 'SEC', value: extractedData.sec ? `Rs. ${extractedData.sec}` : '-', isAmount: true },
-                  { key: 'exchange', label: 'Exchange', value: extractedData.exchange ? `Rs. ${extractedData.exchange}` : '-', isAmount: true },
-                  { key: 'cds', label: 'CDS', value: extractedData.cds ? `Rs. ${extractedData.cds}` : '-', isAmount: true },
-                  { key: 'gov_cess', label: 'Share Transaction Levy (Gov Cess)', value: extractedData.gov_cess ? `Rs. ${extractedData.gov_cess}` : '-', isAmount: true },
-                  { key: 'clearing_fees', label: 'Clearing Fees', value: extractedData.clearing_fees ? `Rs. ${extractedData.clearing_fees}` : '-', isAmount: true },
-                ];
-
-                return (
-                  <div className="border border-gray-300 rounded-lg overflow-hidden">
+                {/* Comparison table: PDF totals vs transaction */}
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">PDF Totals vs Transaction</h3>
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-100">
                         <tr>
-                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Field Name</th>
-                          <th className="px-4 py-2 text-left font-semibold text-gray-700">PDF Value</th>
-                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Expected (from transaction)</th>
-                          <th className="px-4 py-2 text-left font-semibold text-gray-700">Status</th>
+                          <th className="px-4 py-2.5 text-left font-semibold text-gray-600">Field</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-gray-600">PDF Total</th>
+                          <th className="px-4 py-2.5 text-right font-semibold text-gray-600">Transaction (Expected)</th>
+                          <th className="px-4 py-2.5 text-center font-semibold text-gray-600">Status</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {comparedRows.map(row => {
-                          const cmp = fieldCompare[row.key];
+                      <tbody className="divide-y divide-gray-100">
+                        {comparedFields.map(field => {
+                          const cmp = fieldCompare[field.key];
                           const matches = cmp?.matches;
                           const expectedText = cmp?.expected != null
-                            ? (row.isAmount ? `Rs. ${Number(cmp.expected).toFixed(2)}` : String(Number(cmp.expected)))
+                            ? (field.key === 'no_of_shares'
+                                ? Number(cmp.expected).toLocaleString()
+                                : fmtAmt(Number(cmp.expected)))
                             : '-';
                           return (
-                            <tr key={row.key} className={cmp ? (matches ? 'bg-green-50' : 'bg-red-50') : ''}>
-                              <td className="px-4 py-2 font-medium text-gray-900">{row.label}</td>
-                              <td className="px-4 py-2 text-gray-700">{row.value}</td>
-                              <td className="px-4 py-2 text-gray-700">{expectedText}</td>
-                              <td className="px-4 py-2">
+                            <tr key={field.key} className={cmp ? (matches ? 'bg-green-50' : 'bg-red-50') : 'bg-white'}>
+                              <td className="px-4 py-2.5 font-medium text-gray-800">{field.label}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-700 font-mono">{field.pdfValue}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-700 font-mono">{expectedText}</td>
+                              <td className="px-4 py-2.5 text-center">
                                 {cmp ? (
                                   matches ? (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
-                                      <CheckCircle className="w-3 h-3 mr-1" /> Matching
+                                      <CheckCircle className="w-3 h-3 mr-1" />Match
                                     </span>
                                   ) : (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-800">
-                                      <XCircle className="w-3 h-3 mr-1" /> Mismatch
+                                      <XCircle className="w-3 h-3 mr-1" />Mismatch
                                     </span>
                                   )
                                 ) : (
-                                  <span className="text-xs text-gray-400">-</span>
+                                  <span className="text-xs text-gray-400">—</span>
                                 )}
                               </td>
                             </tr>
                           );
                         })}
-                        {pdfOnlyRows.map(row => (
-                          <tr key={row.label}>
-                            <td className="px-4 py-2 font-medium text-gray-900">{row.label}</td>
-                            <td className="px-4 py-2 text-gray-700">{row.value}</td>
-                            <td className="px-4 py-2 text-gray-400 text-xs">From PDF</td>
-                            <td className="px-4 py-2 text-gray-400 text-xs">Not compared</td>
-                          </tr>
-                        ))}
                       </tbody>
                     </table>
                   </div>
-                );
-              })()}
+                </div>
 
-              <div className="bg-green-50 border border-green-300 rounded-lg p-4">
-                <h3 className="font-semibold text-green-800 mb-3">Total Figures</h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total - No of shares:</span>
-                    <span className="font-semibold text-green-900">{totals.total_shares}</span>
+                {/* Settlement summary */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className={`rounded-lg p-4 border-2 ${isBuy ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Purchase Total</p>
+                    <p className="text-xl font-bold text-gray-900">{fmtAmt(isBuy ? pdfNet : 0)}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Price / Avg:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_price_avg.toFixed(2)}</span>
+                  <div className={`rounded-lg p-4 border-2 ${!isBuy ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Sales Total</p>
+                    <p className="text-xl font-bold text-gray-900">{fmtAmt(!isBuy ? pdfNet : 0)}</p>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Gross Amount:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_gross.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Brokerage:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_brokerage.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total SEC:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_sec.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Exchange:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_exchange.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total CDS:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_cds.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Gov Cess:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_gov_cess.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total Clearing Fess:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_clearing.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-700">Total - Net Amount:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.total_net.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between border-t-2 border-green-400 pt-2">
-                    <span className="text-green-700">Purchase Total:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.purchase_total.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between border-t-2 border-green-400 pt-2">
-                    <span className="text-green-700">Sales Total:</span>
-                    <span className="font-semibold text-green-900">Rs. {totals.sales_total.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between col-span-2 border-t-2 border-green-400 pt-2">
-                    <span className="text-green-700 font-bold">Net Settlement Value:</span>
-                    <span className="font-bold text-green-900 text-lg">Rs. {totals.net_settlement.toFixed(2)}</span>
+                  <div className="rounded-lg p-4 border-2 border-gray-800 bg-gray-900">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Net Settlement Value</p>
+                    <p className="text-xl font-bold text-white">{fmtAmt(isBuy ? -pdfNet : pdfNet)}</p>
                   </div>
                 </div>
-                <p className="text-xs text-green-600 mt-3">
-                  These 3 fields should be visible clearly. Better to separate with other fields.
-                </p>
-              </div>
 
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={handleReject}
-                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center space-x-2"
-                >
-                  <XCircle className="w-4 h-4" />
-                  <span>Reject</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApproval}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  <span>Approval</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleApproval}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Process
-                </button>
-              </div>
-
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-gray-600">
-                <p className="mb-1">Updates the cashflow - Sell -&gt; Current and available funds</p>
-                <p>Updates the cashflow - Buy -&gt; Release the onhold funds</p>
+                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                  <button type="button" onClick={handleReject} className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2">
+                    <XCircle className="w-4 h-4" />
+                    <span>Cancel</span>
+                  </button>
+                  <button type="button" onClick={handleApproval} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Approve & Process</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
