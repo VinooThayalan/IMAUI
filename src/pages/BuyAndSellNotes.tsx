@@ -701,20 +701,28 @@ export function BuyAndSellNotes() {
   }
 
   function getExpectedFees(txn: Transaction) {
-    const gross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const shares = Number(txn.no_of_shares) || 0;
+    const price = Number(txn.price_per_share) || 0;
+    const computedGross = shares * price;
+    const storedGross = Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const gross = computedGross > 0 ? computedGross : storedGross;
     const feeType = brokerageFeeTypes.find(ft => ft.id === txn.brokerage_fee_type_id);
     const items = feeType?.fee_breakdown_items || [];
 
-    const findRate = (patterns: string[]) => {
-      const item = items.find(it => patterns.some(p => it.name?.toLowerCase().includes(p)));
+    const findRate = (patterns: string[], excludes: string[] = []) => {
+      const item = items.find(it => {
+        const name = (it.name || '').toLowerCase();
+        if (excludes.some(e => name.includes(e))) return false;
+        return patterns.some(p => name.includes(p));
+      });
       return item ? Number(item.rate) || 0 : 0;
     };
 
     const brokerageRate = findRate(['brokerage']);
-    const secRate = findRate(['sec cess', 'sec ']);
+    const secRate = findRate(['sec cess', 'sec fee', 'sec '], ['gov', 'stl', 'share transaction']);
     const exchangeRate = findRate(['cse', 'exchange']);
     const cdsRate = findRate(['cds']);
-    const govRate = findRate(['iovy', 'cess', 'gov']);
+    const govRate = findRate(['stl', 'share transaction', 'gov cess', 'government', 'levy'], ['sec']);
     const clearingRate = findRate(['clearing']);
 
     return {
@@ -797,11 +805,11 @@ export function BuyAndSellNotes() {
       .filter((t): t is Transaction => !!t);
 
     if (mappedTxns.length > 0) {
+      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
       const expectedGross = mappedTxns.reduce(
-        (s, t) => s + Number(t.total_amount_gross ?? t.total_amount ?? 0),
+        (s, t) => s + (Number(t.no_of_shares) || 0) * (Number(t.price_per_share) || 0),
         0
       );
-      const expectedShares = mappedTxns.reduce((s, t) => s + (Number(t.no_of_shares) || 0), 0);
       const expectedFeesTotals = mappedTxns.reduce(
         (acc, t) => {
           const f = getExpectedFees(t);
