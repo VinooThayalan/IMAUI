@@ -648,19 +648,14 @@ export function Transactions() {
               font-weight: bold;
             }
             .green-bg {
-              background-color: #90EE90 !important;
-              color: #006400;
+              background-color: #f5f5f5;
               font-weight: bold;
             }
             .total-row {
               font-weight: bold;
               background-color: #f5f5f5;
             }
-            .total-row td:first-child {
-              color: #006400;
-            }
             .total-row .green-text {
-              color: #006400;
               font-style: italic;
             }
             @media print {
@@ -1841,15 +1836,9 @@ export function Transactions() {
                       <label className="block text-sm font-semibold text-gray-700 mb-2">
                         Total Brokerage Fee (LKR)
                       </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={formData.fees}
-                        onChange={(e) => setFormData({ ...formData, fees: e.target.value })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g., 50.00"
-                      />
+                      <div className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                        LKR {formData.fees ? parseFloat(formData.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+                      </div>
                     </div>
 
                     <div>
