@@ -1,4 +1,4 @@
-import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle, ClipboardList, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 interface PdfJsLib {
@@ -146,9 +146,56 @@ interface ExtractedRow {
   amount: number;
 }
 
+interface ManualRow {
+  transaction_id: string;
+  broker_id: string;
+  note_type: 'Buy' | 'Sell';
+  trade_date: string;
+  settlement_date: string;
+  contract_no: string;
+  no_of_shares: string;
+  price_avg: string;
+  gross_amount: string;
+  brokerage: string;
+  sec: string;
+  exchange: string;
+  cds: string;
+  gov_cess: string;
+  clearing_fees: string;
+  net_amount: string;
+  foreign_brokerage: string;
+  remarks: string;
+}
+
+function emptyManualRow(): ManualRow {
+  return {
+    transaction_id: '',
+    broker_id: '',
+    note_type: 'Buy',
+    trade_date: '',
+    settlement_date: new Date().toISOString().split('T')[0],
+    contract_no: '',
+    no_of_shares: '',
+    price_avg: '',
+    gross_amount: '',
+    brokerage: '',
+    sec: '',
+    exchange: '',
+    cds: '',
+    gov_cess: '',
+    clearing_fees: '',
+    net_amount: '',
+    foreign_brokerage: '',
+    remarks: '',
+  };
+}
+
 export function BuyAndSellNotes() {
   const [showModal, setShowModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [manualRows, setManualRows] = useState<ManualRow[]>([emptyManualRow()]);
+  const [isSavingManual, setIsSavingManual] = useState(false);
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -188,21 +235,6 @@ export function BuyAndSellNotes() {
     remarks: ''
   });
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
-  const [totals, setTotals] = useState({
-    total_shares: 0,
-    total_price_avg: 0,
-    total_gross: 0,
-    total_brokerage: 0,
-    total_sec: 0,
-    total_exchange: 0,
-    total_cds: 0,
-    total_gov_cess: 0,
-    total_clearing: 0,
-    total_net: 0,
-    purchase_total: 0,
-    sales_total: 0,
-    net_settlement: 0
-  });
 
   useEffect(() => {
     loadData();
@@ -690,8 +722,6 @@ export function BuyAndSellNotes() {
           usedTxnIds.add(candidate.id);
         }
       });
-      setRowTransactionMap(autoMap);
-
       const firstMapped = transactions.find(t => t.id === autoMap[0]);
       setFormData(prev => ({
         ...prev,
@@ -739,38 +769,6 @@ export function BuyAndSellNotes() {
       gov_cess: (gross * govRate) / 100,
       clearing_fees: (gross * clearingRate) / 100,
     };
-  }
-
-  function calculateTotals() {
-    const shares = parseFloat(extractedData.no_of_shares) || 0;
-    const priceAvg = parseFloat(extractedData.price_avg) || 0;
-    const gross = parseFloat(extractedData.gross_amount) || 0;
-    const brokerage = parseFloat(extractedData.brokerage) || 0;
-    const sec = parseFloat(extractedData.sec) || 0;
-    const exchange = parseFloat(extractedData.exchange) || 0;
-    const cds = parseFloat(extractedData.cds) || 0;
-    const govCess = parseFloat(extractedData.gov_cess) || 0;
-    const clearing = parseFloat(extractedData.clearing_fees) || 0;
-    const net = parseFloat(extractedData.net_amount) || 0;
-
-    const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
-    const isBuy = selectedTransaction?.transaction_type === 'Buy';
-
-    setTotals({
-      total_shares: shares,
-      total_price_avg: priceAvg,
-      total_gross: gross,
-      total_brokerage: brokerage,
-      total_sec: sec,
-      total_exchange: exchange,
-      total_cds: cds,
-      total_gov_cess: govCess,
-      total_clearing: clearing,
-      total_net: net,
-      purchase_total: isBuy ? net : 0,
-      sales_total: !isBuy ? net : 0,
-      net_settlement: isBuy ? -net : net
-    });
   }
 
   function validateExtractedData() {
@@ -821,7 +819,6 @@ export function BuyAndSellNotes() {
 
     setFieldCompare(compare);
     setValidationIssues(issues);
-    calculateTotals();
     return issues.length === 0;
   }
 
@@ -934,6 +931,107 @@ export function BuyAndSellNotes() {
     handleCloseModals();
   }
 
+  function updateManualRow(idx: number, field: keyof ManualRow, value: string) {
+    setManualRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  }
+
+  function addManualRow() {
+    setManualRows(prev => [...prev, emptyManualRow()]);
+  }
+
+  function removeManualRow(idx: number) {
+    setManualRows(prev => prev.length === 1 ? [emptyManualRow()] : prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleSaveManual() {
+    const validRows = manualRows.filter(r => r.transaction_id && r.contract_no && r.no_of_shares && r.net_amount);
+    if (validRows.length === 0) {
+      alert('Please fill in at least one row with Transaction, Contract No, Shares, and Net Amount.');
+      return;
+    }
+
+    setIsSavingManual(true);
+    try {
+      for (const row of validRows) {
+        const txn = transactions.find(t => t.id === row.transaction_id);
+        if (!txn) continue;
+        const entity = entities.find(e => e.id === txn.entity_id);
+        if (!entity) continue;
+
+        const net = parseFloat(row.net_amount) || 0;
+        const contractNo = row.contract_no;
+
+        const { data: insertedNote, error: insertError } = await supabase
+          .from('buy_sell_notes')
+          .insert({
+            transaction_id: row.transaction_id,
+            note_type: row.note_type,
+            note_number: contractNo,
+            broker_id: row.broker_id || null,
+            transaction_date: row.trade_date || null,
+            settlement_date: row.settlement_date,
+            trade_date: row.trade_date || null,
+            contract_no: contractNo,
+            no_of_shares: parseFloat(row.no_of_shares) || null,
+            price_avg: parseFloat(row.price_avg) || null,
+            gross_amount: parseFloat(row.gross_amount) || null,
+            brokerage: parseFloat(row.brokerage) || null,
+            sec: parseFloat(row.sec) || null,
+            exchange: parseFloat(row.exchange) || null,
+            cds: parseFloat(row.cds) || null,
+            gov_cess: parseFloat(row.gov_cess) || null,
+            clearing_fees: parseFloat(row.clearing_fees) || null,
+            net_amount: net,
+            foreign_brokerage: parseFloat(row.foreign_brokerage) || null,
+            remarks: row.remarks || null,
+          })
+          .select()
+          .maybeSingle();
+
+        if (insertError) throw insertError;
+
+        const transactionType = row.note_type === 'Buy' ? 'Deduction' : 'Addition';
+        const { data: existing } = await supabase
+          .from('cash_balance_ledger')
+          .select('running_balance')
+          .eq('entity_id', entity.entity_id)
+          .order('timestamp', { ascending: false })
+          .limit(1);
+        const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
+        const newBalance = transactionType === 'Addition' ? lastBalance + net : lastBalance - net;
+
+        const { error: ledgerError } = await supabase
+          .from('cash_balance_ledger')
+          .insert({
+            type: transactionType,
+            description: `${row.note_type} - ${contractNo}`,
+            code: contractNo,
+            amount: net,
+            date: row.trade_date || null,
+            running_balance: newBalance,
+            on_hold_amount: 0,
+            entity_id: entity.entity_id,
+            bank_id: null,
+            reference_id: insertedNote?.id || null,
+            created_by: 'System',
+            notes: row.remarks || null,
+          });
+
+        if (ledgerError) throw ledgerError;
+      }
+
+      await loadData();
+      setShowManualModal(false);
+      setManualRows([emptyManualRow()]);
+      alert(`${validRows.length} note${validRows.length === 1 ? '' : 's'} saved successfully.`);
+    } catch (error) {
+      console.error('Error saving manual entries:', error);
+      alert('Failed to save entries. Please try again.');
+    } finally {
+      setIsSavingManual(false);
+    }
+  }
+
   function handleCloseModals() {
     setShowModal(false);
     setShowProcessModal(false);
@@ -966,31 +1064,6 @@ export function BuyAndSellNotes() {
     setFieldCompare({});
     setExtractedRows([]);
     setDebugRawText('');
-    setTotals({
-      total_shares: 0,
-      total_price_avg: 0,
-      total_gross: 0,
-      total_brokerage: 0,
-      total_sec: 0,
-      total_exchange: 0,
-      total_cds: 0,
-      total_gov_cess: 0,
-      total_clearing: 0,
-      total_net: 0,
-      purchase_total: 0,
-      sales_total: 0,
-      net_settlement: 0
-    });
-  }
-
-  function getTransactionDisplay(transactionId: string) {
-    const transaction = transactions.find(t => t.id === transactionId);
-    if (!transaction) return 'N/A';
-
-    const entity = entities.find(e => e.id === transaction.entity_id);
-    const share = shares.find(s => s.id === transaction.share_id);
-
-    return `${transaction.transaction_type} - ${share?.ticker || 'N/A'} - ${entity?.name || 'N/A'} - ${transaction.no_of_shares} shares`;
   }
 
   const filteredNotes = notes.filter(note =>
@@ -1023,13 +1096,22 @@ export function BuyAndSellNotes() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-bold text-gray-900">Buy & Sell Notes</h1>
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Upload Note</span>
-          </button>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setShowManualModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
+            >
+              <ClipboardList className="w-5 h-5" />
+              <span>Manual Entry</span>
+            </button>
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              <span>Upload Note</span>
+            </button>
+          </div>
         </div>
         <p className="text-gray-600">Upload and process contract notes for approved buy/sell transactions</p>
       </div>
@@ -1516,6 +1598,193 @@ export function BuyAndSellNotes() {
           </div>
         );
       })()}
+
+      {showManualModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-7xl my-6">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-xl flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Manual Entry — Buy/Sell Notes</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Enter past contract note data directly. All entries save immediately to the system.</p>
+              </div>
+              <button
+                onClick={() => { setShowManualModal(false); setManualRows([emptyManualRow()]); }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-gray-800 text-white">
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap w-8">#</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[180px]">Transaction <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">Broker</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[80px]">Type <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[110px]">Trade Date</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[110px]">Settlement Date</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[110px]">Contract No <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[90px]">Shares <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[90px]">Avg Price</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">Gross Amt</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[90px]">Brokerage</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[70px]">SEC</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[80px]">Exchange</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[70px]">CDS</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[80px]">STL/Gov Cess</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[80px]">Clearing</th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">Net Amount <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[90px]">Foreign Br.</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[120px]">Remarks</th>
+                      <th className="px-2 py-2.5 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualRows.map((row, idx) => {
+                      const rowFilled = row.transaction_id && row.contract_no && row.no_of_shares && row.net_amount;
+                      return (
+                        <tr key={idx} className={`border-b border-gray-200 ${rowFilled ? 'bg-white' : 'bg-gray-50'}`}>
+                          <td className="px-2 py-1.5 text-gray-400 text-center">{idx + 1}</td>
+                          {/* Transaction */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.transaction_id}
+                              onChange={e => updateManualRow(idx, 'transaction_id', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="">Select transaction...</option>
+                              {transactions.map(t => {
+                                const sh = shares.find(s => s.id === t.share_id);
+                                const en = entities.find(e => e.id === t.entity_id);
+                                return (
+                                  <option key={t.id} value={t.id}>
+                                    {t.transaction_type} — {sh?.ticker} — {en?.name} — {Number(t.no_of_shares).toLocaleString()} @ {Number(t.price_per_share).toFixed(2)}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </td>
+                          {/* Broker */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.broker_id}
+                              onChange={e => updateManualRow(idx, 'broker_id', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="">Select...</option>
+                              {brokers.map(b => <option key={b.id} value={b.id}>{b.broker_name}</option>)}
+                            </select>
+                          </td>
+                          {/* Type */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.note_type}
+                              onChange={e => updateManualRow(idx, 'note_type', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="Buy">Buy</option>
+                              <option value="Sell">Sell</option>
+                            </select>
+                          </td>
+                          {/* Trade date */}
+                          <td className="px-1 py-1">
+                            <input type="date" value={row.trade_date} onChange={e => updateManualRow(idx, 'trade_date', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          </td>
+                          {/* Settlement date */}
+                          <td className="px-1 py-1">
+                            <input type="date" value={row.settlement_date} onChange={e => updateManualRow(idx, 'settlement_date', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          </td>
+                          {/* Contract no */}
+                          <td className="px-1 py-1">
+                            <input type="text" value={row.contract_no} onChange={e => updateManualRow(idx, 'contract_no', e.target.value)}
+                              placeholder="Contract no."
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          </td>
+                          {/* Numeric fields */}
+                          {(['no_of_shares', 'price_avg', 'gross_amount', 'brokerage', 'sec', 'exchange', 'cds', 'gov_cess', 'clearing_fees', 'net_amount', 'foreign_brokerage'] as (keyof ManualRow)[]).map(field => (
+                            <td key={field} className="px-1 py-1">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={row[field] as string}
+                                onChange={e => updateManualRow(idx, field, e.target.value)}
+                                placeholder="0.00"
+                                className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
+                          ))}
+                          {/* Remarks */}
+                          <td className="px-1 py-1">
+                            <input type="text" value={row.remarks} onChange={e => updateManualRow(idx, 'remarks', e.target.value)}
+                              placeholder="Notes..."
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          </td>
+                          {/* Delete */}
+                          <td className="px-1 py-1 text-center">
+                            <button onClick={() => removeManualRow(idx)} className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <button
+                  onClick={addManualRow}
+                  className="flex items-center space-x-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Row</span>
+                </button>
+
+                <div className="flex items-center space-x-3">
+                  <p className="text-xs text-gray-500">
+                    {manualRows.filter(r => r.transaction_id && r.contract_no && r.no_of_shares && r.net_amount).length} of {manualRows.length} rows ready
+                  </p>
+                  <button
+                    onClick={() => { setShowManualModal(false); setManualRows([emptyManualRow()]); }}
+                    className="px-5 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveManual}
+                    disabled={isSavingManual}
+                    className="flex items-center space-x-2 px-6 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSavingManual ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Save All</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-xs text-amber-700">
+                  <span className="font-semibold">Note:</span> Rows marked with <span className="text-red-500">*</span> are required. Only rows with Transaction, Contract No, Shares, and Net Amount will be saved. Cash balance is updated immediately upon saving.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
