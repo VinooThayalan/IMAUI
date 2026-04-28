@@ -1,4 +1,4 @@
-import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle, ClipboardList, Trash2 } from 'lucide-react';
+import { Plus, Search, FileText, Upload, Eye, CheckCircle, XCircle, AlertTriangle, ClipboardList, Trash2, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 interface PdfJsLib {
@@ -30,6 +30,7 @@ interface BuyAndSellNote {
   transaction_id: string;
   note_type: 'Buy' | 'Sell';
   note_number: string;
+  broker?: string;
   broker_id?: string;
   dealer_name?: string;
   transaction_date?: string;
@@ -156,6 +157,29 @@ interface ManualRow {
   broker_cds_account: string;
 }
 
+interface EditNoteForm {
+  id: string;
+  note_type: 'Buy' | 'Sell';
+  note_number: string;
+  broker: string;
+  dealer_name: string;
+  trade_date: string;
+  settlement_date: string;
+  contract_no: string;
+  no_of_shares: string;
+  price_avg: string;
+  gross_amount: string;
+  brokerage: string;
+  sec: string;
+  exchange: string;
+  cds: string;
+  gov_cess: string;
+  clearing_fees: string;
+  net_amount: string;
+  foreign_brokerage: string;
+  remarks: string;
+}
+
 function emptyManualRow(): ManualRow {
   return {
     entity_id: '',
@@ -172,6 +196,9 @@ export function BuyAndSellNotes() {
   const [showModal, setShowModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [editNote, setEditNote] = useState<EditNoteForm | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [manualRows, setManualRows] = useState<ManualRow[]>([emptyManualRow()]);
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
@@ -1025,6 +1052,85 @@ export function BuyAndSellNotes() {
     }
   }
 
+  function openEditNote(note: BuyAndSellNote) {
+    setEditNote({
+      id: note.id,
+      note_type: note.note_type,
+      note_number: note.note_number || '',
+      broker: note.broker || '',
+      dealer_name: note.dealer_name || '',
+      trade_date: note.trade_date || '',
+      settlement_date: note.settlement_date || '',
+      contract_no: note.contract_no || '',
+      no_of_shares: note.no_of_shares != null ? String(note.no_of_shares) : '',
+      price_avg: note.price_avg != null ? String(note.price_avg) : '',
+      gross_amount: note.gross_amount != null ? String(note.gross_amount) : '',
+      brokerage: note.brokerage != null ? String(note.brokerage) : '',
+      sec: note.sec != null ? String(note.sec) : '',
+      exchange: note.exchange != null ? String(note.exchange) : '',
+      cds: note.cds != null ? String(note.cds) : '',
+      gov_cess: note.gov_cess != null ? String(note.gov_cess) : '',
+      clearing_fees: note.clearing_fees != null ? String(note.clearing_fees) : '',
+      net_amount: note.net_amount != null ? String(note.net_amount) : '',
+      foreign_brokerage: note.foreign_brokerage != null ? String(note.foreign_brokerage) : '',
+      remarks: note.remarks || '',
+    });
+  }
+
+  async function handleSaveEdit() {
+    if (!editNote) return;
+    setIsSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from('buy_sell_notes')
+        .update({
+          note_type: editNote.note_type,
+          note_number: editNote.note_number || `NOTE-${Date.now()}`,
+          broker: editNote.broker || 'Unknown',
+          dealer_name: editNote.dealer_name || null,
+          trade_date: editNote.trade_date || null,
+          settlement_date: editNote.settlement_date,
+          contract_no: editNote.contract_no || null,
+          no_of_shares: editNote.no_of_shares ? Number(editNote.no_of_shares) : null,
+          price_avg: editNote.price_avg ? Number(editNote.price_avg) : null,
+          gross_amount: editNote.gross_amount ? Number(editNote.gross_amount) : null,
+          brokerage: editNote.brokerage ? Number(editNote.brokerage) : null,
+          sec: editNote.sec ? Number(editNote.sec) : null,
+          exchange: editNote.exchange ? Number(editNote.exchange) : null,
+          cds: editNote.cds ? Number(editNote.cds) : null,
+          gov_cess: editNote.gov_cess ? Number(editNote.gov_cess) : null,
+          clearing_fees: editNote.clearing_fees ? Number(editNote.clearing_fees) : null,
+          net_amount: editNote.net_amount ? Number(editNote.net_amount) : null,
+          foreign_brokerage: editNote.foreign_brokerage ? Number(editNote.foreign_brokerage) : null,
+          remarks: editNote.remarks || null,
+        })
+        .eq('id', editNote.id);
+      if (error) throw error;
+      await loadData();
+      setEditNote(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to save: ${msg}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
+  async function handleDeleteNote(id: string) {
+    if (!confirm('Delete this buy/sell note? This cannot be undone.')) return;
+    setDeletingId(id);
+    try {
+      const { error } = await supabase.from('buy_sell_notes').delete().eq('id', id);
+      if (error) throw error;
+      await loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to delete: ${msg}`);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function handleCloseModals() {
     setShowModal(false);
     setShowProcessModal(false);
@@ -1166,9 +1272,34 @@ export function BuyAndSellNotes() {
                     {new Date(note.settlement_date).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                      <Eye className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center space-x-1">
+                      {note.file_url && (
+                        <a
+                          href={note.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="View PDF"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </a>
+                      )}
+                      <button
+                        onClick={() => openEditNote(note)}
+                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Edit"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteNote(note.id)}
+                        disabled={deletingId === note.id}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1591,6 +1722,136 @@ export function BuyAndSellNotes() {
           </div>
         );
       })()}
+
+      {editNote && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Edit Buy/Sell Note</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Contract No: {editNote.contract_no || editNote.note_number}</p>
+              </div>
+              <button onClick={() => setEditNote(null)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
+                  <select
+                    value={editNote.note_type}
+                    onChange={e => setEditNote({ ...editNote, note_type: e.target.value as 'Buy' | 'Sell' })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="Buy">Buy</option>
+                    <option value="Sell">Sell</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Note / Contract No.</label>
+                  <input
+                    type="text"
+                    value={editNote.note_number}
+                    onChange={e => setEditNote({ ...editNote, note_number: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Broker</label>
+                  <input
+                    type="text"
+                    value={editNote.broker}
+                    onChange={e => setEditNote({ ...editNote, broker: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Dealer Name</label>
+                  <input
+                    type="text"
+                    value={editNote.dealer_name}
+                    onChange={e => setEditNote({ ...editNote, dealer_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Trade Date</label>
+                  <input
+                    type="date"
+                    value={editNote.trade_date}
+                    onChange={e => setEditNote({ ...editNote, trade_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Settlement Date</label>
+                  <input
+                    type="date"
+                    value={editNote.settlement_date}
+                    onChange={e => setEditNote({ ...editNote, settlement_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 pt-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase mb-3">Fee Breakdown</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    ['no_of_shares', 'No. of Shares'],
+                    ['price_avg', 'Avg Price'],
+                    ['gross_amount', 'Gross Amount'],
+                    ['brokerage', 'Brokerage'],
+                    ['sec', 'SEC'],
+                    ['exchange', 'Exchange (CSE)'],
+                    ['cds', 'CDS'],
+                    ['gov_cess', 'Gov Cess / STL'],
+                    ['clearing_fees', 'Clearing Fees'],
+                    ['foreign_brokerage', 'Foreign Brokerage'],
+                    ['net_amount', 'Net Amount'],
+                  ] as [keyof EditNoteForm, string][]).map(([field, label]) => (
+                    <div key={field}>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">{label}</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editNote[field]}
+                        onChange={e => setEditNote({ ...editNote, [field]: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Remarks</label>
+                <textarea
+                  rows={2}
+                  value={editNote.remarks}
+                  onChange={e => setEditNote({ ...editNote, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-3 border-t border-gray-200">
+                <button onClick={() => setEditNote(null)} className="px-5 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-sm">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit}
+                  className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 flex items-center space-x-2"
+                >
+                  {isSavingEdit && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                  <span>{isSavingEdit ? 'Saving...' : 'Save Changes'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showManualModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
