@@ -117,49 +117,61 @@ export function ShareAnalytics() {
   async function fetchData() {
     setLoading(true);
     try {
-      let query = supabase
+      // Fetch supporting lookups in parallel
+      const [entitiesRes, sharesRes, txnsRes] = await Promise.all([
+        supabase.from('entities').select('id, name'),
+        supabase.from('shares').select('id, ticker, name'),
+        supabase.from('transactions').select('id, entity_id, share_id'),
+      ]);
+
+      const entityMap = new Map<string, string>(
+        (entitiesRes.data || []).map((e: any) => [e.id, e.name])
+      );
+      const shareMap = new Map<string, { ticker: string; name: string }>(
+        (sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.name || '—' }])
+      );
+      const txnMap = new Map<string, { entity_id: string; share_id: string }>(
+        (txnsRes.data || []).map((t: any) => [t.id, { entity_id: t.entity_id, share_id: t.share_id }])
+      );
+
+      let notesQuery = supabase
         .from('buy_sell_notes')
-        .select(`
-          id, note_type, trade_date, no_of_shares, price_avg,
-          gross_amount, net_amount, brokerage, sec, exchange, cds,
-          gov_cess, clearing_fees, foreign_brokerage,
-          transactions!inner (
-            entity_id,
-            entities ( name ),
-            shares ( id, ticker, name )
-          )
-        `)
+        .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, net_amount, brokerage, sec, exchange, cds, gov_cess, clearing_fees, foreign_brokerage, transaction_id')
         .order('trade_date', { ascending: true });
 
-      if (fromDate) query = query.gte('trade_date', fromDate);
-      if (toDate) query = query.lte('trade_date', toDate);
+      if (fromDate) notesQuery = notesQuery.gte('trade_date', fromDate);
+      if (toDate) notesQuery = notesQuery.lte('trade_date', toDate);
 
-      const { data, error } = await query;
-      if (error) throw error;
+      const { data: notesData, error: notesError } = await notesQuery;
+      if (notesError) throw notesError;
 
-      const raw: RawNote[] = (data || [])
-        .filter((n: any) => n.transactions?.shares)
-        .map((n: any) => ({
-          id: n.id,
-          note_type: n.note_type,
-          trade_date: n.trade_date,
-          no_of_shares: Number(n.no_of_shares) || 0,
-          price_avg: n.price_avg != null ? Number(n.price_avg) : null,
-          gross_amount: n.gross_amount != null ? Number(n.gross_amount) : null,
-          net_amount: n.net_amount != null ? Number(n.net_amount) : null,
-          brokerage: n.brokerage != null ? Number(n.brokerage) : null,
-          sec: n.sec != null ? Number(n.sec) : null,
-          exchange: n.exchange != null ? Number(n.exchange) : null,
-          cds: n.cds != null ? Number(n.cds) : null,
-          gov_cess: n.gov_cess != null ? Number(n.gov_cess) : null,
-          clearing_fees: n.clearing_fees != null ? Number(n.clearing_fees) : null,
-          foreign_brokerage: n.foreign_brokerage != null ? Number(n.foreign_brokerage) : null,
-          entity_id: n.transactions.entity_id,
-          entity_name: n.transactions.entities?.name || '—',
-          share_id: n.transactions.shares.id,
-          share_ticker: n.transactions.shares.ticker || '—',
-          share_name: n.transactions.shares.name || '—',
-        }))
+      const raw: RawNote[] = (notesData || [])
+        .filter((n: any) => txnMap.has(n.transaction_id))
+        .map((n: any) => {
+          const txn = txnMap.get(n.transaction_id)!;
+          const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
+          return {
+            id: n.id,
+            note_type: n.note_type,
+            trade_date: n.trade_date,
+            no_of_shares: Number(n.no_of_shares) || 0,
+            price_avg: n.price_avg != null ? Number(n.price_avg) : null,
+            gross_amount: n.gross_amount != null ? Number(n.gross_amount) : null,
+            net_amount: n.net_amount != null ? Number(n.net_amount) : null,
+            brokerage: n.brokerage != null ? Number(n.brokerage) : null,
+            sec: n.sec != null ? Number(n.sec) : null,
+            exchange: n.exchange != null ? Number(n.exchange) : null,
+            cds: n.cds != null ? Number(n.cds) : null,
+            gov_cess: n.gov_cess != null ? Number(n.gov_cess) : null,
+            clearing_fees: n.clearing_fees != null ? Number(n.clearing_fees) : null,
+            foreign_brokerage: n.foreign_brokerage != null ? Number(n.foreign_brokerage) : null,
+            entity_id: txn.entity_id,
+            entity_name: entityMap.get(txn.entity_id) ?? '—',
+            share_id: txn.share_id,
+            share_ticker: share.ticker,
+            share_name: share.name,
+          };
+        })
         .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
 
       // Group by entity + share, then compute running totals within each group
@@ -171,7 +183,7 @@ export function ShareAnalytics() {
       }
 
       const result: ShareGroup[] = [];
-      for (const [key, notes] of map) {
+      for (const [, notes] of map) {
         const computed = computeRows(notes);
         const first = computed[0];
         result.push({
