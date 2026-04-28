@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X } from 'lucide-react';
+import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, ClipboardList, Trash2, CheckCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -102,9 +102,36 @@ interface EntityBroker {
   } | null;
 }
 
+interface BulkRow {
+  transaction_id: string;
+  entity_id: string;
+  share_id: string;
+  transaction_type: 'Buy' | 'Sell';
+  settlement_date: string;
+  no_of_shares: string;
+  price_per_share: string;
+  cds_account: string;
+}
+
+function emptyBulkRow(): BulkRow {
+  return {
+    transaction_id: '',
+    entity_id: '',
+    share_id: '',
+    transaction_type: 'Buy',
+    settlement_date: new Date().toISOString().split('T')[0],
+    no_of_shares: '',
+    price_per_share: '',
+    cds_account: '',
+  };
+}
+
 export function Transactions() {
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([emptyBulkRow()]);
+  const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -596,6 +623,64 @@ export function Transactions() {
     }
   }
 
+  function updateBulkRow(idx: number, field: keyof BulkRow, value: string) {
+    setBulkRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
+  }
+
+  function addBulkRow() {
+    setBulkRows(prev => [...prev, emptyBulkRow()]);
+  }
+
+  function removeBulkRow(idx: number) {
+    setBulkRows(prev => prev.length === 1 ? [emptyBulkRow()] : prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleSaveBulk() {
+    const validRows = bulkRows.filter(r => r.entity_id && r.share_id && r.no_of_shares && r.price_per_share);
+    if (validRows.length === 0) {
+      alert('Please fill in at least one row with Entity, Share, Shares, and Price.');
+      return;
+    }
+
+    setIsSavingBulk(true);
+    try {
+      for (const row of validRows) {
+        const qty = parseFloat(row.no_of_shares) || 0;
+        const price = parseFloat(row.price_per_share) || 0;
+        const grossAmount = qty * price;
+
+        const { error } = await supabase.from('transactions').insert({
+          entity_id: row.entity_id,
+          share_id: row.share_id,
+          transaction_type: row.transaction_type,
+          order_type: 'DAY',
+          transaction_date: row.settlement_date,
+          no_of_shares: qty,
+          price_per_share: price,
+          total_amount_gross: grossAmount,
+          fees: 0,
+          net_price_per_share: price,
+          total_amount: grossAmount,
+          approval_status: 'APPROVED',
+          cds_account_id: row.cds_account || null,
+          ...(row.transaction_id ? { id: undefined } : {}),
+        });
+
+        if (error) throw error;
+      }
+
+      await loadData();
+      setShowBulkModal(false);
+      setBulkRows([emptyBulkRow()]);
+      alert(`${validRows.length} transaction${validRows.length === 1 ? '' : 's'} saved successfully.`);
+    } catch (error) {
+      console.error('Error saving bulk transactions:', error);
+      alert('Failed to save transactions. Please try again.');
+    } finally {
+      setIsSavingBulk(false);
+    }
+  }
+
   function handlePrintTransaction(transaction: Transaction) {
     const entityName = getEntityName(transaction.entity_id);
     const shareInfo = getShareInfo(transaction.share_id);
@@ -686,18 +771,15 @@ export function Transactions() {
           <table>
             <thead>
               <tr>
-                <th rowspan="2">Date of Transaction</th>
-                <th rowspan="2">Share</th>
-                <th rowspan="2">Buy/Sell</th>
-                <th rowspan="2">Number of Shares</th>
-                <th colspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Gross)</th>
-                <th rowspan="2" class="green-bg">Per Share Sales Price / Purchase Cost (Net)</th>
-                <th rowspan="2">Purchase/ Sale Value</th>
-                <th rowspan="2">CDS Acc. No</th>
-                <th rowspan="2">Broker Name</th>
-              </tr>
-              <tr>
-                <th class="green-bg" colspan="2"></th>
+                <th>Date of Transaction</th>
+                <th>Share</th>
+                <th>Buy/Sell</th>
+                <th>Number of Shares</th>
+                <th>Per Share Sales Price / Purchase Cost (Gross)</th>
+                <th>Per Share Sales Price / Purchase Cost (Net)</th>
+                <th>Purchase/ Sale Value</th>
+                <th>CDS Acc. No</th>
+                <th>Broker Name</th>
               </tr>
             </thead>
             <tbody>
@@ -706,8 +788,8 @@ export function Transactions() {
                 <td>${shareInfo}</td>
                 <td>${transaction.transaction_type}</td>
                 <td>${Number(transaction.no_of_shares).toLocaleString()}</td>
-                <td class="green-bg" colspan="2">${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td class="green-bg">${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td>${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td>${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                 <td>${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                 <td>${cdsAccount}</td>
                 <td>${brokerName}</td>
@@ -715,23 +797,23 @@ export function Transactions() {
               <tr class="total-row">
                 <td colspan="2">Total Sales Values /Purchase Values</td>
                 <td>${transaction.transaction_type}</td>
-                <td colspan="3" class="green-text">${Number(transaction.no_of_shares).toLocaleString()} shares</td>
+                <td colspan="2" class="green-text">${Number(transaction.no_of_shares).toLocaleString()} shares</td>
                 <td colspan="4" class="green-text">LKR ${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
               </tr>
               <tr>
-                <td colspan="10" style="border: none; padding: 20px 8px;"></td>
+                <td colspan="9" style="border: none; padding: 20px 8px;"></td>
               </tr>
               <tr>
                 <td colspan="3" style="border-right: none; font-weight: normal;">Authorized by</td>
-                <td colspan="7" style="border-left: none;">..........................</td>
+                <td colspan="6" style="border-left: none;">..........................</td>
               </tr>
               <tr>
                 <td colspan="3" style="border-right: none; font-weight: normal;">Authorized date</td>
-                <td colspan="7" style="border-left: none;">..........................</td>
+                <td colspan="6" style="border-left: none;">..........................</td>
               </tr>
               <tr>
                 <td colspan="3" style="border-right: none; font-weight: normal;">Generate Date</td>
-                <td colspan="7" style="border-left: none;">${currentDate}</td>
+                <td colspan="6" style="border-left: none;">${currentDate}</td>
               </tr>
             </tbody>
           </table>
@@ -1024,6 +1106,13 @@ export function Transactions() {
               <span className="font-medium">Submit for Approval ({selectedTransactionIds.size})</span>
             </button>
           )}
+          <button
+            onClick={() => setShowBulkModal(true)}
+            className="flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
+          >
+            <ClipboardList className="w-5 h-5" />
+            <span className="font-medium">Bulk Entry</span>
+          </button>
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -2331,6 +2420,226 @@ export function Transactions() {
                 <Mail className="w-4 h-4" />
                 <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl my-6">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-xl flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Bulk Entry — Transactions</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Enter multiple past buy/sell transactions. All entries go directly into the system.</p>
+              </div>
+              <button
+                onClick={() => { setShowBulkModal(false); setBulkRows([emptyBulkRow()]); }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-gray-800 text-white">
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap w-8">#</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[200px]">Transaction</th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Entity <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Share <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[80px]">Buy / Sell <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[120px]">Settlement Date <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">No. of Shares <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[130px]">Purchase / Sales Cost <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">CDS Account</th>
+                      <th className="px-2 py-2.5 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkRows.map((row, idx) => {
+                      const rowReady = row.entity_id && row.share_id && row.no_of_shares && row.price_per_share;
+                      return (
+                        <tr key={idx} className={`border-b border-gray-200 ${rowReady ? 'bg-white' : 'bg-gray-50'}`}>
+                          <td className="px-2 py-1.5 text-gray-400 text-center">{idx + 1}</td>
+
+                          {/* Transaction (optional link to existing) */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.transaction_id}
+                              onChange={e => {
+                                const txn = transactions.find(t => t.id === e.target.value);
+                                if (txn) {
+                                  setBulkRows(prev => prev.map((r, i) => i === idx ? {
+                                    ...r,
+                                    transaction_id: e.target.value,
+                                    entity_id: txn.entity_id,
+                                    share_id: txn.share_id,
+                                    transaction_type: txn.transaction_type === 'BUY' ? 'Buy' : 'Sell',
+                                    no_of_shares: String(txn.no_of_shares),
+                                    price_per_share: String(txn.price_per_share),
+                                    cds_account: txn.cds_account_id || '',
+                                  } : r));
+                                } else {
+                                  updateBulkRow(idx, 'transaction_id', e.target.value);
+                                }
+                              }}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="">— not linked —</option>
+                              {transactions.map(t => {
+                                const sh = shares.find(s => s.id === t.share_id);
+                                const en = entities.find(e => e.id === t.entity_id);
+                                return (
+                                  <option key={t.id} value={t.id}>
+                                    {t.transaction_type} — {sh?.ticker} — {en?.name}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </td>
+
+                          {/* Entity */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.entity_id}
+                              onChange={e => updateBulkRow(idx, 'entity_id', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="">Select entity...</option>
+                              {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                            </select>
+                          </td>
+
+                          {/* Share */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.share_id}
+                              onChange={e => updateBulkRow(idx, 'share_id', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="">Select share...</option>
+                              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} — {s.name}</option>)}
+                            </select>
+                          </td>
+
+                          {/* Buy / Sell */}
+                          <td className="px-1 py-1">
+                            <select
+                              value={row.transaction_type}
+                              onChange={e => updateBulkRow(idx, 'transaction_type', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                            >
+                              <option value="Buy">Buy</option>
+                              <option value="Sell">Sell</option>
+                            </select>
+                          </td>
+
+                          {/* Settlement date */}
+                          <td className="px-1 py-1">
+                            <input
+                              type="date"
+                              value={row.settlement_date}
+                              onChange={e => updateBulkRow(idx, 'settlement_date', e.target.value)}
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            />
+                          </td>
+
+                          {/* No of shares */}
+                          <td className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="1"
+                              min="0"
+                              value={row.no_of_shares}
+                              onChange={e => updateBulkRow(idx, 'no_of_shares', e.target.value)}
+                              placeholder="0"
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            />
+                          </td>
+
+                          {/* Price per share */}
+                          <td className="px-1 py-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={row.price_per_share}
+                              onChange={e => updateBulkRow(idx, 'price_per_share', e.target.value)}
+                              placeholder="0.00"
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            />
+                          </td>
+
+                          {/* CDS account */}
+                          <td className="px-1 py-1">
+                            <input
+                              type="text"
+                              value={row.cds_account}
+                              onChange={e => updateBulkRow(idx, 'cds_account', e.target.value)}
+                              placeholder="CDS account no."
+                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            />
+                          </td>
+
+                          {/* Delete */}
+                          <td className="px-1 py-1 text-center">
+                            <button onClick={() => removeBulkRow(idx)} className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <button
+                  onClick={addBulkRow}
+                  className="flex items-center space-x-1.5 px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Row</span>
+                </button>
+
+                <div className="flex items-center space-x-3">
+                  <p className="text-xs text-gray-500">
+                    {bulkRows.filter(r => r.entity_id && r.share_id && r.no_of_shares && r.price_per_share).length} of {bulkRows.length} rows ready
+                  </p>
+                  <button
+                    onClick={() => { setShowBulkModal(false); setBulkRows([emptyBulkRow()]); }}
+                    className="px-5 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveBulk}
+                    disabled={isSavingBulk}
+                    className="flex items-center space-x-2 px-6 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSavingBulk ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Save All</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-xs text-amber-700">
+                  <span className="font-semibold">Note:</span> Fields marked <span className="text-red-500">*</span> are required. Selecting a Transaction auto-fills the row. Only complete rows (Entity, Share, Shares, Price) are saved. Transactions are saved with <span className="font-semibold">APPROVED</span> status immediately.
+                </p>
+              </div>
             </div>
           </div>
         </div>
