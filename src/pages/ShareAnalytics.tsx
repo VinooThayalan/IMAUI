@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, FileText, Search, TrendingUp, TrendingDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Entity {
@@ -7,25 +7,14 @@ interface Entity {
   name: string;
 }
 
-interface Share {
+interface RawNote {
   id: string;
-  ticker: string;
-  name: string;
-}
-
-interface NoteRow {
-  id: string;
-  transaction_id: string;
   note_type: string;
-  note_number: string | null;
-  contract_no: string | null;
-  broker: string | null;
-  dealer_name: string | null;
   trade_date: string | null;
-  settlement_date: string | null;
-  no_of_shares: number | null;
+  no_of_shares: number;
   price_avg: number | null;
   gross_amount: number | null;
+  net_amount: number | null;
   brokerage: number | null;
   sec: number | null;
   exchange: number | null;
@@ -33,28 +22,87 @@ interface NoteRow {
   gov_cess: number | null;
   clearing_fees: number | null;
   foreign_brokerage: number | null;
-  net_amount: number | null;
-  file_url: string | null;
-  // from joined transaction
-  transaction_type: string;
-  transaction_date: string;
-  price_per_share: number;
-  total_amount: number;
   entity_id: string;
   entity_name: string;
+  share_id: string;
   share_ticker: string;
   share_name: string;
 }
 
+interface ComputedRow extends RawNote {
+  total_cost: number;
+  sale_value: number;
+  av_cost_buy: number;
+  av_cost_sell: number;
+  av_price: number;
+}
+
+interface ShareGroup {
+  share_id: string;
+  share_ticker: string;
+  share_name: string;
+  entity_id: string;
+  entity_name: string;
+  rows: ComputedRow[];
+}
+
+function computeRows(notes: RawNote[]): ComputedRow[] {
+  // Sort chronologically
+  const sorted = [...notes].sort((a, b) => {
+    const da = a.trade_date ?? '';
+    const db = b.trade_date ?? '';
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+
+  let heldShares = 0;
+  let heldCost = 0; // total cost of current holdings at weighted avg cost
+
+  return sorted.map(note => {
+    const qty = Number(note.no_of_shares) || 0;
+    const gross = Number(note.gross_amount) || 0;
+    const isBuy = note.note_type === 'Buy' || note.note_type === 'BUY';
+
+    let total_cost = 0;
+    let sale_value = 0;
+    let av_cost_sell = 0;
+
+    if (isBuy) {
+      total_cost = gross;
+      heldShares += qty;
+      heldCost += gross;
+    } else {
+      sale_value = gross;
+      // avg cost per share before this sell
+      const avgCostPerShare = heldShares > 0 ? heldCost / heldShares : 0;
+      av_cost_sell = avgCostPerShare * qty;
+      // reduce holdings
+      const costToRemove = avgCostPerShare * qty;
+      heldShares = Math.max(0, heldShares - qty);
+      heldCost = Math.max(0, heldCost - costToRemove);
+    }
+
+    const av_cost_buy = heldCost;
+    const av_price = heldShares > 0 ? heldCost / heldShares : 0;
+
+    return {
+      ...note,
+      total_cost,
+      sale_value,
+      av_cost_buy,
+      av_cost_sell,
+      av_price,
+    };
+  });
+}
+
 export function ShareAnalytics() {
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [selectedEntityId, setSelectedEntityId] = useState<string>('');
+  const [selectedEntityId, setSelectedEntityId] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [search, setSearch] = useState('');
-  const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [groups, setGroups] = useState<ShareGroup[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) => {
@@ -63,27 +111,25 @@ export function ShareAnalytics() {
   }, []);
 
   useEffect(() => {
-    fetchNotes();
+    fetchData();
   }, [selectedEntityId, fromDate, toDate]);
 
-  async function fetchNotes() {
+  async function fetchData() {
     setLoading(true);
     try {
       let query = supabase
         .from('buy_sell_notes')
         .select(`
-          id, transaction_id, note_type, note_number, contract_no, broker,
-          dealer_name, trade_date, settlement_date, no_of_shares, price_avg,
-          gross_amount, brokerage, sec, exchange, cds, gov_cess,
-          clearing_fees, foreign_brokerage, net_amount, file_url,
-          transactions (
-            transaction_type, transaction_date, price_per_share, total_amount,
+          id, note_type, trade_date, no_of_shares, price_avg,
+          gross_amount, net_amount, brokerage, sec, exchange, cds,
+          gov_cess, clearing_fees, foreign_brokerage,
+          transactions!inner (
             entity_id,
             entities ( name ),
-            shares ( ticker, name )
+            shares ( id, ticker, name )
           )
         `)
-        .order('trade_date', { ascending: false });
+        .order('trade_date', { ascending: true });
 
       if (fromDate) query = query.gte('trade_date', fromDate);
       if (toDate) query = query.lte('trade_date', toDate);
@@ -91,21 +137,16 @@ export function ShareAnalytics() {
       const { data, error } = await query;
       if (error) throw error;
 
-      let rows: NoteRow[] = (data || [])
-        .filter((n: any) => n.transactions)
+      const raw: RawNote[] = (data || [])
+        .filter((n: any) => n.transactions?.shares)
         .map((n: any) => ({
           id: n.id,
-          transaction_id: n.transaction_id,
           note_type: n.note_type,
-          note_number: n.note_number,
-          contract_no: n.contract_no,
-          broker: n.broker,
-          dealer_name: n.dealer_name,
           trade_date: n.trade_date,
-          settlement_date: n.settlement_date,
-          no_of_shares: n.no_of_shares != null ? Number(n.no_of_shares) : null,
+          no_of_shares: Number(n.no_of_shares) || 0,
           price_avg: n.price_avg != null ? Number(n.price_avg) : null,
           gross_amount: n.gross_amount != null ? Number(n.gross_amount) : null,
+          net_amount: n.net_amount != null ? Number(n.net_amount) : null,
           brokerage: n.brokerage != null ? Number(n.brokerage) : null,
           sec: n.sec != null ? Number(n.sec) : null,
           exchange: n.exchange != null ? Number(n.exchange) : null,
@@ -113,23 +154,44 @@ export function ShareAnalytics() {
           gov_cess: n.gov_cess != null ? Number(n.gov_cess) : null,
           clearing_fees: n.clearing_fees != null ? Number(n.clearing_fees) : null,
           foreign_brokerage: n.foreign_brokerage != null ? Number(n.foreign_brokerage) : null,
-          net_amount: n.net_amount != null ? Number(n.net_amount) : null,
-          file_url: n.file_url,
-          transaction_type: n.transactions.transaction_type,
-          transaction_date: n.transactions.transaction_date,
-          price_per_share: Number(n.transactions.price_per_share),
-          total_amount: Number(n.transactions.total_amount),
           entity_id: n.transactions.entity_id,
           entity_name: n.transactions.entities?.name || '—',
-          share_ticker: n.transactions.shares?.ticker || '—',
-          share_name: n.transactions.shares?.name || '—',
-        }));
+          share_id: n.transactions.shares.id,
+          share_ticker: n.transactions.shares.ticker || '—',
+          share_name: n.transactions.shares.name || '—',
+        }))
+        .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
 
-      if (selectedEntityId) {
-        rows = rows.filter(r => r.entity_id === selectedEntityId);
+      // Group by entity + share, then compute running totals within each group
+      const map = new Map<string, RawNote[]>();
+      for (const note of raw) {
+        const key = `${note.entity_id}__${note.share_id}`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(note);
       }
 
-      setNotes(rows);
+      const result: ShareGroup[] = [];
+      for (const [key, notes] of map) {
+        const computed = computeRows(notes);
+        const first = computed[0];
+        result.push({
+          share_id: first.share_id,
+          share_ticker: first.share_ticker,
+          share_name: first.share_name,
+          entity_id: first.entity_id,
+          entity_name: first.entity_name,
+          rows: computed,
+        });
+      }
+
+      // Sort groups by entity name then ticker
+      result.sort((a, b) =>
+        a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker)
+      );
+
+      setGroups(result);
+      // Auto-expand all groups
+      setExpandedGroups(new Set(result.map(g => `${g.entity_id}__${g.share_id}`)));
     } catch (err) {
       console.error(err);
     } finally {
@@ -137,35 +199,28 @@ export function ShareAnalytics() {
     }
   }
 
-  const filtered = notes.filter(n => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      n.share_ticker.toLowerCase().includes(q) ||
-      n.share_name.toLowerCase().includes(q) ||
-      (n.note_number || '').toLowerCase().includes(q) ||
-      (n.contract_no || '').toLowerCase().includes(q) ||
-      (n.broker || '').toLowerCase().includes(q)
-    );
-  });
-
-  const isBuy = (type: string) => type === 'BUY' || type === 'Buy';
-
-  function fmt(val: number | null, decimals = 2) {
-    if (val == null) return '—';
-    return `Rs. ${val.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+  function toggleGroup(key: string) {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
-  function fmtDate(d: string | null) {
-    if (!d) return '—';
-    return new Date(d).toLocaleDateString();
-  }
+  const fmt = (v: number, dec = 2) =>
+    v.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
+
+  const fmtDate = (d: string | null) =>
+    d ? new Date(d + 'T00:00:00').toLocaleDateString() : '—';
+
+  const isBuy = (type: string) => type === 'Buy' || type === 'BUY';
 
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Share Analytics</h1>
-        <p className="text-gray-500 mt-1">Buy and sell notes filtered by entity and date</p>
+        <p className="text-gray-500 mt-1">Running cost analysis per share using weighted average cost method</p>
       </div>
 
       {/* Filters */}
@@ -185,7 +240,7 @@ export function ShareAnalytics() {
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase">From</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase">From Date</label>
             <input
               type="date"
               value={fromDate}
@@ -194,7 +249,7 @@ export function ShareAnalytics() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase">To</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase">To Date</label>
             <input
               type="date"
               value={toDate}
@@ -202,197 +257,172 @@ export function ShareAnalytics() {
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
-            <label className="text-xs font-semibold text-gray-500 uppercase">Search</label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Ticker, note no., broker..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <FileText className="w-5 h-5 text-blue-600" />
-            <span className="font-semibold text-gray-900">Buy / Sell Notes</span>
-          </div>
-          <span className="text-sm text-gray-500">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
+      {loading ? (
+        <div className="flex items-center justify-center h-48">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
         </div>
+      ) : groups.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
+          <BarChart2 className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-400 font-medium">No data found</p>
+          <p className="text-gray-300 text-sm mt-1">Adjust your filters to see results</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map(group => {
+            const key = `${group.entity_id}__${group.share_id}`;
+            const isOpen = expandedGroups.has(key);
+            const lastRow = group.rows[group.rows.length - 1];
+            const totalBought = group.rows.filter(r => isBuy(r.note_type)).reduce((s, r) => s + r.total_cost, 0);
+            const totalSold = group.rows.filter(r => !isBuy(r.note_type)).reduce((s, r) => s + r.sale_value, 0);
 
-        {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="w-10 px-4 py-3"></th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Share</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Note No.</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Broker</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">No. of Shares</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Avg Price</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Gross Amount</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Net Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Settlement</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(note => {
-                  const isOpen = expandedId === note.id;
-                  const buy = isBuy(note.note_type);
-                  return (
-                    <>
-                      <tr
-                        key={note.id}
-                        onClick={() => setExpandedId(isOpen ? null : note.id)}
-                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
-                      >
-                        <td className="px-4 py-3 text-center">
-                          {isOpen
-                            ? <ChevronDown className="w-4 h-4 text-blue-500 mx-auto" />
-                            : <ChevronRight className="w-4 h-4 text-gray-400 mx-auto" />
-                          }
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(note.trade_date)}</td>
-                        <td className="px-4 py-3 text-sm text-gray-900 font-medium">{note.entity_name}</td>
-                        <td className="px-4 py-3">
-                          <div className="text-sm font-bold text-gray-900">{note.share_ticker}</div>
-                          <div className="text-xs text-gray-500">{note.share_name}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                            buy ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {note.note_type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700 font-mono">{note.note_number || note.contract_no || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{note.broker || '—'}</td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-900 font-medium">
-                          {note.no_of_shares != null ? Number(note.no_of_shares).toLocaleString() : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-900">
-                          {note.price_avg != null ? `Rs. ${Number(note.price_avg).toFixed(2)}` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-900">
-                          {note.gross_amount != null ? `Rs. ${Number(note.gross_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700">
-                          {note.net_amount != null ? `Rs. ${Number(note.net_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{fmtDate(note.settlement_date)}</td>
-                      </tr>
+            return (
+              <div key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                {/* Group header */}
+                <button
+                  onClick={() => toggleGroup(key)}
+                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="flex items-center space-x-3">
+                    {isOpen
+                      ? <ChevronDown className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                      : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                    <div>
+                      <div className="font-bold text-gray-900 text-base">{group.share_ticker}</div>
+                      <div className="text-xs text-gray-500">{group.share_name} · {group.entity_name}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-6 text-sm">
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">Total Bought</div>
+                      <div className="font-semibold text-gray-800">Rs. {fmt(totalBought)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">Total Sold</div>
+                      <div className="font-semibold text-gray-800">Rs. {fmt(totalSold)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">Av. Hold Cost</div>
+                      <div className="font-semibold text-blue-700">Rs. {fmt(lastRow.av_cost_buy)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">Av. Price</div>
+                      <div className="font-semibold text-gray-800">Rs. {fmt(lastRow.av_price)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-gray-400">Transactions</div>
+                      <div className="font-semibold text-gray-800">{group.rows.length}</div>
+                    </div>
+                  </div>
+                </button>
 
-                      {isOpen && (
-                        <tr key={`${note.id}-detail`} className="bg-blue-50/30 border-b border-blue-100">
-                          <td></td>
-                          <td colSpan={11} className="px-4 py-4">
-                            <div className="rounded-xl border border-blue-200 bg-white shadow-sm overflow-hidden">
-                              {/* Detail header */}
-                              <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-blue-700 to-blue-600 text-white">
-                                <div className="flex items-center space-x-3">
-                                  {buy ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-                                  <div>
-                                    <div className="font-bold text-base">{note.note_type} Note — {note.note_number || note.contract_no || 'N/A'}</div>
-                                    <div className="text-blue-200 text-xs">{note.share_ticker} · {note.entity_name}</div>
-                                  </div>
-                                </div>
-                                <div className="flex items-center space-x-4">
-                                  {note.dealer_name && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-blue-300">Dealer</div>
-                                      <div className="text-sm font-medium">{note.dealer_name}</div>
-                                    </div>
-                                  )}
-                                  {note.file_url && (
-                                    <a
-                                      href={note.file_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      onClick={e => e.stopPropagation()}
-                                      className="flex items-center space-x-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors"
-                                    >
-                                      <FileText className="w-4 h-4" />
-                                      <span>View PDF</span>
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Fee breakdown grid */}
-                              <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                                {[
-                                  { label: 'Trade Date', value: fmtDate(note.trade_date) },
-                                  { label: 'Settlement Date', value: fmtDate(note.settlement_date) },
-                                  { label: 'Contract No.', value: note.contract_no || '—' },
-                                  { label: 'No. of Shares', value: note.no_of_shares != null ? note.no_of_shares.toLocaleString() : '—' },
-                                  { label: 'Avg Price', value: note.price_avg != null ? `Rs. ${note.price_avg.toFixed(2)}` : '—' },
-                                ].map(({ label, value }) => (
-                                  <div key={label} className="bg-gray-50 rounded-lg px-3 py-2.5">
-                                    <div className="text-xs text-gray-400 font-medium mb-0.5">{label}</div>
-                                    <div className="text-sm font-semibold text-gray-800">{value}</div>
-                                  </div>
-                                ))}
-                              </div>
-
-                              <div className="px-4 pb-4">
-                                <div className="text-xs font-semibold text-gray-400 uppercase mb-2">Fee Breakdown</div>
-                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-gray-200 rounded-lg overflow-hidden border border-gray-200">
-                                  {[
-                                    { label: 'Gross Amount', value: fmt(note.gross_amount), highlight: false },
-                                    { label: 'Brokerage', value: fmt(note.brokerage) },
-                                    { label: 'SEC', value: fmt(note.sec) },
-                                    { label: 'Exchange', value: fmt(note.exchange) },
-                                    { label: 'CDS', value: fmt(note.cds) },
-                                    { label: 'Gov Cess', value: fmt(note.gov_cess) },
-                                    { label: 'Clearing Fees', value: fmt(note.clearing_fees) },
-                                    { label: 'Foreign Brokerage', value: fmt(note.foreign_brokerage) },
-                                    { label: 'Net Amount', value: fmt(note.net_amount), highlight: true },
-                                  ].map(({ label, value, highlight }) => (
-                                    <div key={label} className={`px-3 py-2.5 ${highlight ? 'bg-blue-50' : 'bg-white'}`}>
-                                      <div className="text-xs text-gray-400 font-medium mb-0.5">{label}</div>
-                                      <div className={`text-sm font-semibold ${highlight ? 'text-blue-700' : 'text-gray-800'}`}>{value}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
+                {isOpen && (
+                  <div className="border-t border-gray-200 overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-100">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Date</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Price</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">No. of Shares</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Total Cost</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Sale Value</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Av Cost (Buy)</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Av Cost (Sell)</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Av Price</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row, idx) => {
+                          const buy = isBuy(row.note_type);
+                          return (
+                            <tr
+                              key={row.id}
+                              className={`border-b border-gray-50 ${
+                                idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'
+                              } hover:bg-blue-50/30 transition-colors`}
+                            >
+                              <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">
+                                {fmtDate(row.trade_date)}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                  buy ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {buy
+                                    ? <TrendingUp className="w-3 h-3" />
+                                    : <TrendingDown className="w-3 h-3" />}
+                                  {buy ? 'Buy' : 'Sell'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-gray-700 font-mono">
+                                {row.price_avg != null ? fmt(row.price_avg) : '—'}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-gray-700 font-mono">
+                                {row.no_of_shares.toLocaleString()}
+                              </td>
+                              {/* Total Cost — buy: gross; sell: 0 */}
+                              <td className="px-4 py-2.5 text-right font-mono">
+                                <span className={row.total_cost > 0 ? 'text-gray-900' : 'text-gray-300'}>
+                                  {row.total_cost > 0 ? fmt(row.total_cost) : '0'}
+                                </span>
+                              </td>
+                              {/* Sale Value — sell: gross; buy: 0 */}
+                              <td className="px-4 py-2.5 text-right font-mono">
+                                <span className={row.sale_value > 0 ? 'text-gray-900' : 'text-gray-300'}>
+                                  {row.sale_value > 0 ? fmt(row.sale_value) : '0'}
+                                </span>
+                              </td>
+                              {/* Av Cost (Buy) = running total cost of holdings */}
+                              <td className="px-4 py-2.5 text-right font-mono font-semibold text-blue-700">
+                                {fmt(row.av_cost_buy)}
+                              </td>
+                              {/* Av Cost (Sell) = cost of sold shares at avg buy price */}
+                              <td className="px-4 py-2.5 text-right font-mono">
+                                <span className={row.av_cost_sell > 0 ? 'text-orange-700 font-semibold' : 'text-gray-300'}>
+                                  {row.av_cost_sell > 0 ? fmt(row.av_cost_sell) : '—'}
+                                </span>
+                              </td>
+                              {/* Av Price = weighted avg cost per share held */}
+                              <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-900">
+                                {fmt(row.av_price)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {/* Summary footer */}
+                      <tfoot className="bg-gray-100 border-t-2 border-gray-200">
+                        <tr>
+                          <td colSpan={4} className="px-4 py-2.5 text-xs font-bold text-gray-500 uppercase">Totals</td>
+                          <td className="px-4 py-2.5 text-right font-bold text-gray-900 font-mono">
+                            {fmt(group.rows.reduce((s, r) => s + r.total_cost, 0))}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-bold text-gray-900 font-mono">
+                            {fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-bold text-blue-700 font-mono">
+                            {fmt(lastRow.av_cost_buy)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-bold text-orange-700 font-mono">
+                            {fmt(group.rows.reduce((s, r) => s + r.av_cost_sell, 0))}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-bold text-gray-900 font-mono">
+                            {fmt(lastRow.av_price)}
                           </td>
                         </tr>
-                      )}
-                    </>
-                  );
-                })}
-
-                {filtered.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={12} className="py-16 text-center">
-                      <FileText className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-                      <p className="text-gray-400 font-medium">No buy/sell notes found</p>
-                      <p className="text-gray-300 text-sm mt-1">Adjust your filters to see results</p>
-                    </td>
-                  </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
