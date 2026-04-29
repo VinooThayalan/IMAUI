@@ -37,6 +37,7 @@ const IndustryTypes = lazy(() => import('./pages/IndustryTypes').then(m => ({ de
 const SectorTypes = lazy(() => import('./pages/SectorTypes').then(m => ({ default: m.SectorTypes })));
 const BankMaster = lazy(() => import('./pages/BankMaster').then(m => ({ default: m.BankMaster })));
 const OpeningBalances = lazy(() => import('./pages/OpeningBalances').then(m => ({ default: m.OpeningBalances })));
+const BankTransactionHistory = lazy(() => import('./pages/BankTransactionHistory').then(m => ({ default: m.BankTransactionHistory })));
 
 function PageFallback() {
   return (
@@ -95,6 +96,8 @@ function App() {
         return <Shares />;
       case 'banks':
         return <Banks />;
+      case 'bank-transaction-history':
+        return <BankTransactionHistory />;
       case 'brokers':
         return <Brokers />;
       case 'transactions':
