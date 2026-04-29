@@ -1315,27 +1315,23 @@ export function BuyAndSellNotes() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <h2 className="text-xl font-bold text-gray-900">Upload Buy/Sell Note</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[98vh] flex flex-col">
+            <div className="border-b border-gray-200 px-5 py-3">
+              <h2 className="text-base font-bold text-gray-900">Upload Buy/Sell Note</h2>
+              <p className="text-xs text-blue-600 mt-0.5">Select the matching approved transaction, upload the PDF, then review &amp; process.</p>
             </div>
 
-            <div className="p-6 space-y-5">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  Upload a broker contract note PDF, select the matching approved transaction, and process the note. The PDF totals will be compared against the transaction on the next step.
-                </p>
-              </div>
+            <div className="px-5 py-3 space-y-3 overflow-y-auto flex-1">
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
                   Transaction <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={formData.transaction_id}
                   onChange={(e) => setFormData({ ...formData, transaction_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   required
                 >
                   <option value="">Select approved transaction</option>
@@ -1351,46 +1347,40 @@ export function BuyAndSellNotes() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Broker <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Broker <span className="text-red-500">*</span></label>
                   <select
                     value={formData.broker_id}
                     onChange={(e) => setFormData({ ...formData, broker_id: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
                     <option value="">Select broker</option>
                     {brokers.map((broker) => (
-                      <option key={broker.id} value={broker.id}>
-                        {broker.broker_name}
-                      </option>
+                      <option key={broker.id} value={broker.id}>{broker.broker_name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Dealer Name</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Dealer Name</label>
                   <input
                     type="text"
                     value={formData.dealer_name}
                     onChange={(e) => setFormData({ ...formData, dealer_name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter dealer name"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Client A/C Number
-                  </label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Client A/C Number</label>
                   <select
                     value={formData.entity_account_number}
                     onChange={(e) => setFormData({ ...formData, entity_account_number: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     disabled={availableEntityAccounts.length === 0}
                   >
                     <option value="">Select account (CDS or Broker)</option>
@@ -1400,59 +1390,57 @@ export function BuyAndSellNotes() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-blue-600 mt-1">CDS or Broker account (not bank)</p>
+                  <p className="text-xs text-blue-500 mt-0.5">CDS or Broker account (not bank)</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Settlement Date <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Settlement Date <span className="text-red-500">*</span></label>
                   <input
                     type="date"
                     value={formData.settlement_date}
                     onChange={(e) => setFormData({ ...formData, settlement_date: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   />
-                  <p className="text-xs text-red-600 mt-1">Used in reports</p>
+                  <p className="text-xs text-red-500 mt-0.5">Used in reports</p>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Upload buy/sell document (PDF) <span className="text-red-500">*</span>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">
+                  Upload PDF <span className="text-red-500">*</span>
                 </label>
-                <div className="flex items-center space-x-2">
-                  <Upload className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                <div className="flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <input
                     type="file"
                     accept=".pdf"
                     onChange={handleFileUpload}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
                 {isExtracting && (
-                  <div className="mt-2 text-sm text-blue-600 flex items-center space-x-2">
+                  <div className="mt-1.5 text-xs text-blue-600 flex items-center gap-1.5">
                     <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                     <span>Extracting data from PDF...</span>
                   </div>
                 )}
                 {uploadedFile && !isExtracting && extractedRows.length > 0 && (
-                  <div className="mt-2 text-sm text-green-600 flex items-center space-x-1">
-                    <CheckCircle className="w-4 h-4" />
+                  <div className="mt-1.5 text-xs text-green-600 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" />
                     <span>{uploadedFile.name} — {extractedRows.length} line item{extractedRows.length === 1 ? '' : 's'} extracted</span>
                   </div>
                 )}
                 {uploadedFile && !isExtracting && extractedRows.length === 0 && debugRawText && (
-                  <div className="mt-3 bg-amber-50 border border-amber-300 rounded-lg p-3">
-                    <div className="flex items-start space-x-2">
+                  <div className="mt-2 bg-amber-50 border border-amber-300 rounded-lg p-2.5">
+                    <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-amber-900">Could not auto-extract line items</p>
-                        <p className="text-xs text-amber-700 mt-1">PDF layout does not match expected patterns. Share the text below so the parser can be tuned.</p>
+                        <p className="text-xs font-semibold text-amber-900">Could not auto-extract line items</p>
+                        <p className="text-xs text-amber-700 mt-0.5">PDF layout does not match expected patterns.</p>
                         <textarea
                           readOnly
                           value={debugRawText}
-                          className="mt-2 w-full h-40 text-xs font-mono p-2 border border-amber-300 rounded bg-white text-gray-700"
+                          className="mt-1.5 w-full h-28 text-xs font-mono p-1.5 border border-amber-300 rounded bg-white text-gray-700"
                         />
                       </div>
                     </div>
@@ -1461,29 +1449,30 @@ export function BuyAndSellNotes() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Remarks</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Remarks</label>
                 <textarea
                   value={formData.remarks}
                   onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
                   rows={2}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Additional notes..."
                 />
               </div>
 
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                <button type="button" onClick={handleCloseModals} className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleProcessClick}
-                  disabled={!uploadedFile || isExtracting || !formData.transaction_id}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                >
-                  Review & Process
-                </button>
-              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-200">
+              <button type="button" onClick={handleCloseModals} className="px-4 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleProcessClick}
+                disabled={!uploadedFile || isExtracting || !formData.transaction_id}
+                className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                Review & Process
+              </button>
             </div>
           </div>
         </div>
