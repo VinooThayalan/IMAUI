@@ -28,6 +28,7 @@ const navSections: NavSection[] = [
       { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes', menuName: 'buy-sell-notes' },
       { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals', menuName: 'buy-sell-approvals' },
       { icon: Wallet, label: 'Cash Balance', href: '#cash-balance', menuName: 'cash-balance' },
+      { icon: BarChart3, label: 'Bank Transaction History', href: '#bank-transaction-history', menuName: 'bank-transaction-history' },
       { icon: FileEdit, label: 'Scrip Entry', href: '#scrip-entry', menuName: 'scrip-entry' },
       { icon: Wallet, label: 'Opening Balances', href: '#opening-balances', menuName: 'opening-balances' },
       { icon: DollarSign, label: 'Dividends', href: '#dividends', menuName: 'dividends' },
@@ -46,7 +47,6 @@ const navSections: NavSection[] = [
       { icon: Building2, label: 'Entities', href: '#entities', menuName: 'entities' },
       { icon: TrendingUp, label: 'Shares', href: '#shares', menuName: 'shares' },
       { icon: Landmark, label: 'Entity - Banks', href: '#banks', menuName: 'banks' },
-      { icon: BarChart3, label: 'Bank Transaction History', href: '#bank-transaction-history', menuName: 'bank-transaction-history' },
       { icon: Briefcase, label: 'Brokers', href: '#brokers', menuName: 'brokers' },
     ]
   },
