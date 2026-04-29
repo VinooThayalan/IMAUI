@@ -1234,6 +1234,8 @@ export function BuyAndSellNotes() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ticker</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Shares</th>
@@ -1244,10 +1246,22 @@ export function BuyAndSellNotes() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredNotes.map((note) => (
+              {filteredNotes.map((note) => {
+                const txn = transactions.find(t => t.id === note.transaction_id);
+                const noteEntity = txn ? entities.find(e => e.id === txn.entity_id) : undefined;
+                const noteShare = txn ? shares.find(s => s.id === txn.share_id) : undefined;
+                return (
                 <tr key={note.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-bold text-blue-600">{note.contract_no}</div>
+                    <div className="text-sm font-bold text-blue-600">{note.contract_no || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{noteEntity?.name || '-'}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 font-mono">
+                      {noteShare?.ticker || '-'}
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -1302,7 +1316,8 @@ export function BuyAndSellNotes() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
           {filteredNotes.length === 0 && (
