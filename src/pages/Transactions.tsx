@@ -151,6 +151,9 @@ export function Transactions() {
   const [shareBalances, setShareBalances] = useState<Map<string, ShareBalance>>(new Map());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -788,8 +791,8 @@ export function Transactions() {
                 <td>${shareInfo}</td>
                 <td>${transaction.transaction_type}</td>
                 <td>${Number(transaction.no_of_shares).toLocaleString()}</td>
-                <td>${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td>${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td>${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                <td>${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                 <td>${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                 <td>${cdsAccount}</td>
                 <td>${brokerName}</td>
@@ -883,8 +886,8 @@ export function Transactions() {
         cds_acc_no: selectedTransaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
         order_type: selectedTransaction.order_type,
         no_of_shares: Number(selectedTransaction.no_of_shares).toLocaleString(),
-        gross_price_per_share: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        net_price_per_share: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        gross_price_per_share: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
+        net_price_per_share: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
         total_amount: Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
         broker_name: brokerName,
         brokerage_fee_type: brokerageFeeType?.name || 'N/A',
@@ -947,8 +950,8 @@ export function Transactions() {
       cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
       order_type: transaction.order_type,
       no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
-      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
+      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
       total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
       broker_name: brokerName,
       brokerage_fee_type: brokerageFeeType?.name || 'N/A',
@@ -1054,10 +1057,14 @@ export function Transactions() {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = entityName.includes(searchLower) || shareInfo.includes(searchLower);
 
+    const matchesDateFrom = !filterDateFrom || txn.transaction_date >= filterDateFrom;
+    const matchesDateTo = !filterDateTo || txn.transaction_date <= filterDateTo;
+    const matchesStatus = !filterStatus || txn.approval_status === filterStatus;
+
     if (activeTab === 'pending') {
-      return matchesSearch && txn.approval_status === 'PENDING_APPROVAL';
+      return matchesSearch && matchesDateFrom && matchesDateTo && matchesStatus && txn.approval_status === 'PENDING_APPROVAL';
     }
-    return matchesSearch;
+    return matchesSearch && matchesDateFrom && matchesDateTo && matchesStatus;
   });
 
   const key = `${formData.entity_id}-${formData.share_id}`;
@@ -1208,22 +1215,55 @@ export function Transactions() {
           </div>
         </div>
 
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <div className="p-4 border-b border-gray-200">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex-1 min-w-48 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search transactions..."
+                placeholder="Search by entity or share..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <button className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter className="w-5 h-5 text-gray-500" />
-              <span className="font-medium text-gray-700">Filter</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">From</label>
+              <input
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => setFilterDateFrom(e.target.value)}
+                className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">To</label>
+              <input
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => setFilterDateTo(e.target.value)}
+                className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="PENDING_APPROVAL">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+            {(filterDateFrom || filterDateTo || filterStatus) && (
+              <button
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus(''); }}
+                className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Clear
+              </button>
+            )}
           </div>
         </div>
 
@@ -1800,7 +1840,7 @@ export function Transactions() {
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Net Price Per Share</label>
                     <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                      LKR {calculateNetPricePerShare().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      LKR {calculateNetPricePerShare().toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                     </div>
                   </div>
                   <div>
@@ -1879,7 +1919,7 @@ export function Transactions() {
                 <div>
                   <p className="text-sm font-medium text-gray-500">Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
-                    LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
                 </div>
                 <div>
@@ -1902,7 +1942,7 @@ export function Transactions() {
                 <div>
                   <p className="text-sm font-medium text-gray-500">Net Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
-                    LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
                 </div>
                 <div>

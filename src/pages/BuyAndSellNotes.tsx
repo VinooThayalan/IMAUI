@@ -213,6 +213,10 @@ export function BuyAndSellNotes() {
   const [debugRawText, setDebugRawText] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterNoteType, setFilterNoteType] = useState('');
+  const [txnSearchTerm, setTxnSearchTerm] = useState('');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData>({
@@ -1165,10 +1169,22 @@ export function BuyAndSellNotes() {
     setDebugRawText('');
   }
 
-  const filteredNotes = notes.filter(note =>
-    note.note_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    note.dealer_name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredNotes = notes.filter(note => {
+    const txn = transactions.find(t => t.id === note.transaction_id);
+    const noteEntity = txn ? entities.find(e => e.id === txn.entity_id) : undefined;
+    const noteShare = txn ? shares.find(s => s.id === txn.share_id) : undefined;
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = !searchTerm ||
+      note.note_number?.toLowerCase().includes(searchLower) ||
+      note.dealer_name?.toLowerCase().includes(searchLower) ||
+      note.contract_no?.toLowerCase().includes(searchLower) ||
+      noteEntity?.name?.toLowerCase().includes(searchLower) ||
+      noteShare?.ticker?.toLowerCase().includes(searchLower);
+    const matchesDateFrom = !filterDateFrom || (note.trade_date || note.settlement_date) >= filterDateFrom;
+    const matchesDateTo = !filterDateTo || (note.trade_date || note.settlement_date) <= filterDateTo;
+    const matchesType = !filterNoteType || note.note_type === filterNoteType;
+    return matchesSearch && matchesDateFrom && matchesDateTo && matchesType;
+  });
 
   const availableEntityAccounts = formData.broker_id && formData.transaction_id
     ? (() => {
@@ -1215,16 +1231,53 @@ export function BuyAndSellNotes() {
         <p className="text-gray-600">Upload and process contract notes for approved buy/sell transactions</p>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6 p-6">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <input
-            type="text"
-            placeholder="Search by contract number or dealer name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6 p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex-1 min-w-48 relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input
+              type="text"
+              placeholder="Search by contract no, entity, ticker, dealer..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">From</label>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">To</label>
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <select
+            value={filterNoteType}
+            onChange={(e) => setFilterNoteType(e.target.value)}
+            className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Types</option>
+            <option value="Buy">Buy</option>
+            <option value="Sell">Sell</option>
+          </select>
+          {(filterDateFrom || filterDateTo || filterNoteType) && (
+            <button
+              onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterNoteType(''); }}
+              className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -1343,23 +1396,71 @@ export function BuyAndSellNotes() {
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
                   Transaction <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={formData.transaction_id}
-                  onChange={(e) => setFormData({ ...formData, transaction_id: e.target.value })}
-                  className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select approved transaction</option>
-                  {transactions.map((t) => {
-                    const share = shares.find(s => s.id === t.share_id);
-                    const entity = entities.find(e => e.id === t.entity_id);
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {t.transaction_type} — {share?.ticker || '?'} — {entity?.name || '?'} — {Number(t.no_of_shares).toLocaleString()} shares @ {Number(t.price_per_share).toFixed(2)}
-                      </option>
-                    );
-                  })}
-                </select>
+                {(() => {
+                  const selectedTxn = transactions.find(t => t.id === formData.transaction_id);
+                  const selectedShare = selectedTxn ? shares.find(s => s.id === selectedTxn.share_id) : undefined;
+                  const selectedEntity = selectedTxn ? entities.find(e => e.id === selectedTxn.entity_id) : undefined;
+                  const txnSearchLower = txnSearchTerm.toLowerCase();
+                  const filteredTxns = transactions.filter(t => {
+                    const sh = shares.find(s => s.id === t.share_id);
+                    const en = entities.find(e => e.id === t.entity_id);
+                    const label = `${t.transaction_type} ${sh?.ticker || ''} ${en?.name || ''} ${Number(t.no_of_shares).toLocaleString()} ${Number(t.price_per_share).toFixed(4)} ${t.transaction_date || ''}`.toLowerCase();
+                    return !txnSearchTerm || label.includes(txnSearchLower);
+                  });
+                  return (
+                    <div className="relative">
+                      {formData.transaction_id && selectedTxn ? (
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 border border-blue-400 rounded-lg bg-blue-50">
+                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${selectedTxn.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                            {selectedTxn.transaction_type}
+                          </span>
+                          <span className="text-xs font-mono font-bold text-gray-800">{selectedShare?.ticker || '?'}</span>
+                          <span className="text-xs text-gray-600">{selectedEntity?.name || '?'}</span>
+                          <span className="text-xs text-gray-500">{Number(selectedTxn.no_of_shares).toLocaleString()} @ {Number(selectedTxn.price_per_share).toFixed(4)}</span>
+                          <button type="button" onClick={() => { setFormData({ ...formData, transaction_id: '' }); setTxnSearchTerm(''); }} className="ml-auto text-gray-400 hover:text-gray-600 text-xs">✕</button>
+                        </div>
+                      ) : (
+                        <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                          <div className="flex items-center px-2.5 py-1.5 border-b border-gray-200 bg-gray-50">
+                            <Search className="w-3.5 h-3.5 text-gray-400 mr-2 flex-shrink-0" />
+                            <input
+                              type="text"
+                              value={txnSearchTerm}
+                              onChange={(e) => setTxnSearchTerm(e.target.value)}
+                              placeholder="Search by type, ticker, entity, price, date..."
+                              className="flex-1 text-sm bg-transparent focus:outline-none"
+                              autoFocus
+                            />
+                          </div>
+                          <div className="max-h-44 overflow-y-auto">
+                            {filteredTxns.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-gray-400 italic">No transactions match</div>
+                            ) : filteredTxns.map(t => {
+                              const sh = shares.find(s => s.id === t.share_id);
+                              const en = entities.find(e => e.id === t.entity_id);
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => { setFormData({ ...formData, transaction_id: t.id }); setTxnSearchTerm(''); }}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex items-center gap-2 border-b border-gray-100 last:border-0"
+                                >
+                                  <span className={`font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${t.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                    {t.transaction_type}
+                                  </span>
+                                  <span className="font-mono font-bold text-gray-800">{sh?.ticker || '?'}</span>
+                                  <span className="text-gray-600 truncate">{en?.name || '?'}</span>
+                                  <span className="text-gray-400 ml-auto flex-shrink-0">{Number(t.no_of_shares).toLocaleString()} @ {Number(t.price_per_share).toFixed(4)}</span>
+                                  {t.transaction_date && <span className="text-gray-400 flex-shrink-0">{new Date(t.transaction_date).toLocaleDateString()}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
