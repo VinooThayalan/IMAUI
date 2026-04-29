@@ -217,6 +217,7 @@ export function BuyAndSellNotes() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterNoteType, setFilterNoteType] = useState('');
   const [txnSearchTerm, setTxnSearchTerm] = useState('');
+  const [txnDropdownOpen, setTxnDropdownOpen] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData>({
@@ -1409,48 +1410,62 @@ export function BuyAndSellNotes() {
                   });
                   return (
                     <div className="relative">
-                      {formData.transaction_id && selectedTxn ? (
-                        <div className="flex items-center gap-2 px-2.5 py-1.5 border border-blue-400 rounded-lg bg-blue-50">
-                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${selectedTxn.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                            {selectedTxn.transaction_type}
+                      <button
+                        type="button"
+                        onClick={() => { setTxnDropdownOpen(!txnDropdownOpen); setTxnSearchTerm(''); }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 text-sm border rounded-lg transition-colors text-left ${txnDropdownOpen ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-300 hover:border-gray-400'} bg-white`}
+                      >
+                        {selectedTxn ? (
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${selectedTxn.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                              {selectedTxn.transaction_type}
+                            </span>
+                            <span className="font-mono font-bold text-gray-900 flex-shrink-0">{selectedShare?.ticker || '?'}</span>
+                            <span className="text-gray-600 truncate">{selectedEntity?.name || '?'}</span>
+                            <span className="text-gray-400 flex-shrink-0 text-xs">{Number(selectedTxn.no_of_shares).toLocaleString()} @ {Number(selectedTxn.price_per_share).toFixed(4)}</span>
                           </span>
-                          <span className="text-xs font-mono font-bold text-gray-800">{selectedShare?.ticker || '?'}</span>
-                          <span className="text-xs text-gray-600">{selectedEntity?.name || '?'}</span>
-                          <span className="text-xs text-gray-500">{Number(selectedTxn.no_of_shares).toLocaleString()} @ {Number(selectedTxn.price_per_share).toFixed(4)}</span>
-                          <button type="button" onClick={() => { setFormData({ ...formData, transaction_id: '' }); setTxnSearchTerm(''); }} className="ml-auto text-gray-400 hover:text-gray-600 text-xs">✕</button>
-                        </div>
-                      ) : (
-                        <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
-                          <div className="flex items-center px-2.5 py-1.5 border-b border-gray-200 bg-gray-50">
-                            <Search className="w-3.5 h-3.5 text-gray-400 mr-2 flex-shrink-0" />
+                        ) : (
+                          <span className="text-gray-400">Select approved transaction...</span>
+                        )}
+                        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 ml-2 transition-transform ${txnDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                      </button>
+
+                      {txnDropdownOpen && (
+                        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                          <div className="flex items-center gap-2 px-2.5 py-2 border-b border-gray-100">
+                            <Search className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                             <input
                               type="text"
+                              autoFocus
                               value={txnSearchTerm}
                               onChange={(e) => setTxnSearchTerm(e.target.value)}
-                              placeholder="Search by type, ticker, entity, price, date..."
-                              className="flex-1 text-sm bg-transparent focus:outline-none"
-                              autoFocus
+                              placeholder="Type to search..."
+                              className="flex-1 text-sm focus:outline-none"
                             />
+                            {txnSearchTerm && (
+                              <button type="button" onClick={() => setTxnSearchTerm('')} className="text-gray-400 hover:text-gray-600 text-xs flex-shrink-0">✕</button>
+                            )}
                           </div>
-                          <div className="max-h-44 overflow-y-auto">
+                          <div className="max-h-48 overflow-y-auto">
                             {filteredTxns.length === 0 ? (
-                              <div className="px-3 py-2 text-xs text-gray-400 italic">No transactions match</div>
+                              <div className="px-3 py-3 text-xs text-gray-400 italic text-center">No transactions match</div>
                             ) : filteredTxns.map(t => {
                               const sh = shares.find(s => s.id === t.share_id);
                               const en = entities.find(e => e.id === t.entity_id);
+                              const isSelected = t.id === formData.transaction_id;
                               return (
                                 <button
                                   key={t.id}
                                   type="button"
-                                  onClick={() => { setFormData({ ...formData, transaction_id: t.id }); setTxnSearchTerm(''); }}
-                                  className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex items-center gap-2 border-b border-gray-100 last:border-0"
+                                  onClick={() => { setFormData({ ...formData, transaction_id: t.id }); setTxnDropdownOpen(false); setTxnSearchTerm(''); }}
+                                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-gray-50 last:border-0 transition-colors ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                                 >
                                   <span className={`font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${t.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                     {t.transaction_type}
                                   </span>
-                                  <span className="font-mono font-bold text-gray-800">{sh?.ticker || '?'}</span>
-                                  <span className="text-gray-600 truncate">{en?.name || '?'}</span>
-                                  <span className="text-gray-400 ml-auto flex-shrink-0">{Number(t.no_of_shares).toLocaleString()} @ {Number(t.price_per_share).toFixed(4)}</span>
+                                  <span className="font-mono font-bold text-gray-800 flex-shrink-0">{sh?.ticker || '?'}</span>
+                                  <span className="text-gray-600 truncate flex-1">{en?.name || '?'}</span>
+                                  <span className="text-gray-400 flex-shrink-0">{Number(t.no_of_shares).toLocaleString()} @ {Number(t.price_per_share).toFixed(4)}</span>
                                   {t.transaction_date && <span className="text-gray-400 flex-shrink-0">{new Date(t.transaction_date).toLocaleDateString()}</span>}
                                 </button>
                               );
