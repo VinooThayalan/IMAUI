@@ -1475,14 +1475,12 @@ export function Transactions() {
                         <span className="text-xs text-gray-500">Custodian Acct: <span className="font-semibold text-gray-800">{selectedEntityBroker.custodian_account_number || 'N/A'}</span></span>
                         <span className="text-xs text-gray-500">Broker: <span className="font-semibold text-gray-800">{formData.selected_broker_name_id ? brokers.find(b => b.id === formData.selected_broker_name_id)?.broker_name || 'N/A' : '—'}</span></span>
                         {selectedEntityBroker.bank && <span className="text-xs text-gray-500">Bank: <span className="font-semibold text-gray-800">{selectedEntityBroker.bank.name}</span></span>}
-                        {selectedEntityBroker.bank && <span className="text-xs text-gray-500">Balance: <span className="font-semibold text-green-700">LKR {Number(selectedEntityBroker.bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></span>}
                         {selectedEntityBroker.bank_account_number && <span className="text-xs text-gray-500">Bank Acct: <span className="font-semibold text-gray-800">{selectedEntityBroker.bank_account_number}</span></span>}
                       </>
                     ) : (
                       <>
                         <span className="text-xs text-gray-500">Bank: <span className="font-semibold text-gray-800">{selectedEntityBroker.bank?.name || 'N/A'}</span></span>
                         <span className="text-xs text-gray-500">Bank Acct: <span className="font-semibold text-gray-800">{selectedEntityBroker.bank_account_number || 'N/A'}</span></span>
-                        <span className="text-xs text-gray-500">Balance: <span className="font-semibold text-green-700">LKR {selectedEntityBroker.bank?.balance ? Number(selectedEntityBroker.bank.balance).toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}</span></span>
                       </>
                     )}
                   </div>
