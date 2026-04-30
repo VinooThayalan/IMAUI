@@ -1307,7 +1307,7 @@ export function BuyAndSellNotes() {
                 return (
                 <tr key={note.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-bold text-blue-600">{note.contract_no || '-'}</div>
+                    <div className="text-sm font-bold text-blue-600">{note.contract_no || note.note_number || '-'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{noteEntity?.name || '-'}</div>

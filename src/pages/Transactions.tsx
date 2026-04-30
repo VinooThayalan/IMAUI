@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, ClipboardList, Trash2, CheckCircle } from 'lucide-react';
+import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -1113,13 +1113,6 @@ export function Transactions() {
               <span className="font-medium">Submit for Approval ({selectedTransactionIds.size})</span>
             </button>
           )}
-          <button
-            onClick={() => setShowBulkModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
-          >
-            <ClipboardList className="w-5 h-5" />
-            <span className="font-medium">Bulk Entry</span>
-          </button>
           <button
             onClick={() => setShowModal(true)}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"

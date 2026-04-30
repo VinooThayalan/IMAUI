@@ -109,15 +109,38 @@ export function BankTransactionHistory() {
   async function loadLedger(bankId: string) {
     setLedgerLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('cash_balance_ledger')
-        .select('id, date, type, description, code, amount, running_balance, on_hold_amount')
-        .eq('bank_id', bankId)
-        .order('date', { ascending: true });
+      const bank = banks.find(b => b.id === bankId);
 
-      if (error) throw error;
+      const [bankRes, entityRes] = await Promise.all([
+        supabase
+          .from('cash_balance_ledger')
+          .select('id, date, type, description, code, amount, running_balance')
+          .eq('bank_id', bankId)
+          .order('date', { ascending: true }),
+        bank
+          ? supabase
+              .from('cash_balance_ledger')
+              .select('id, date, type, description, code, amount, running_balance')
+              .eq('entity_id', bank.entity_id)
+              .is('bank_id', null)
+              .order('date', { ascending: true })
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      if (bankRes.error) throw bankRes.error;
+
+      const allEntries = [
+        ...(bankRes.data || []),
+        ...(entityRes.data || []),
+      ].sort((a, b) => {
+        if (!a.date && !b.date) return 0;
+        if (!a.date) return -1;
+        if (!b.date) return 1;
+        return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+      });
+
       setLedger(
-        (data || []).map((r: any) => ({
+        allEntries.map((r: any) => ({
           id: r.id,
           date: r.date,
           type: r.type,
@@ -125,7 +148,7 @@ export function BankTransactionHistory() {
           code: r.code,
           amount: Number(r.amount) || 0,
           running_balance: Number(r.running_balance) || 0,
-          on_hold_amount: r.on_hold_amount != null ? Number(r.on_hold_amount) : null,
+          on_hold_amount: null,
         }))
       );
     } catch (err) {
@@ -312,7 +335,6 @@ export function BankTransactionHistory() {
                                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
                                         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
                                         <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
-                                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">On Hold</th>
                                         <th className="pr-6 pl-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Running Balance</th>
                                       </tr>
                                     </thead>
@@ -342,11 +364,6 @@ export function BankTransactionHistory() {
                                                 {isAdd ? '+' : '-'}{fmt(entry.amount)}
                                               </span>
                                             </td>
-                                            <td className="px-3 py-2 text-right font-mono text-gray-500 text-xs">
-                                              {entry.on_hold_amount != null && entry.on_hold_amount !== 0
-                                                ? fmt(entry.on_hold_amount)
-                                                : <span className="text-gray-300">—</span>}
-                                            </td>
                                             <td className="pr-6 pl-3 py-2 text-right font-mono font-semibold">
                                               <span className={entry.running_balance >= 0 ? 'text-gray-900' : 'text-red-600'}>
                                                 {fmt(entry.running_balance)}
@@ -370,7 +387,6 @@ export function BankTransactionHistory() {
                                             {fmt(ledger.reduce((s, r) => s + (r.type === 'Addition' || r.type === 'addition' ? r.amount : -r.amount), 0))}
                                           </span>
                                         </td>
-                                        <td />
                                         <td className="pr-6 pl-3 py-2 text-right font-mono">
                                           <span className={bank.current_balance >= 0 ? 'text-green-700' : 'text-red-600'}>
                                             Rs. {fmt(bank.current_balance)}
