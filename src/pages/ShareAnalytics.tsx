@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, BarChart2, X, Search } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -179,10 +179,92 @@ function SummaryCard({ label, value, sub, color = 'text-gray-900' }: SummaryCard
   );
 }
 
+// ── Note detail types ────────────────────────────────────────────────────────
+
+interface NoteDetail {
+  id: string;
+  note_number: string;
+  contract_no: string | null;
+  note_type: string;
+  trade_date: string | null;
+  settlement_date: string | null;
+  no_of_shares: number | null;
+  price_avg: number | null;
+  gross_amount: number | null;
+  brokerage: number | null;
+  sec: number | null;
+  exchange: number | null;
+  cds: number | null;
+  gov_cess: number | null;
+  clearing_fees: number | null;
+  net_amount: number | null;
+  foreign_brokerage: number | null;
+  dealer_name: string | null;
+  remarks: string | null;
+  file_url: string | null;
+  broker_name: string | null;
+}
+
 // ── Breakdown modal ──────────────────────────────────────────────────────────
 
 function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => void }) {
   const last = group.rows[group.rows.length - 1];
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
+  const [noteLoading, setNoteLoading]       = useState<string | null>(null);
+
+  async function toggleNote(noteId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (expandedNoteId === noteId) {
+      setExpandedNoteId(null);
+      return;
+    }
+    setExpandedNoteId(noteId);
+    if (noteDetails.has(noteId)) return;
+
+    setNoteLoading(noteId);
+    try {
+      const { data } = await supabase
+        .from('buy_sell_notes')
+        .select(`
+          id, note_number, contract_no, note_type, trade_date, settlement_date,
+          no_of_shares, price_avg, gross_amount, brokerage, sec, exchange,
+          cds, gov_cess, clearing_fees, net_amount, foreign_brokerage,
+          dealer_name, remarks, file_url,
+          broker:brokers(broker_name)
+        `)
+        .eq('id', noteId)
+        .maybeSingle();
+
+      if (data) {
+        setNoteDetails(prev => new Map(prev).set(noteId, {
+          id: data.id,
+          note_number: data.note_number,
+          contract_no: data.contract_no,
+          note_type: data.note_type,
+          trade_date: data.trade_date,
+          settlement_date: data.settlement_date,
+          no_of_shares: data.no_of_shares != null ? Number(data.no_of_shares) : null,
+          price_avg: data.price_avg != null ? Number(data.price_avg) : null,
+          gross_amount: data.gross_amount != null ? Number(data.gross_amount) : null,
+          brokerage: data.brokerage != null ? Number(data.brokerage) : null,
+          sec: data.sec != null ? Number(data.sec) : null,
+          exchange: data.exchange != null ? Number(data.exchange) : null,
+          cds: data.cds != null ? Number(data.cds) : null,
+          gov_cess: data.gov_cess != null ? Number(data.gov_cess) : null,
+          clearing_fees: data.clearing_fees != null ? Number(data.clearing_fees) : null,
+          net_amount: data.net_amount != null ? Number(data.net_amount) : null,
+          foreign_brokerage: data.foreign_brokerage != null ? Number(data.foreign_brokerage) : null,
+          dealer_name: data.dealer_name,
+          remarks: data.remarks,
+          file_url: data.file_url,
+          broker_name: (data.broker as any)?.broker_name ?? null,
+        }));
+      }
+    } finally {
+      setNoteLoading(null);
+    }
+  }
 
   const badge = (type: string) => {
     if (type === 'Opening')
@@ -198,7 +280,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus'];
+  const COLS = ['Date','Status','Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -271,32 +353,160 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             </thead>
             <tbody>
               {group.rows.map((row, idx) => {
-                const isOp  = row.row_type === 'opening';
-                const isDiv = row.row_type === 'dividend';
-                const bg    = isOp ? 'bg-blue-50/70' : isDiv ? 'bg-yellow-50/60' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50';
+                const isOp    = row.row_type === 'opening';
+                const isDiv   = row.row_type === 'dividend';
+                const isNote  = row.row_type === 'buy' || row.row_type === 'sell';
+                const bg      = isOp ? 'bg-blue-50/70' : isDiv ? 'bg-yellow-50/60' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50';
+                const isExpanded = expandedNoteId === row.id;
+                const detail     = noteDetails.get(row.id);
+                const isLoading  = noteLoading === row.id;
+
+                const feeRow = (label: string, val: number | null) => val ? (
+                  <div key={label} className="flex justify-between py-1 border-b border-gray-100 last:border-0">
+                    <span className="text-xs text-gray-500">{label}</span>
+                    <span className="text-xs font-mono text-gray-800">Rs. {fmt(val)}</span>
+                  </div>
+                ) : null;
+
                 return (
-                  <tr key={row.id} className={`${bg} border-b border-gray-50 hover:bg-blue-50/30 transition-colors`}>
-                    <td className="px-3 py-2 text-gray-700">{fmtDate(row.trade_date)}</td>
-                    <td className="px-3 py-2">{badge(row.note_type)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-gray-700">{row.price_avg != null ? fmt(row.price_avg) : '—'}</td>
-                    <td className="px-3 py-2 text-right font-mono text-gray-700">{row.no_of_shares > 0 ? fmtN(row.no_of_shares) : '—'}</td>
-                    <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmtN(row.share_cum_bal)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{row.purchase_cost > 0 ? fmt(row.purchase_cost) : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-right font-mono">{row.sale_value > 0 ? fmt(row.sale_value) : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{fmt(row.av_cost)}</td>
-                    <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
-                    <td className="px-3 py-2 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
-                        {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono">
-                      {group.market_price > 0 ? <span className={clsSurplus(row.total_surplus)}>{fmt(row.total_surplus)}</span> : <span className="text-gray-300">—</span>}
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={row.id} className={`${bg} border-b border-gray-50 hover:bg-blue-50/30 transition-colors`}>
+                      <td className="px-3 py-2 text-gray-700">{fmtDate(row.trade_date)}</td>
+                      <td className="px-3 py-2">{badge(row.note_type)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-700">{row.price_avg != null ? fmt(row.price_avg) : '—'}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-700">{row.no_of_shares > 0 ? fmtN(row.no_of_shares) : '—'}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmtN(row.share_cum_bal)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{row.purchase_cost > 0 ? fmt(row.purchase_cost) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono">{row.sale_value > 0 ? fmt(row.sale_value) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{fmt(row.av_cost)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
+                      <td className="px-3 py-2 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
+                          {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {group.market_price > 0 ? <span className={clsSurplus(row.total_surplus)}>{fmt(row.total_surplus)}</span> : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {isNote ? (
+                          <button
+                            onClick={e => toggleNote(row.id, e)}
+                            disabled={isLoading}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+                              isExpanded ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                            }`}
+                          >
+                            {isLoading
+                              ? <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                              : <FileText className="w-3 h-3" />}
+                            {isExpanded
+                              ? <ChevronUp className="w-3 h-3" />
+                              : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                        ) : (
+                          <span className="text-gray-300 text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+
+                    {/* Inline note detail expansion */}
+                    {isExpanded && (
+                      <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
+                        <td colSpan={15} className="px-6 py-4">
+                          {!detail ? (
+                            <div className="flex items-center justify-center py-4">
+                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                              {/* Identity */}
+                              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 space-y-1.5">
+                                <div className="text-xs font-bold text-gray-400 uppercase mb-2">Note Info</div>
+                                <div className="flex justify-between">
+                                  <span className="text-xs text-gray-500">Contract / Note No.</span>
+                                  <span className="text-xs font-mono font-semibold text-gray-800">{detail.contract_no || detail.note_number}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-xs text-gray-500">Trade Date</span>
+                                  <span className="text-xs font-semibold text-gray-800">{fmtDate(detail.trade_date)}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-xs text-gray-500">Settlement Date</span>
+                                  <span className="text-xs font-semibold text-gray-800">{fmtDate(detail.settlement_date)}</span>
+                                </div>
+                                {detail.broker_name && (
+                                  <div className="flex justify-between">
+                                    <span className="text-xs text-gray-500">Broker</span>
+                                    <span className="text-xs font-semibold text-gray-800">{detail.broker_name}</span>
+                                  </div>
+                                )}
+                                {detail.dealer_name && (
+                                  <div className="flex justify-between">
+                                    <span className="text-xs text-gray-500">Dealer</span>
+                                    <span className="text-xs font-semibold text-gray-800">{detail.dealer_name}</span>
+                                  </div>
+                                )}
+                                {detail.file_url && (
+                                  <div className="flex items-center gap-1 pt-1 text-xs text-blue-600">
+                                    <FileText className="w-3 h-3 flex-shrink-0" />
+                                    <span className="truncate">{detail.file_url}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Volume & price */}
+                              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 space-y-1.5">
+                                <div className="text-xs font-bold text-gray-400 uppercase mb-2">Volume & Price</div>
+                                {feeRow('No. of Shares', detail.no_of_shares)}
+                                {feeRow('Avg Price', detail.price_avg)}
+                                {feeRow('Gross Amount', detail.gross_amount)}
+                                {feeRow('Net Amount', detail.net_amount)}
+                              </div>
+
+                              {/* Fee breakdown */}
+                              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 space-y-1.5">
+                                <div className="text-xs font-bold text-gray-400 uppercase mb-2">Fee Breakdown</div>
+                                {detail.brokerage || detail.sec || detail.exchange || detail.cds || detail.gov_cess || detail.clearing_fees || detail.foreign_brokerage ? (
+                                  <>
+                                    {feeRow('Brokerage', detail.brokerage)}
+                                    {feeRow('SEC', detail.sec)}
+                                    {feeRow('Exchange (CSE)', detail.exchange)}
+                                    {feeRow('CDS', detail.cds)}
+                                    {feeRow('Govt. Cess / STL', detail.gov_cess)}
+                                    {feeRow('Clearing Fees', detail.clearing_fees)}
+                                    {feeRow('Foreign Brokerage', detail.foreign_brokerage)}
+                                    {/* Total fees */}
+                                    <div className="flex justify-between pt-1.5 mt-1 border-t border-gray-200">
+                                      <span className="text-xs font-bold text-gray-600">Total Fees</span>
+                                      <span className="text-xs font-mono font-bold text-red-600">
+                                        Rs. {fmt(
+                                          (detail.brokerage ?? 0) + (detail.sec ?? 0) + (detail.exchange ?? 0) +
+                                          (detail.cds ?? 0) + (detail.gov_cess ?? 0) + (detail.clearing_fees ?? 0) +
+                                          (detail.foreign_brokerage ?? 0)
+                                        )}
+                                      </span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-gray-400 italic">No fee breakdown extracted</span>
+                                )}
+                                {detail.remarks && (
+                                  <div className="mt-2 pt-2 border-t border-gray-100">
+                                    <div className="text-xs font-bold text-amber-600 mb-0.5">Remarks</div>
+                                    <p className="text-xs text-gray-600">{detail.remarks}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>
@@ -318,6 +528,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono">
                   {group.market_price > 0 ? <span className={clsSurplus(last.total_surplus)}>{fmt(last.total_surplus)}</span> : '—'}
                 </td>
+                <td />
               </tr>
             </tfoot>
           </table>
