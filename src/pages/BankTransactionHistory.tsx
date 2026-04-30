@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Entity {
@@ -25,7 +25,33 @@ interface LedgerEntry {
   code: string | null;
   amount: number;
   running_balance: number;
-  on_hold_amount: number | null;
+  reference_id: string | null;
+}
+
+interface BuyAndSellNote {
+  id: string;
+  note_number: string;
+  contract_no: string | null;
+  note_type: string;
+  trade_date: string | null;
+  settlement_date: string | null;
+  no_of_shares: number | null;
+  price_avg: number | null;
+  gross_amount: number | null;
+  brokerage: number | null;
+  sec: number | null;
+  exchange: number | null;
+  cds: number | null;
+  gov_cess: number | null;
+  clearing_fees: number | null;
+  net_amount: number | null;
+  foreign_brokerage: number | null;
+  dealer_name: string | null;
+  remarks: string | null;
+  file_url: string | null;
+  broker_name: string | null;
+  ticker: string | null;
+  share_name: string | null;
 }
 
 const fmt = (v: number) =>
@@ -33,6 +59,133 @@ const fmt = (v: number) =>
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB') : '—';
+
+function NoteModal({ note, onClose }: { note: BuyAndSellNote; onClose: () => void }) {
+  const isBuy = note.note_type === 'Buy';
+
+  const feeRow = (label: string, val: number | null) => {
+    if (!val) return null;
+    return (
+      <div className="flex justify-between py-1.5 border-b border-gray-100 last:border-0">
+        <span className="text-sm text-gray-500">{label}</span>
+        <span className="text-sm font-mono text-gray-800">Rs. {fmt(val)}</span>
+      </div>
+    );
+  };
+
+  const hasFees = note.brokerage || note.sec || note.exchange || note.cds || note.gov_cess || note.clearing_fees || note.foreign_brokerage;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className={`rounded-t-2xl px-6 py-4 flex items-start justify-between ${isBuy ? 'bg-green-50 border-b border-green-100' : 'bg-red-50 border-b border-red-100'}`}>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${isBuy ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
+                {note.note_type}
+              </span>
+              {note.ticker && (
+                <span className="font-bold text-gray-900 text-lg font-mono">{note.ticker}</span>
+              )}
+            </div>
+            {note.share_name && <p className="text-sm text-gray-500 mt-0.5">{note.share_name}</p>}
+            <p className="text-xs text-gray-400 mt-1 font-mono">
+              {note.contract_no || note.note_number}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4">
+          {/* Key figures */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-gray-50 rounded-xl px-3 py-3 text-center">
+              <div className="text-xs text-gray-400 uppercase font-semibold">Shares</div>
+              <div className="text-lg font-bold text-gray-900 mt-0.5">
+                {note.no_of_shares != null ? Number(note.no_of_shares).toLocaleString() : '—'}
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-xl px-3 py-3 text-center">
+              <div className="text-xs text-gray-400 uppercase font-semibold">Avg Price</div>
+              <div className="text-lg font-bold text-gray-900 mt-0.5">
+                {note.price_avg != null ? fmt(Number(note.price_avg)) : '—'}
+              </div>
+            </div>
+            <div className={`rounded-xl px-3 py-3 text-center ${isBuy ? 'bg-green-50' : 'bg-red-50'}`}>
+              <div className="text-xs text-gray-400 uppercase font-semibold">Net Amount</div>
+              <div className={`text-lg font-bold mt-0.5 ${isBuy ? 'text-green-700' : 'text-red-600'}`}>
+                {note.net_amount != null ? `Rs. ${fmt(Number(note.net_amount))}` : '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* Dates & parties */}
+          <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-2">
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Trade Date</span>
+              <span className="text-sm font-semibold text-gray-800">{fmtDate(note.trade_date)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-sm text-gray-500">Settlement Date</span>
+              <span className="text-sm font-semibold text-gray-800">{fmtDate(note.settlement_date)}</span>
+            </div>
+            {note.broker_name && (
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-500">Broker</span>
+                <span className="text-sm font-semibold text-gray-800">{note.broker_name}</span>
+              </div>
+            )}
+            {note.dealer_name && (
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-500">Dealer</span>
+                <span className="text-sm font-semibold text-gray-800">{note.dealer_name}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Fee breakdown */}
+          {hasFees && (
+            <div>
+              <div className="text-xs font-semibold text-gray-400 uppercase mb-2">Fee Breakdown</div>
+              <div className="bg-gray-50 rounded-xl px-4 py-2">
+                {feeRow('Gross Amount', note.gross_amount)}
+                {feeRow('Brokerage', note.brokerage)}
+                {feeRow('SEC', note.sec)}
+                {feeRow('Exchange', note.exchange)}
+                {feeRow('CDS', note.cds)}
+                {feeRow('Govt. Cess / STL', note.gov_cess)}
+                {feeRow('Clearing Fees', note.clearing_fees)}
+                {feeRow('Foreign Brokerage', note.foreign_brokerage)}
+              </div>
+            </div>
+          )}
+
+          {/* Remarks */}
+          {note.remarks && (
+            <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
+              <div className="text-xs font-semibold text-amber-600 uppercase mb-1">Remarks</div>
+              <p className="text-sm text-gray-700">{note.remarks}</p>
+            </div>
+          )}
+
+          {/* File */}
+          {note.file_url && (
+            <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-xl px-4 py-3">
+              <FileText className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{note.file_url}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function BankTransactionHistory() {
   const [entities, setEntities]               = useState<Entity[]>([]);
@@ -44,6 +197,8 @@ export function BankTransactionHistory() {
   const [ledger, setLedger]                   = useState<LedgerEntry[]>([]);
   const [ledgerLoading, setLedgerLoading]     = useState(false);
   const [sortAsc, setSortAsc]                 = useState(true);
+  const [viewNote, setViewNote]               = useState<BuyAndSellNote | null>(null);
+  const [noteLoading, setNoteLoading]         = useState<string | null>(null);
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) =>
@@ -70,9 +225,8 @@ export function BankTransactionHistory() {
       const { data, error } = await query;
       if (error) throw error;
 
-      // Compute current balance = last running_balance for each bank
       const bankIds = (data || []).map((b: any) => b.id);
-      let balanceMap = new Map<string, number>();
+      const balanceMap = new Map<string, number>();
 
       if (bankIds.length > 0) {
         const { data: ledgerData } = await supabase
@@ -114,13 +268,13 @@ export function BankTransactionHistory() {
       const [bankRes, entityRes] = await Promise.all([
         supabase
           .from('cash_balance_ledger')
-          .select('id, date, type, description, code, amount, running_balance')
+          .select('id, date, type, description, code, amount, running_balance, reference_id')
           .eq('bank_id', bankId)
           .order('date', { ascending: true }),
         bank
           ? supabase
               .from('cash_balance_ledger')
-              .select('id, date, type, description, code, amount, running_balance')
+              .select('id, date, type, description, code, amount, running_balance, reference_id')
               .eq('entity_id', bank.entity_id)
               .is('bank_id', null)
               .order('date', { ascending: true })
@@ -148,13 +302,65 @@ export function BankTransactionHistory() {
           code: r.code,
           amount: Number(r.amount) || 0,
           running_balance: Number(r.running_balance) || 0,
-          on_hold_amount: null,
+          reference_id: r.reference_id || null,
         }))
       );
     } catch (err) {
       console.error(err);
     } finally {
       setLedgerLoading(false);
+    }
+  }
+
+  async function handleViewNote(referenceId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setNoteLoading(referenceId);
+    try {
+      const { data, error } = await supabase
+        .from('buy_sell_notes')
+        .select(`
+          id, note_number, contract_no, note_type, trade_date, settlement_date,
+          no_of_shares, price_avg, gross_amount, brokerage, sec, exchange,
+          cds, gov_cess, clearing_fees, net_amount, foreign_brokerage,
+          dealer_name, remarks, file_url,
+          broker:brokers(broker_name),
+          transaction:transactions(share:shares(ticker, share_name))
+        `)
+        .eq('id', referenceId)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return;
+
+      setViewNote({
+        id: data.id,
+        note_number: data.note_number,
+        contract_no: data.contract_no,
+        note_type: data.note_type,
+        trade_date: data.trade_date,
+        settlement_date: data.settlement_date,
+        no_of_shares: data.no_of_shares != null ? Number(data.no_of_shares) : null,
+        price_avg: data.price_avg != null ? Number(data.price_avg) : null,
+        gross_amount: data.gross_amount != null ? Number(data.gross_amount) : null,
+        brokerage: data.brokerage != null ? Number(data.brokerage) : null,
+        sec: data.sec != null ? Number(data.sec) : null,
+        exchange: data.exchange != null ? Number(data.exchange) : null,
+        cds: data.cds != null ? Number(data.cds) : null,
+        gov_cess: data.gov_cess != null ? Number(data.gov_cess) : null,
+        clearing_fees: data.clearing_fees != null ? Number(data.clearing_fees) : null,
+        net_amount: data.net_amount != null ? Number(data.net_amount) : null,
+        foreign_brokerage: data.foreign_brokerage != null ? Number(data.foreign_brokerage) : null,
+        dealer_name: data.dealer_name,
+        remarks: data.remarks,
+        file_url: data.file_url,
+        broker_name: (data.broker as any)?.broker_name ?? null,
+        ticker: (data.transaction as any)?.share?.ticker ?? null,
+        share_name: (data.transaction as any)?.share?.share_name ?? null,
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setNoteLoading(null);
     }
   }
 
@@ -180,11 +386,12 @@ export function BankTransactionHistory() {
 
   const totalBalance = filtered.reduce((s, b) => s + b.current_balance, 0);
   const activeCount  = filtered.filter(b => b.is_active).length;
-
   const sortedLedger = sortAsc ? ledger : [...ledger].reverse();
 
   return (
     <div className="p-6 space-y-5">
+      {viewNote && <NoteModal note={viewNote} onClose={() => setViewNote(null)} />}
+
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Bank Transaction History</h1>
         <p className="text-gray-500 mt-1">Running balance per entity–bank account. Click a row to view the ledger.</p>
@@ -250,7 +457,6 @@ export function BankTransactionHistory() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          {/* Header row */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -336,11 +542,13 @@ export function BankTransactionHistory() {
                                         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
                                         <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
                                         <th className="pr-6 pl-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Running Balance</th>
+                                        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Note</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {sortedLedger.map((entry, i) => {
                                         const isAdd = entry.type === 'Addition' || entry.type === 'addition';
+                                        const isLoadingThis = noteLoading === entry.reference_id;
                                         return (
                                           <tr
                                             key={entry.id}
@@ -369,11 +577,26 @@ export function BankTransactionHistory() {
                                                 {fmt(entry.running_balance)}
                                               </span>
                                             </td>
+                                            <td className="px-3 py-2 text-center">
+                                              {entry.reference_id ? (
+                                                <button
+                                                  onClick={e => handleViewNote(entry.reference_id!, e)}
+                                                  disabled={isLoadingThis}
+                                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                                                >
+                                                  {isLoadingThis
+                                                    ? <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                    : <FileText className="w-3 h-3" />}
+                                                  View
+                                                </button>
+                                              ) : (
+                                                <span className="text-gray-300 text-xs">—</span>
+                                              )}
+                                            </td>
                                           </tr>
                                         );
                                       })}
                                     </tbody>
-                                    {/* Ledger footer */}
                                     <tfoot className="bg-gray-100 border-t-2 border-gray-200 text-xs font-bold">
                                       <tr>
                                         <td colSpan={4} className="pl-12 pr-3 py-2 text-gray-500 uppercase">
@@ -392,6 +615,7 @@ export function BankTransactionHistory() {
                                             Rs. {fmt(bank.current_balance)}
                                           </span>
                                         </td>
+                                        <td />
                                       </tr>
                                     </tfoot>
                                   </table>
@@ -406,7 +630,6 @@ export function BankTransactionHistory() {
                 })}
               </tbody>
 
-              {/* Grand total footer */}
               <tfoot className="bg-gray-100 border-t-2 border-gray-200 text-xs font-bold">
                 <tr>
                   <td colSpan={2} className="px-4 py-3 text-gray-500 uppercase">
