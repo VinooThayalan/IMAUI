@@ -867,16 +867,20 @@ export function BuyAndSellNotes() {
       const avgPrice = totalShares > 0 ? totalGross / totalShares : 0;
       const contractNo = extractedRows[0]?.contract_no || extractedData.contract_no || '';
 
+      const selectedBroker = brokers.find(b => b.id === formData.broker_id);
+      const brokerName = selectedBroker?.broker_name || extractedData.broker_name || '';
+
       const { data: insertedNote, error: insertError } = await supabase
         .from('buy_sell_notes')
         .insert({
           transaction_id: formData.transaction_id,
           note_type: selectedTransaction.transaction_type,
-          note_number: contractNo,
+          note_number: contractNo || 'N/A',
+          broker: brokerName,
           broker_id: formData.broker_id || null,
           dealer_name: formData.dealer_name || null,
           transaction_date: extractedData.trade_date || null,
-          settlement_date: formData.settlement_date,
+          settlement_date: formData.settlement_date || extractedData.settlement || null,
           file_url: uploadedFile?.name || null,
           remarks: formData.remarks || null,
           trade_date: extractedData.trade_date || null,
@@ -930,9 +934,10 @@ export function BuyAndSellNotes() {
       await loadData();
       handleCloseModals();
       alert('Buy/sell note processed successfully! Cash balance has been updated.');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing note:', error);
-      alert('Failed to process note');
+      const msg = error?.message || error?.details || error?.hint || JSON.stringify(error);
+      alert(`Failed to process note:\n\n${msg}`);
     }
   }
 
