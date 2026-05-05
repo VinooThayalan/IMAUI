@@ -869,12 +869,14 @@ export function BuyAndSellNotes() {
 
       const selectedBroker = brokers.find(b => b.id === formData.broker_id);
       const brokerName = selectedBroker?.broker_name || extractedData.broker_name || '';
+      const rawType = selectedTransaction.transaction_type?.toUpperCase();
+      const noteType: 'Buy' | 'Sell' = rawType === 'SELL' ? 'Sell' : 'Buy';
 
       const { data: insertedNote, error: insertError } = await supabase
         .from('buy_sell_notes')
         .insert({
           transaction_id: formData.transaction_id,
-          note_type: selectedTransaction.transaction_type,
+          note_type: noteType,
           note_number: contractNo || 'N/A',
           broker: brokerName,
           broker_id: formData.broker_id || null,
@@ -902,7 +904,7 @@ export function BuyAndSellNotes() {
 
       if (insertError) throw insertError;
 
-      const transactionType = selectedTransaction.transaction_type === 'Buy' ? 'Deduction' : 'Addition';
+      const transactionType = noteType === 'Buy' ? 'Deduction' : 'Addition';
       const { data: existing } = await supabase
         .from('cash_balance_ledger')
         .select('running_balance')
@@ -1647,7 +1649,7 @@ export function BuyAndSellNotes() {
           { key: 'net_amount', label: 'Net Amount', pdfValue: fmtAmt(pdfNet) },
         ];
 
-        const isBuy = txn?.transaction_type === 'Buy';
+        const isBuy = txn?.transaction_type?.toUpperCase() === 'BUY';
 
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
