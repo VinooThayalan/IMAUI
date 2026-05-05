@@ -902,7 +902,7 @@ export function BuyAndSellNotes() {
       const { data: existing } = await supabase
         .from('cash_balance_ledger')
         .select('running_balance')
-        .eq('entity_id', entity.entity_id)
+        .eq('entity_id', entity.id)
         .order('timestamp', { ascending: false })
         .limit(1);
       const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
@@ -918,7 +918,7 @@ export function BuyAndSellNotes() {
           date: extractedData.trade_date || null,
           running_balance: newBalance,
           on_hold_amount: 0,
-          entity_id: entity.entity_id,
+          entity_id: entity.id,
           bank_id: null,
           reference_id: insertedNote?.id || null,
           created_by: 'System',
