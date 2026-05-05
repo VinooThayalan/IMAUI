@@ -1,6 +1,7 @@
 import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Transaction {
   id: string;
@@ -127,6 +128,7 @@ function emptyBulkRow(): BulkRow {
 }
 
 export function Transactions() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -1000,25 +1002,56 @@ export function Transactions() {
 
     try {
       setSubmitting(true);
+      const currentEmail = user?.email?.toLowerCase() || '';
+      let autoApprovedCount = 0;
+      let pendingCount = 0;
 
       for (const transactionId of selectedTransactionIds) {
-        const submittedAt = new Date();
-        const expiresAt = new Date(submittedAt.getTime() + hours * 60 * 60 * 1000);
+        const txn = transactions.find(t => t.id === transactionId);
+        if (!txn) continue;
+
+        // Check if current user is a designated approver for this entity
+        const { data: approverRows } = await supabase
+          .from('entity_approvers')
+          .select('id')
+          .eq('entity_id', txn.entity_id)
+          .eq('approver_email', currentEmail)
+          .maybeSingle();
+
+        const isApprover = !!approverRows;
+        const now = new Date();
+        const expiresAt = new Date(now.getTime() + hours * 60 * 60 * 1000);
+
+        const updatePayload: Record<string, unknown> = {
+          submitted_for_approval_at: now.toISOString(),
+          submitted_by: currentEmail,
+          approval_validity_hours: hours,
+          approval_expires_at: expiresAt.toISOString(),
+        };
+
+        if (isApprover) {
+          updatePayload.approval_status = 'AUTO_APPROVED';
+          updatePayload.approved_by = currentEmail;
+          updatePayload.approval_date = now.toISOString();
+          updatePayload.approval_notes = 'Auto-approved: submitted by designated approver';
+          autoApprovedCount++;
+        } else {
+          updatePayload.approval_status = 'PENDING_APPROVAL';
+          pendingCount++;
+        }
 
         const { error } = await supabase
           .from('transactions')
-          .update({
-            approval_status: 'PENDING_APPROVAL',
-            submitted_for_approval_at: submittedAt.toISOString(),
-            approval_validity_hours: hours,
-            approval_expires_at: expiresAt.toISOString()
-          })
+          .update(updatePayload)
           .eq('id', transactionId);
 
         if (error) throw error;
       }
 
-      alert(`${selectedTransactionIds.size} transaction(s) submitted for approval successfully`);
+      const parts: string[] = [];
+      if (pendingCount > 0) parts.push(`${pendingCount} submitted for approval`);
+      if (autoApprovedCount > 0) parts.push(`${autoApprovedCount} auto-approved`);
+      alert(parts.join(', ') + '.');
       setSelectedTransactionIds(new Set());
       loadData();
     } catch (error) {

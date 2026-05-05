@@ -59,6 +59,7 @@ interface Broker {
 const statusConfig = {
   PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
   APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
+  AUTO_APPROVED: { icon: CheckCircle, color: 'text-emerald-700', bg: 'bg-emerald-100', label: 'Auto Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
   EXPIRED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Expired' },
   ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' }
@@ -439,31 +440,38 @@ export function TransactionApprovals() {
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') && (
-                          <>
-                            <button
-                              onClick={() => openModal(transaction, 'APPROVE')}
-                              className="p-1 text-green-600 hover:bg-green-50 rounded"
-                              title="Approve"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openModal(transaction, 'REJECT')}
-                              className="p-1 text-red-600 hover:bg-red-50 rounded"
-                              title="Reject"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => openModal(transaction, 'HOLD')}
-                              className="p-1 text-yellow-600 hover:bg-yellow-50 rounded"
-                              title="Hold / Extend Time"
-                            >
-                              <Pause className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
+                        {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') && (() => {
+                          const isSelfSubmitted = transaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
+                          return isSelfSubmitted ? (
+                            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded font-medium">
+                              Self-submitted
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => openModal(transaction, 'APPROVE')}
+                                className="p-1 text-green-600 hover:bg-green-50 rounded"
+                                title="Approve"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => openModal(transaction, 'REJECT')}
+                                className="p-1 text-red-600 hover:bg-red-50 rounded"
+                                title="Reject"
+                              >
+                                <XCircle className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => openModal(transaction, 'HOLD')}
+                                className="p-1 text-yellow-600 hover:bg-yellow-50 rounded"
+                                title="Hold / Extend Time"
+                              >
+                                <Pause className="w-4 h-4" />
+                              </button>
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>
@@ -493,11 +501,20 @@ export function TransactionApprovals() {
             </div>
 
             <div className="p-6 space-y-6">
-              {checkAutoApproval(selectedTransaction) && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center space-x-2">
-                  <CheckCircle className="w-5 h-5 text-blue-600" />
-                  <p className="text-sm text-blue-800 font-medium">
-                    Auto approval - Entity owner initiated this request
+              {selectedTransaction.approval_status === 'AUTO_APPROVED' && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center space-x-2">
+                  <CheckCircle className="w-5 h-5 text-emerald-600" />
+                  <p className="text-sm text-emerald-800 font-medium">
+                    Auto-approved — submitted by the designated approver for this entity
+                  </p>
+                </div>
+              )}
+              {selectedTransaction.approval_status === 'PENDING_APPROVAL' &&
+                selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase() && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center space-x-2">
+                  <Clock className="w-5 h-5 text-amber-600" />
+                  <p className="text-sm text-amber-800 font-medium">
+                    You submitted this transaction — it must be approved by another user
                   </p>
                 </div>
               )}
@@ -787,15 +804,19 @@ export function TransactionApprovals() {
               >
                 {actionType === 'VIEW' ? 'Close' : 'Cancel'}
               </button>
-              {actionType === 'APPROVE' && !isEditing && (
-                <button
-                  onClick={handleApprove}
-                  disabled={submitting}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                >
-                  {submitting ? 'Approving...' : 'Approve Transaction'}
-                </button>
-              )}
+              {actionType === 'APPROVE' && !isEditing && (() => {
+                const isSelf = selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
+                return (
+                  <button
+                    onClick={handleApprove}
+                    disabled={submitting || isSelf}
+                    title={isSelf ? 'Cannot approve your own submission' : ''}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? 'Approving...' : 'Approve Transaction'}
+                  </button>
+                );
+              })()}
               {actionType === 'REJECT' && (
                 <button
                   onClick={handleReject}
