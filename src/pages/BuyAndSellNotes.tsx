@@ -1129,11 +1129,60 @@ export function BuyAndSellNotes() {
   }
 
   async function handleDeleteNote(id: string) {
-    if (!confirm('Delete this buy/sell note? This cannot be undone.')) return;
+    if (!confirm('Delete this buy/sell note? The corresponding cash balance entry will also be reversed.')) return;
     setDeletingId(id);
     try {
-      const { error } = await supabase.from('buy_sell_notes').delete().eq('id', id);
-      if (error) throw error;
+      // Find ledger entry linked to this note
+      const { data: ledgerEntry } = await supabase
+        .from('cash_balance_ledger')
+        .select('id, entity_id, amount, timestamp, type')
+        .eq('reference_id', id)
+        .maybeSingle();
+
+      // Delete the buy/sell note
+      const { error: deleteError } = await supabase.from('buy_sell_notes').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+
+      // Reverse the cash ledger entry and recompute running balances
+      if (ledgerEntry) {
+        const { error: ledgerDeleteError } = await supabase
+          .from('cash_balance_ledger')
+          .delete()
+          .eq('id', ledgerEntry.id);
+        if (ledgerDeleteError) throw ledgerDeleteError;
+
+        // Recompute running balances for all subsequent entries of the same entity
+        const { data: subsequentEntries } = await supabase
+          .from('cash_balance_ledger')
+          .select('id, type, amount, timestamp')
+          .eq('entity_id', ledgerEntry.entity_id)
+          .gte('timestamp', ledgerEntry.timestamp)
+          .order('timestamp', { ascending: true });
+
+        if (subsequentEntries && subsequentEntries.length > 0) {
+          // Get balance just before the deleted entry
+          const { data: priorEntry } = await supabase
+            .from('cash_balance_ledger')
+            .select('running_balance')
+            .eq('entity_id', ledgerEntry.entity_id)
+            .lt('timestamp', ledgerEntry.timestamp)
+            .order('timestamp', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          let runningBal = priorEntry ? Number(priorEntry.running_balance) : 0;
+          for (const entry of subsequentEntries) {
+            runningBal = entry.type === 'Addition'
+              ? runningBal + Number(entry.amount)
+              : runningBal - Number(entry.amount);
+            await supabase
+              .from('cash_balance_ledger')
+              .update({ running_balance: runningBal })
+              .eq('id', entry.id);
+          }
+        }
+      }
+
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
