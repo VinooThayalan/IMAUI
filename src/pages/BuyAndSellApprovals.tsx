@@ -1,30 +1,37 @@
-import { CheckCircle, XCircle, Search, FileText, Eye } from 'lucide-react';
+import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, Mail, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-
-interface BuyAndSellApproval {
-  id: string;
-  buy_sell_note_id: string;
-  status: 'Pending' | 'Approved' | 'Rejected';
-  submitted_by: string;
-  submitted_date: string;
-  reviewed_by?: string;
-  reviewed_date?: string;
-  remarks?: string;
-  priority: 'Low' | 'Medium' | 'High';
-  created_at: string;
-  updated_at: string;
-}
 
 interface BuyAndSellNote {
   id: string;
   transaction_id: string;
   note_type: 'Buy' | 'Sell';
   note_number: string;
-  broker: string;
-  settlement_date: string;
+  contract_no?: string;
+  broker?: string;
+  broker_id?: string;
+  dealer_name?: string;
+  trade_date?: string;
+  settlement_date?: string;
   file_url?: string;
   remarks?: string;
+  no_of_shares?: number;
+  price_avg?: number;
+  gross_amount?: number;
+  brokerage?: number;
+  sec?: number;
+  exchange?: number;
+  cds?: number;
+  gov_cess?: number;
+  clearing_fees?: number;
+  net_amount?: number;
+  foreign_brokerage?: number;
+  status?: string;
+  has_mismatch?: boolean;
+  approval_notes?: string;
+  approved_by?: string;
+  approved_at?: string;
+  created_at: string;
 }
 
 interface Transaction {
@@ -32,10 +39,10 @@ interface Transaction {
   entity_id: string;
   share_id: string;
   transaction_type: string;
-  transaction_date: string;
   no_of_shares: number;
   price_per_share: number;
   total_amount: number;
+  transaction_date?: string;
 }
 
 interface Entity {
@@ -50,134 +57,225 @@ interface Share {
   share_name: string;
 }
 
+interface Broker {
+  id: string;
+  broker_name: string;
+  contact_person_name?: string;
+  contact_person_email?: string;
+  contact_person_phone?: string;
+  contact_person_designation?: string;
+}
+
+interface EntityBroker {
+  id: string;
+  entity_id: string;
+  broker_id: string;
+  broker_account_number?: string;
+  custodian_account_number?: string;
+}
+
+type ModalAction = 'approve' | 'reject' | 'inform' | null;
+
 export function BuyAndSellApprovals() {
-  const [approvals, setApprovals] = useState<BuyAndSellApproval[]>([]);
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [brokers, setBrokers] = useState<Broker[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'Pending' | 'Approved' | 'Rejected'>('all');
-  const [showReviewModal, setShowReviewModal] = useState(false);
-  const [selectedApproval, setSelectedApproval] = useState<BuyAndSellApproval | null>(null);
-  const [reviewAction, setReviewAction] = useState<'Approved' | 'Rejected'>('Approved');
-  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'PENDING_APPROVAL' | 'PROCESSED' | 'REJECTED' | 'all'>('PENDING_APPROVAL');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const [modalAction, setModalAction] = useState<ModalAction>(null);
+  const [selectedNote, setSelectedNote] = useState<BuyAndSellNote | null>(null);
+  const [actionRemarks, setActionRemarks] = useState('');
+  const [informSubject, setInformSubject] = useState('');
+  const [informBody, setInformBody] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     try {
       setLoading(true);
-
-      const [approvalsRes, notesRes, transactionsRes, entitiesRes, sharesRes] = await Promise.all([
-        supabase.from('buy_sell_approvals').select('*').order('submitted_date', { ascending: false }),
+      const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
+        supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date'),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, ticker, share_name').order('share_name')
+        supabase.from('shares').select('id, ticker, share_name').order('share_name'),
+        supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation').eq('is_active', true),
+        supabase.from('entity_brokers').select('id, entity_id, broker_id, broker_account_number, custodian_account_number'),
       ]);
-
-      if (approvalsRes.error) throw approvalsRes.error;
       if (notesRes.error) throw notesRes.error;
-      if (transactionsRes.error) throw transactionsRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
-      if (sharesRes.error) throw sharesRes.error;
-
-      setApprovals(approvalsRes.data || []);
       setNotes(notesRes.data || []);
-      setTransactions(transactionsRes.data || []);
+      setTransactions(txnRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      alert('Failed to load data');
+      setBrokers(brokersRes.data || []);
+      setEntityBrokers(ebRes.data || []);
+    } catch (err) {
+      console.error('Error loading approvals data:', err);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleReview() {
-    if (!selectedApproval) return;
+  function getDetails(note: BuyAndSellNote) {
+    const txn = transactions.find(t => t.id === note.transaction_id);
+    const entity = txn ? entities.find(e => e.id === txn.entity_id) : null;
+    const share = txn ? shares.find(s => s.id === txn.share_id) : null;
+    const broker = note.broker_id ? brokers.find(b => b.id === note.broker_id) : null;
+    const eb = entity && note.broker_id
+      ? entityBrokers.find(e => e.entity_id === entity.id && e.broker_id === note.broker_id)
+      : null;
+    return { txn, entity, share, broker, eb };
+  }
 
+  function openModal(note: BuyAndSellNote, action: ModalAction) {
+    setSelectedNote(note);
+    setModalAction(action);
+    setActionRemarks('');
+    if (action === 'inform') {
+      const { txn, entity, share, broker, eb } = getDetails(note);
+      setInformSubject(`Contract Note Query — ${note.contract_no || note.note_number}`);
+      setInformBody(
+        `Dear ${broker?.contact_person_name || 'Sir/Madam'},\n\n` +
+        `We are reviewing the contract note for the following transaction and have identified discrepancies that require clarification:\n\n` +
+        `Contract No: ${note.contract_no || note.note_number || '-'}\n` +
+        `Type: ${note.note_type}\n` +
+        `Security: ${share?.share_name || '-'} (${share?.ticker || '-'})\n` +
+        `Entity: ${entity?.name || '-'}\n` +
+        (eb?.broker_account_number ? `Client A/C: ${eb.broker_account_number}\n` : '') +
+        `Trade Date: ${note.trade_date ? new Date(note.trade_date).toLocaleDateString() : '-'}\n` +
+        `Settlement Date: ${note.settlement_date ? new Date(note.settlement_date).toLocaleDateString() : '-'}\n` +
+        `Net Amount: Rs. ${note.net_amount?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '-'}\n\n` +
+        `Please review and revert at your earliest convenience.\n\nThank you.`
+      );
+    }
+  }
+
+  function closeModal() {
+    setModalAction(null);
+    setSelectedNote(null);
+    setActionRemarks('');
+    setInformSubject('');
+    setInformBody('');
+    setIsSubmitting(false);
+  }
+
+  async function handleApprove() {
+    if (!selectedNote) return;
+    setIsSubmitting(true);
     try {
-      const { error } = await supabase
-        .from('buy_sell_approvals')
-        .update({
-          status: reviewAction,
-          reviewed_by: 'Current User',
-          reviewed_date: new Date().toISOString(),
-          remarks: reviewRemarks || null
-        })
-        .eq('id', selectedApproval.id);
+      const { txn, entity } = getDetails(selectedNote);
+      if (!entity) throw new Error('Entity not found for this note');
 
-      if (error) throw error;
+      const { error: noteErr } = await supabase
+        .from('buy_sell_notes')
+        .update({
+          status: 'PROCESSED',
+          approved_by: 'Reviewer',
+          approved_at: new Date().toISOString(),
+          approval_notes: actionRemarks || null,
+        })
+        .eq('id', selectedNote.id);
+      if (noteErr) throw noteErr;
+
+      const totalNet = Number(selectedNote.net_amount) || 0;
+      const transactionType = selectedNote.note_type === 'Buy' ? 'Deduction' : 'Addition';
+
+      const { data: existing } = await supabase
+        .from('cash_balance_ledger')
+        .select('running_balance')
+        .eq('entity_id', entity.id)
+        .order('timestamp', { ascending: false })
+        .limit(1);
+      const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
+      const newBalance = transactionType === 'Addition' ? lastBalance + totalNet : lastBalance - totalNet;
+
+      const { error: ledgerErr } = await supabase
+        .from('cash_balance_ledger')
+        .insert({
+          type: transactionType,
+          description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
+          code: selectedNote.contract_no || selectedNote.note_number,
+          amount: totalNet,
+          date: selectedNote.trade_date || null,
+          running_balance: newBalance,
+          on_hold_amount: 0,
+          entity_id: entity.id,
+          bank_id: null,
+          reference_id: selectedNote.id,
+          created_by: 'Reviewer',
+          notes: actionRemarks || null,
+        });
+      if (ledgerErr) throw ledgerErr;
 
       await loadData();
-      handleCloseReviewModal();
-    } catch (error) {
-      console.error('Error reviewing approval:', error);
-      alert('Failed to review approval');
+      closeModal();
+    } catch (err: any) {
+      alert(`Failed to approve: ${err?.message || JSON.stringify(err)}`);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
-  function handleOpenReviewModal(approval: BuyAndSellApproval, action: 'Approved' | 'Rejected') {
-    setSelectedApproval(approval);
-    setReviewAction(action);
-    setReviewRemarks('');
-    setShowReviewModal(true);
+  async function handleReject() {
+    if (!selectedNote || !actionRemarks.trim()) return;
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('buy_sell_notes')
+        .update({
+          status: 'REJECTED',
+          approved_by: 'Reviewer',
+          approved_at: new Date().toISOString(),
+          approval_notes: actionRemarks,
+        })
+        .eq('id', selectedNote.id);
+      if (error) throw error;
+      await loadData();
+      closeModal();
+    } catch (err: any) {
+      alert(`Failed to reject: ${err?.message || JSON.stringify(err)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function handleCloseReviewModal() {
-    setShowReviewModal(false);
-    setSelectedApproval(null);
-    setReviewRemarks('');
+  function handleInformCopy() {
+    const broker = selectedNote ? getDetails(selectedNote).broker : null;
+    const email = broker?.contact_person_email || '';
+    navigator.clipboard.writeText(`To: ${email}\nSubject: ${informSubject}\n\n${informBody}`)
+      .then(() => alert('Email content copied to clipboard.'));
   }
 
-  function getNoteDetails(noteId: string) {
-    const note = notes.find(n => n.id === noteId);
-    if (!note) return null;
-
-    const transaction = transactions.find(t => t.id === note.transaction_id);
-    if (!transaction) return { note, transaction: null, entity: null, share: null };
-
-    const entity = entities.find(e => e.id === transaction.entity_id);
-    const share = shares.find(s => s.id === transaction.share_id);
-
-    return { note, transaction, entity, share };
-  }
-
-  const filteredApprovals = approvals.filter(approval => {
-    const noteDetails = getNoteDetails(approval.buy_sell_note_id);
-    if (!noteDetails) return false;
-
-    const matchesSearch =
-      noteDetails.note.note_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      noteDetails.note.broker.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      approval.submitted_by.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesStatus = filterStatus === 'all' || approval.status === filterStatus;
-    return matchesSearch && matchesStatus;
+  const displayNotes = notes.filter(n => {
+    const status = n.status || 'PROCESSED';
+    if (filterStatus !== 'all' && status !== filterStatus) return false;
+    if (!searchTerm) return true;
+    const { entity, share, broker } = getDetails(n);
+    const q = searchTerm.toLowerCase();
+    return (
+      (n.contract_no || n.note_number || '').toLowerCase().includes(q) ||
+      (entity?.name || '').toLowerCase().includes(q) ||
+      (share?.ticker || '').toLowerCase().includes(q) ||
+      (broker?.broker_name || n.broker || '').toLowerCase().includes(q)
+    );
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Pending': return 'bg-yellow-100 text-yellow-800';
-      case 'Approved': return 'bg-green-100 text-green-800';
-      case 'Rejected': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+  const counts = {
+    PENDING_APPROVAL: notes.filter(n => (n.status || 'PROCESSED') === 'PENDING_APPROVAL').length,
+    PROCESSED: notes.filter(n => (n.status || 'PROCESSED') === 'PROCESSED').length,
+    REJECTED: notes.filter(n => (n.status || 'PROCESSED') === 'REJECTED').length,
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'High': return 'bg-red-100 text-red-800';
-      case 'Medium': return 'bg-yellow-100 text-yellow-800';
-      case 'Low': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+  const statusCfg: Record<string, { label: string; cls: string }> = {
+    PROCESSED: { label: 'Processed', cls: 'bg-green-100 text-green-800' },
+    PENDING_APPROVAL: { label: 'Pending Approval', cls: 'bg-amber-100 text-amber-800' },
+    REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800' },
   };
 
   if (loading) {
@@ -190,226 +288,376 @@ export function BuyAndSellApprovals() {
 
   return (
     <div className="p-8">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-bold text-gray-900">Buy & Sell Approvals</h1>
-          <div className="flex items-center space-x-4">
-            <div className="text-sm">
-              <span className="font-semibold text-yellow-600">
-                {approvals.filter(a => a.status === 'Pending').length}
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 mb-1">Buy &amp; Sell Note Approvals</h1>
+        <p className="text-gray-500 text-sm">Review uploaded contract notes with mismatches — approve, reject, or contact the broker.</p>
+      </div>
+
+      {/* Status filter tabs + search */}
+      <div className="flex gap-3 mb-6 flex-wrap items-center">
+        {(['PENDING_APPROVAL', 'PROCESSED', 'REJECTED', 'all'] as const).map(s => {
+          const labels: Record<string, string> = { PENDING_APPROVAL: 'Pending', PROCESSED: 'Processed', REJECTED: 'Rejected', all: 'All' };
+          const count = s === 'all' ? notes.length : counts[s] ?? 0;
+          const active = filterStatus === s;
+          const activeClasses: Record<string, string> = {
+            PENDING_APPROVAL: 'bg-amber-500 text-white border-amber-500',
+            PROCESSED: 'bg-green-600 text-white border-green-600',
+            REJECTED: 'bg-red-600 text-white border-red-600',
+            all: 'bg-gray-800 text-white border-gray-800',
+          };
+          return (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors flex items-center gap-2 ${active ? activeClasses[s] : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+            >
+              {labels[s]}
+              <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-white bg-opacity-25' : 'bg-gray-100 text-gray-600'}`}>
+                {count}
               </span>
-              <span className="text-gray-600 ml-1">Pending</span>
-            </div>
-          </div>
-        </div>
-        <p className="text-gray-600">Review and approve uploaded buy/sell contract notes</p>
-      </div>
-
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6 p-6">
-        <div className="flex items-center space-x-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Search by note number, broker, or submitter..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value as any)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All Statuses</option>
-            <option value="Pending">Pending</option>
-            <option value="Approved">Approved</option>
-            <option value="Rejected">Rejected</option>
-          </select>
+            </button>
+          );
+        })}
+        <div className="flex-1 flex justify-end">
+          <input
+            type="text"
+            placeholder="Search notes..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+          />
         </div>
       </div>
 
+      {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Note Details</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Transaction</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Priority</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Submitted By</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Document</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                <th className="w-8 px-4 py-3"></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Security</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Broker</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Net Amount</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredApprovals.map((approval) => {
-                const details = getNoteDetails(approval.buy_sell_note_id);
-                if (!details) return null;
+              {displayNotes.map(note => {
+                const { entity, share, broker, eb } = getDetails(note);
+                const status = note.status || 'PROCESSED';
+                const scfg = statusCfg[status] || statusCfg['PROCESSED'];
+                const isExpanded = expandedId === note.id;
+                const isPending = status === 'PENDING_APPROVAL';
 
                 return (
-                  <tr key={approval.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div>
-                        <div className="text-sm font-bold text-blue-600">{details.note.note_number}</div>
-                        <div className="text-xs text-gray-500">{details.note.broker}</div>
-                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold mt-1 ${
-                          details.note.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                        }`}>
-                          {details.note.note_type}
+                  <>
+                  <tr
+                    key={note.id}
+                    className={`hover:bg-gray-50 cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50' : ''}`}
+                    onClick={() => setExpandedId(isExpanded ? null : note.id)}
+                  >
+                    <td className="px-4 py-3 text-gray-400">
+                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="text-sm font-bold text-blue-600">{note.contract_no || note.note_number || '-'}</div>
+                      {note.has_mismatch && (
+                        <span className="inline-flex items-center gap-0.5 text-xs text-orange-600 font-medium mt-0.5">
+                          <AlertTriangle className="w-3 h-3" /> Mismatch
                         </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {details.transaction ? (
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{details.share?.share_name || 'N/A'}</div>
-                          <div className="text-xs text-gray-500">{details.entity?.name || 'N/A'}</div>
-                          <div className="text-xs text-gray-500">
-                            {details.transaction.no_of_shares} shares @ Rs. {details.transaction.price_per_share.toLocaleString()}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-500">N/A</div>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${getPriorityColor(approval.priority)}`}>
-                        {approval.priority}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{entity?.name || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="text-sm font-semibold text-gray-900">{share?.share_name || '-'}</div>
+                      <div className="text-xs text-gray-500 font-mono">{share?.ticker || ''}</div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${note.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {note.note_type}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{approval.submitted_by}</div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(approval.submitted_date).toLocaleDateString()}
-                        </div>
-                      </div>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{broker?.broker_name || note.broker || '-'}</div>
+                      {note.dealer_name && <div className="text-xs text-gray-500">{note.dealer_name}</div>}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(approval.status)}`}>
-                        {approval.status}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                      {note.trade_date ? new Date(note.trade_date).toLocaleDateString() : '-'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-gray-900 tabular-nums">
+                      {note.net_amount != null ? `Rs. ${Number(note.net_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scfg.cls}`}>
+                        {isPending && <AlertTriangle className="w-3 h-3" />}
+                        {status === 'PROCESSED' && <CheckCircle className="w-3 h-3" />}
+                        {status === 'REJECTED' && <XCircle className="w-3 h-3" />}
+                        {scfg.label}
                       </span>
-                      {approval.reviewed_by && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          by {approval.reviewed_by}
-                        </div>
-                      )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {details.note.file_url ? (
-                        <a
-                          href={details.note.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 flex items-center space-x-1"
-                        >
-                          <Eye className="w-4 h-4" />
-                          <span className="text-sm">View</span>
-                        </a>
-                      ) : (
-                        <span className="text-sm text-gray-400">No file</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {approval.status === 'Pending' ? (
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={() => handleOpenReviewModal(approval, 'Approved')}
-                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                            title="Approve"
-                          >
-                            <CheckCircle className="w-4 h-4" />
+                    <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {isPending ? (
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => openModal(note, 'approve')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                            <CheckCircle className="w-3.5 h-3.5" /> Approve
                           </button>
-                          <button
-                            onClick={() => handleOpenReviewModal(approval, 'Rejected')}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Reject"
-                          >
-                            <XCircle className="w-4 h-4" />
+                          <button onClick={() => openModal(note, 'reject')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
+                            <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
+                          <button onClick={() => openModal(note, 'inform')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                            <Mail className="w-3.5 h-3.5" /> Broker
+                          </button>
+                          {note.file_url && (
+                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
+                              <Eye className="w-3.5 h-3.5" />
+                            </a>
+                          )}
                         </div>
                       ) : (
-                        <div className="text-sm text-gray-500">
-                          {approval.remarks && (
-                            <div className="max-w-xs truncate" title={approval.remarks}>
-                              {approval.remarks}
-                            </div>
+                        <div className="flex items-center gap-1.5">
+                          {note.file_url && (
+                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
+                              <Eye className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          {note.approval_notes && (
+                            <span className="text-xs text-gray-500 max-w-[160px] truncate" title={note.approval_notes}>{note.approval_notes}</span>
                           )}
                         </div>
                       )}
                     </td>
                   </tr>
+
+                  {isExpanded && (
+                    <tr key={`${note.id}-detail`} className="bg-blue-50 border-b border-blue-100">
+                      <td colSpan={10} className="px-6 py-4">
+                        {/* Broker + Transaction + Account info */}
+                        <div className="grid grid-cols-3 gap-4 mb-4">
+                          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Broker</p>
+                            <p className="text-sm font-bold text-gray-900">{broker?.broker_name || note.broker || '-'}</p>
+                            {broker?.contact_person_name && <p className="text-xs text-gray-500 mt-0.5">{broker.contact_person_name}{broker.contact_person_designation ? ` · ${broker.contact_person_designation}` : ''}</p>}
+                            {broker?.contact_person_email && <p className="text-xs text-blue-600 mt-0.5">{broker.contact_person_email}</p>}
+                            {broker?.contact_person_phone && <p className="text-xs text-gray-500 mt-0.5">{broker.contact_person_phone}</p>}
+                          </div>
+                          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Transaction</p>
+                            <p className="text-sm font-bold text-gray-900">{share?.share_name || '-'} <span className="font-mono text-gray-500 text-xs">({share?.ticker || '-'})</span></p>
+                            <p className="text-xs text-gray-600 mt-0.5">{entity?.name || '-'}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{note.no_of_shares?.toLocaleString() || '-'} shares @ Rs.&nbsp;{note.price_avg?.toFixed(4) || '-'}</p>
+                          </div>
+                          <div className="bg-white rounded-lg border border-emerald-200 px-4 py-3">
+                            <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-1">Client Account</p>
+                            <p className="text-sm font-bold text-gray-900 font-mono">{eb?.broker_account_number || '-'}</p>
+                            {eb?.custodian_account_number && <p className="text-xs text-gray-500 mt-0.5">CDS: <span className="font-mono">{eb.custodian_account_number}</span></p>}
+                            <div className="mt-2 pt-2 border-t border-gray-100">
+                              <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
+                              <p className="text-sm font-bold text-gray-900">
+                                {note.settlement_date ? new Date(note.settlement_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Fee breakdown */}
+                        <div className="grid grid-cols-4 gap-3">
+                          {[
+                            { label: 'Gross Amount', value: note.gross_amount },
+                            { label: 'Brokerage', value: note.brokerage },
+                            { label: 'SEC', value: note.sec },
+                            { label: 'CSE / Exchange', value: note.exchange },
+                            { label: 'CDS Fees', value: note.cds },
+                            { label: 'Gov. Levy (STL)', value: note.gov_cess },
+                            { label: 'Clearing Fees', value: note.clearing_fees },
+                            { label: 'Net Amount', value: note.net_amount },
+                          ].map(({ label, value }) => (
+                            <div key={label} className="bg-white rounded-lg border border-gray-200 px-3 py-2">
+                              <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                              <p className={`text-sm font-semibold tabular-nums ${label === 'Net Amount' ? 'text-gray-900' : 'text-gray-700'}`}>
+                                {value != null ? `Rs. ${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {(note.remarks || note.approval_notes) && (
+                          <div className="mt-3 flex gap-6 text-xs text-gray-500">
+                            {note.remarks && <p><span className="font-semibold">Remarks:</span> {note.remarks}</p>}
+                            {note.approval_notes && <p><span className="font-semibold">Review Notes:</span> {note.approval_notes}</p>}
+                          </div>
+                        )}
+                        {note.approved_by && (
+                          <p className="mt-1 text-xs text-gray-400">
+                            Reviewed by {note.approved_by}{note.approved_at ? ` on ${new Date(note.approved_at).toLocaleDateString()}` : ''}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 );
               })}
             </tbody>
           </table>
-          {filteredApprovals.length === 0 && (
-            <div className="text-center py-12">
-              <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-500">No approvals found</p>
+
+          {displayNotes.length === 0 && (
+            <div className="text-center py-16">
+              <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500 font-medium">
+                {filterStatus === 'PENDING_APPROVAL' ? 'No notes pending approval' : 'No notes found'}
+              </p>
             </div>
           )}
         </div>
       </div>
 
-      {showReviewModal && selectedApproval && (
+      {/* Approve Modal */}
+      {modalAction === 'approve' && selectedNote && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full">
-            <div className="bg-white border-b border-gray-200 px-6 py-4 rounded-t-xl">
-              <h2 className="text-xl font-bold text-gray-900">
-                {reviewAction} Approval
-              </h2>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 p-4 rounded-lg">
-                <div className="text-sm text-gray-600 mb-1">Note Number</div>
-                <div className="font-semibold text-gray-900">
-                  {getNoteDetails(selectedApproval.buy_sell_note_id)?.note.note_number}
-                </div>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
+              <div className="w-9 h-9 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <CheckCircle className="w-5 h-5 text-green-600" />
               </div>
-
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Remarks {reviewAction === 'Rejected' && <span className="text-red-500">*</span>}
-                </label>
+                <h2 className="text-lg font-bold text-gray-900">Approve Note</h2>
+                <p className="text-xs text-gray-500">{selectedNote.contract_no || selectedNote.note_number}</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+                <p className="font-semibold mb-1">Cash balance will be updated</p>
+                <p>Approving will create a {selectedNote.note_type === 'Buy' ? 'deduction' : 'addition'} of <span className="font-bold">Rs. {Number(selectedNote.net_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span> in the cash ledger.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Approval Notes <span className="font-normal text-gray-400">(optional)</span></label>
                 <textarea
-                  value={reviewRemarks}
-                  onChange={(e) => setReviewRemarks(e.target.value)}
-                  rows={4}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder={`Add ${reviewAction === 'Rejected' ? 'rejection reason' : 'comments'}...`}
-                  required={reviewAction === 'Rejected'}
+                  value={actionRemarks}
+                  onChange={e => setActionRemarks(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="Add any notes about this approval..."
                 />
               </div>
-
-              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
                 <button
-                  type="button"
-                  onClick={handleCloseReviewModal}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  onClick={handleApprove}
+                  disabled={isSubmitting}
+                  className="px-5 py-2 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleReview}
-                  disabled={reviewAction === 'Rejected' && !reviewRemarks.trim()}
-                  className={`px-4 py-2 text-white rounded-lg transition-colors ${
-                    reviewAction === 'Approved'
-                      ? 'bg-green-600 hover:bg-green-700'
-                      : 'bg-red-600 hover:bg-red-700 disabled:bg-red-300'
-                  }`}
-                >
-                  Confirm {reviewAction}
+                  <CheckCircle className="w-4 h-4" />
+                  {isSubmitting ? 'Processing...' : 'Approve & Process'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Reject Modal */}
+      {modalAction === 'reject' && selectedNote && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
+              <div className="w-9 h-9 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <XCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Reject Note</h2>
+                <p className="text-xs text-gray-500">{selectedNote.contract_no || selectedNote.note_number}</p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800">
+                Rejecting this note will mark it as rejected. The transaction will become available again for re-upload.
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Rejection Reason <span className="text-red-500">*</span></label>
+                <textarea
+                  value={actionRemarks}
+                  onChange={e => setActionRemarks(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  placeholder="Describe why this note is being rejected..."
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+                <button
+                  onClick={handleReject}
+                  disabled={isSubmitting || !actionRemarks.trim()}
+                  className="px-5 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <XCircle className="w-4 h-4" />
+                  {isSubmitting ? 'Rejecting...' : 'Confirm Reject'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inform Broker Modal */}
+      {modalAction === 'inform' && selectedNote && (() => {
+        const { broker } = getDetails(selectedNote);
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full">
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
+                <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Mail className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Inform Broker</h2>
+                  <p className="text-xs text-gray-500">{selectedNote.contract_no || selectedNote.note_number}</p>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+                {broker?.contact_person_email ? (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm">
+                    <Mail className="w-4 h-4 text-blue-500 flex-shrink-0" />
+                    <span className="text-blue-700 font-medium">{broker.contact_person_email}</span>
+                    {broker.contact_person_name && <span className="text-blue-500">— {broker.contact_person_name}</span>}
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700">
+                    No email address on file for this broker. Copy and send manually.
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Subject</label>
+                  <input type="text" value={informSubject} onChange={e => setInformSubject(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Message</label>
+                  <textarea value={informBody} onChange={e => setInformBody(e.target.value)} rows={10} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+                </div>
+                <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                  <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+                  <button onClick={handleInformCopy} className="px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+                    <Mail className="w-4 h-4" /> Copy to Clipboard
+                  </button>
+                  {broker?.contact_person_email && (
+                    <a
+                      href={`mailto:${broker.contact_person_email}?subject=${encodeURIComponent(informSubject)}&body=${encodeURIComponent(informBody)}`}
+                      className="px-5 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors flex items-center gap-2"
+                    >
+                      <Mail className="w-4 h-4" /> Open Email Client
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

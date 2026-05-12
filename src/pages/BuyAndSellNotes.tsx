@@ -107,8 +107,9 @@ interface EntityBroker {
   id: string;
   entity_id: string;
   broker_id: string;
-  account_number: string;
-  cds_account?: string;
+  broker_account_number?: string;
+  custodian_account_number?: string;
+  broker_name_id?: string;
 }
 
 interface ExtractedData {
@@ -208,6 +209,7 @@ export function BuyAndSellNotes() {
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
@@ -277,10 +279,17 @@ export function BuyAndSellNotes() {
       if (brokersRes.error) throw brokersRes.error;
 
       const allNotes = notesRes.data || [];
-      // Exclude transactions that already have a linked buy/sell note
-      const linkedTxnIds = new Set(allNotes.map((n: any) => n.transaction_id).filter(Boolean));
+      const allTxns = transactionsRes.data || [];
+      // Exclude transactions that already have an active (non-rejected) linked note from the dropdown
+      const linkedTxnIds = new Set(
+        allNotes
+          .filter((n: any) => n.status !== 'REJECTED')
+          .map((n: any) => n.transaction_id)
+          .filter(Boolean)
+      );
       setNotes(allNotes);
-      setTransactions((transactionsRes.data || []).filter((t: any) => !linkedTxnIds.has(t.id)));
+      setAllTransactions(allTxns);
+      setTransactions(allTxns.filter((t: any) => !linkedTxnIds.has(t.id)));
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
@@ -1039,7 +1048,7 @@ export function BuyAndSellNotes() {
           .insert({
             transaction_id: insertedTxn!.id,
             note_type: row.note_type,
-            note_number: `MAN-${Date.now()}`,
+            note_number: `MAN-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(Date.now()).slice(-5)}`,
             broker: row.broker_cds_account || 'Manual Entry',
             settlement_date: row.settlement_date,
             transaction_date: row.settlement_date,
@@ -1391,12 +1400,7 @@ export function BuyAndSellNotes() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredNotes.map((note) => {
-                const txn = transactions.find(t => t.id === note.transaction_id) ||
-                  // also search all notes' transactions even if already linked (for display)
-                  null;
-                // Re-derive entity/share from all loaded data using note's stored broker name fallback
-                const allTxns = [...transactions];
-                const matchedTxn = allTxns.find(t => t.id === note.transaction_id);
+                const matchedTxn = allTransactions.find(t => t.id === note.transaction_id);
                 const noteEntity = matchedTxn ? entities.find(e => e.id === matchedTxn.entity_id) : undefined;
                 const noteShare = matchedTxn ? shares.find(s => s.id === matchedTxn.share_id) : undefined;
                 const noteBroker = note.broker_id ? brokers.find(b => b.id === note.broker_id) : null;
@@ -1510,7 +1514,7 @@ export function BuyAndSellNotes() {
                           <p className="text-sm font-bold text-gray-900 font-mono">
                             {(() => {
                               const eb = noteEntity && note.broker_id
-                                ? entityBrokers.find(e => e.entity_id === noteEntity.entity_id && e.broker_id === note.broker_id)
+                                ? entityBrokers.find(e => e.entity_id === noteEntity.id && e.broker_id === note.broker_id)
                                 : null;
                               return eb?.broker_account_number || eb?.custodian_account_number || '-';
                             })()}
@@ -1641,7 +1645,19 @@ export function BuyAndSellNotes() {
                                 <button
                                   key={t.id}
                                   type="button"
-                                  onClick={() => { setFormData({ ...formData, transaction_id: t.id }); setTxnDropdownOpen(false); setTxnSearchTerm(''); }}
+                                  onClick={() => {
+                                    const entity = entities.find(e => e.id === t.entity_id);
+                                    const matchingEb = entity
+                                      ? entityBrokers.find(eb => eb.entity_id === entity.id && eb.broker_id)
+                                      : null;
+                                    setFormData({
+                                      ...formData,
+                                      transaction_id: t.id,
+                                      broker_id: matchingEb?.broker_id || formData.broker_id,
+                                    });
+                                    setTxnDropdownOpen(false);
+                                    setTxnSearchTerm('');
+                                  }}
                                   className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 border-b border-gray-50 last:border-0 transition-colors ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
                                 >
                                   <span className={`font-semibold px-1.5 py-0.5 rounded flex-shrink-0 ${t.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -1661,6 +1677,38 @@ export function BuyAndSellNotes() {
                   );
                 })()}
               </div>
+
+              {(() => {
+                const selTxn = transactions.find(t => t.id === formData.transaction_id);
+                if (!selTxn) return null;
+                const selEntity = entities.find(e => e.id === selTxn.entity_id);
+                const selShare = shares.find(s => s.id === selTxn.share_id);
+                const selBroker = formData.broker_id ? brokers.find(b => b.id === formData.broker_id) : null;
+                const selEb = selEntity && formData.broker_id
+                  ? entityBrokers.find(eb => eb.entity_id === selEntity.id && eb.broker_id === formData.broker_id)
+                  : null;
+                return (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Transaction</p>
+                      <p className="font-bold text-gray-900">{selShare?.share_name || selShare?.ticker || '-'} <span className="font-mono text-gray-500">({selShare?.ticker || '-'})</span></p>
+                      <p className="text-gray-600 mt-0.5">{selEntity?.name || '-'}</p>
+                      <p className="text-gray-500 mt-0.5">
+                        {selTxn.transaction_type} · {Number(selTxn.no_of_shares).toLocaleString()} shares @ Rs.&nbsp;{Number(selTxn.price_per_share).toFixed(4)}
+                      </p>
+                      <p className="text-gray-400 mt-0.5">Date: {selTxn.transaction_date ? new Date(selTxn.transaction_date).toLocaleDateString() : '-'}</p>
+                    </div>
+                    {selBroker && (
+                      <div>
+                        <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Broker</p>
+                        <p className="font-bold text-gray-900">{selBroker.broker_name}</p>
+                        {selEb?.broker_account_number && <p className="text-gray-500 mt-0.5">A/C: <span className="font-mono">{selEb.broker_account_number}</span></p>}
+                        {selEb?.custodian_account_number && <p className="text-gray-500 mt-0.5">CDS: <span className="font-mono">{selEb.custodian_account_number}</span></p>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1827,7 +1875,7 @@ export function BuyAndSellNotes() {
                   const txnForAc = transactions.find(t => t.id === formData.transaction_id);
                   const entityForAc = txnForAc ? entities.find(e => e.id === txnForAc.entity_id) : null;
                   const matchedEb = entityForAc
-                    ? entityBrokers.find(eb => eb.entity_id === entityForAc.entity_id && eb.broker_id === formData.broker_id)
+                    ? entityBrokers.find(eb => eb.entity_id === entityForAc.id && eb.broker_id === formData.broker_id)
                     : null;
                   const clientAc = matchedEb?.broker_account_number || matchedEb?.custodian_account_number || extractedData.account_no || null;
                   if (!selectedBroker && !clientAc && !settlementDate) return null;
