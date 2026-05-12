@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Search, Filter, CreditCard as Edit2, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -24,7 +24,7 @@ interface Entity {
 interface Share {
   id: string;
   ticker: string;
-  name: string;
+  share_name: string;
 }
 
 const statusColors = {
@@ -62,7 +62,7 @@ export function ScripEntry() {
       const [entriesRes, entitiesRes, sharesRes] = await Promise.all([
         supabase.from('scrip_entries').select('*').order('entry_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('ticker')
+        supabase.from('shares').select('id, ticker, share_name').order('ticker')
       ]);
 
       if (entriesRes.error) throw entriesRes.error;

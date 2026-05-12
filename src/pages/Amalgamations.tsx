@@ -23,7 +23,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  name: string;
+  share_name: string;
   ticker: string;
 }
 
@@ -63,7 +63,7 @@ export function Amalgamations() {
           .eq('transaction_type', 'Amalgamation')
           .order('amalgamation_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name')
+        supabase.from('shares').select('id, share_name, ticker').order('share_name')
       ]);
 
       if (amalgamationsRes.error) throw amalgamationsRes.error;
@@ -87,7 +87,7 @@ export function Amalgamations() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.ticker} - ${share.name}` : 'Unknown';
+    return share ? `${share.ticker} - ${share.share_name}` : 'Unknown';
   }
 
   function resetForm() {
@@ -233,7 +233,7 @@ export function Amalgamations() {
                   <option value="">Select Share</option>
                   {shares.map(share => (
                     <option key={share.id} value={share.id}>
-                      {share.ticker} - {share.name}
+                      {share.ticker} - {share.share_name}
                     </option>
                   ))}
                 </select>

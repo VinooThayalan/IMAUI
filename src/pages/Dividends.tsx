@@ -30,7 +30,7 @@ interface Entity {
 interface Share {
   id: string;
   ticker: string;
-  name: string;
+  share_name: string;
 }
 
 export function Dividends() {
@@ -65,7 +65,7 @@ export function Dividends() {
       const [dividendsRes, entitiesRes, sharesRes] = await Promise.all([
         supabase.from('dividends').select('*').order('payment_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('ticker')
+        supabase.from('shares').select('id, ticker, share_name').order('ticker')
       ]);
 
       if (dividendsRes.error) throw dividendsRes.error;
@@ -331,7 +331,7 @@ export function Dividends() {
                       <option value="">Select a ticker</option>
                       {shares.map((share) => (
                         <option key={share.id} value={share.id}>
-                          {share.ticker} - {share.name}
+                          {share.ticker} - {share.share_name}
                         </option>
                       ))}
                     </select>

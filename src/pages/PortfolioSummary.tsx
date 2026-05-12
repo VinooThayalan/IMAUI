@@ -56,7 +56,7 @@ export function PortfolioSummary() {
           .select('share_id, entity_id, dividend_per_share, total_dividend_amount, ex_dividend_date')
           .lte('ex_dividend_date', asOfDate),
         supabase.from('entities').select('id, name, entity_id'),
-        supabase.from('shares').select('id, ticker, name, sector_types(name)')
+        supabase.from('shares').select('id, ticker, share_name, sector_types(name)')
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -81,7 +81,7 @@ export function PortfolioSummary() {
       sharesRes.data?.forEach(s => {
         shareMap.set(s.id, {
           ticker: s.ticker,
-          name: s.name,
+          name: s.share_name,
           sector: s.sector_types?.name || 'N/A'
         });
       });

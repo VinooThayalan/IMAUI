@@ -12,7 +12,7 @@ interface Entity {
 interface Share {
   id: string;
   ticker: string;
-  name: string | null;
+  share_name: string | null;
 }
 
 interface OpeningBalance {
@@ -24,7 +24,7 @@ interface OpeningBalance {
   average_purchase_cost: number;
   notes: string | null;
   entities?: { name: string; entity_id: string } | null;
-  shares?: { ticker: string; name: string | null } | null;
+  shares?: { ticker: string; share_name: string | null } | null;
 }
 
 interface FormState {
@@ -74,10 +74,10 @@ export function OpeningBalances() {
       setLoading(true);
       const [entitiesRes, sharesRes, balancesRes] = await Promise.all([
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name, is_active').order('ticker'),
+        supabase.from('shares').select('id, ticker, share_name, is_active').order('ticker'),
         supabase
           .from('entity_share_opening_balances')
-          .select('*, entities(name, entity_id), shares(ticker, name)')
+          .select('*, entities(name, entity_id), shares(ticker, share_name)')
           .order('effective_date', { ascending: false }),
       ]);
 
@@ -196,7 +196,7 @@ export function OpeningBalances() {
     if (!q) return balances;
     return balances.filter((b) => {
       const e = b.entities?.name?.toLowerCase() || '';
-      const s = (b.shares?.ticker || '').toLowerCase() + ' ' + (b.shares?.name || '').toLowerCase();
+      const s = (b.shares?.ticker || '').toLowerCase() + ' ' + (b.shares?.share_name || '').toLowerCase();
       return e.includes(q) || s.includes(q);
     });
   }, [balances, search]);
@@ -288,7 +288,7 @@ export function OpeningBalances() {
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap">
                         <div className="text-sm font-bold text-blue-600">{b.shares?.ticker}</div>
-                        <div className="text-xs text-gray-500">{b.shares?.name}</div>
+                        <div className="text-xs text-gray-500">{b.shares?.share_name}</div>
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap text-right text-sm font-semibold text-gray-900">
                         {Number(b.opening_shares).toLocaleString()}
@@ -371,7 +371,7 @@ export function OpeningBalances() {
                     <option value="">Select share</option>
                     {shares.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.ticker} {s.name ? `- ${s.name}` : ''}
+                        {s.ticker} {s.share_name ? `- ${s.share_name}` : ''}
                       </option>
                     ))}
                   </select>

@@ -47,7 +47,7 @@ interface Entity {
 interface Share {
   id: string;
   ticker: string;
-  name: string;
+  share_name: string;
 }
 
 export function BuyAndSellApprovals() {
@@ -77,7 +77,7 @@ export function BuyAndSellApprovals() {
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('name')
+        supabase.from('shares').select('id, ticker, share_name').order('share_name')
       ]);
 
       if (approvalsRes.error) throw approvalsRes.error;
@@ -265,7 +265,7 @@ export function BuyAndSellApprovals() {
                     <td className="px-6 py-4">
                       {details.transaction ? (
                         <div>
-                          <div className="text-sm font-medium text-gray-900">{details.share?.name || 'N/A'}</div>
+                          <div className="text-sm font-medium text-gray-900">{details.share?.share_name || 'N/A'}</div>
                           <div className="text-xs text-gray-500">{details.entity?.name || 'N/A'}</div>
                           <div className="text-xs text-gray-500">
                             {details.transaction.no_of_shares} shares @ Rs. {details.transaction.price_per_share.toLocaleString()}

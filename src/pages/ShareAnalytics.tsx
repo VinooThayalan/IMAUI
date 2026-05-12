@@ -559,7 +559,7 @@ export function ShareAnalytics() {
     try {
       const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
-        supabase.from('shares').select('id, ticker, name'),
+        supabase.from('shares').select('id, ticker, share_name'),
         supabase.from('transactions').select('id, entity_id, share_id, cds_account_id'),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
@@ -567,7 +567,7 @@ export function ShareAnalytics() {
       ]);
 
       const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
-      const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.name || '—' }]));
+      const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
 
       // Build txn map; also capture CDS account per entity+share (first non-null wins)
       const txnMap    = new Map<string, { entity_id: string; share_id: string }>();

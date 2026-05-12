@@ -24,7 +24,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  name: string;
+  share_name: string;
   ticker: string;
 }
 
@@ -96,7 +96,7 @@ export function IpoTransactions() {
           .eq('transaction_type', 'IPO')
           .order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name'),
+        supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('entity_brokers').select('*'),
         supabase.from('brokers').select('id, broker_name').order('broker_name'),
         supabase.from('banks').select('id, name, account_number, balance').order('name')
@@ -137,7 +137,7 @@ export function IpoTransactions() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.ticker} - ${share.name}` : 'Unknown';
+    return share ? `${share.ticker} - ${share.share_name}` : 'Unknown';
   }
 
   const filteredEntityBrokers = entityBrokers.filter(
@@ -402,7 +402,7 @@ export function IpoTransactions() {
                   <option value="">Select Share</option>
                   {shares.map(share => (
                     <option key={share.id} value={share.id}>
-                      {share.ticker} - {share.name}
+                      {share.ticker} - {share.share_name}
                     </option>
                   ))}
                 </select>

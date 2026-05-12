@@ -47,7 +47,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  name: string;
+  share_name: string;
   ticker: string;
 }
 
@@ -227,7 +227,7 @@ export function Transactions() {
       const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, name, current_balance').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name'),
+        supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').eq('is_active', true).order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
@@ -444,7 +444,7 @@ export function Transactions() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.ticker} - ${share.name}` : 'Unknown';
+    return share ? `${share.ticker} - ${share.share_name}` : 'Unknown';
   }
 
   function resetForm() {
@@ -475,6 +475,17 @@ export function Transactions() {
     if (!formData.entity_id || !formData.share_id || !formData.no_of_shares || !formData.price_per_share) {
       alert('Please fill in all required fields');
       return;
+    }
+
+    if (formData.transaction_type === 'SELL') {
+      const balKey = `${formData.entity_id}-${formData.share_id}`;
+      const bal = shareBalances.get(balKey);
+      const available = bal?.total_shares ?? 0;
+      const requested = parseFloat(formData.no_of_shares) || 0;
+      if (requested > available) {
+        alert(`Insufficient shares: you hold ${available.toLocaleString()} share${available !== 1 ? 's' : ''} but are trying to sell ${requested.toLocaleString()}.`);
+        return;
+      }
     }
 
     try {
@@ -1655,7 +1666,7 @@ export function Transactions() {
                     >
                       <option value="">Select Share</option>
                       {shares.map(share => (
-                        <option key={share.id} value={share.id}>{share.ticker} - {share.name}</option>
+                        <option key={share.id} value={share.id}>{share.ticker} - {share.share_name}</option>
                       ))}
                     </select>
                   </div>
@@ -1683,6 +1694,12 @@ export function Transactions() {
                     />
                     {currentBalance && (
                       <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.total_shares.toLocaleString()}</span></p>
+                    )}
+                    {formData.transaction_type === 'SELL' && currentBalance && formData.no_of_shares &&
+                      parseFloat(formData.no_of_shares) > currentBalance.total_shares && (
+                      <p className="text-xs text-red-600 mt-0.5 font-semibold">
+                        Exceeds available shares ({currentBalance.total_shares.toLocaleString()})
+                      </p>
                     )}
                   </div>
                   <div>
@@ -2467,7 +2484,7 @@ export function Transactions() {
                               className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                             >
                               <option value="">Select share...</option>
-                              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} — {s.name}</option>)}
+                              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>)}
                             </select>
                           </td>
 

@@ -134,7 +134,7 @@ export function Reports() {
           shares (
             id,
             ticker,
-            name
+            share_name
           )
         `);
 
@@ -178,7 +178,7 @@ export function Reports() {
         if (!shareMap.has(shareId)) {
           shareMap.set(shareId, {
             ticker: tx.shares.ticker,
-            name: tx.shares.name,
+            name: tx.shares.share_name,
             total_shares: 0,
             total_cost: 0,
             transactions: []
@@ -251,7 +251,7 @@ export function Reports() {
           shares (
             id,
             ticker,
-            name,
+            share_name,
             sector
           )
         `)
@@ -342,7 +342,7 @@ export function Reports() {
           entity.shares.set(shareId, {
             sector: tx.shares.sector || 'N/A',
             ticker: tx.shares.ticker,
-            name: tx.shares.name,
+            name: tx.shares.share_name,
             total_shares: 0,
             total_cost: 0,
             first_tx_date: tx.transaction_date
@@ -450,7 +450,7 @@ export function Reports() {
           shares (
             id,
             ticker,
-            name
+            share_name
           )
         `)
         .order('transaction_date', { ascending: true });
@@ -546,7 +546,7 @@ export function Reports() {
         detailedTransactions.push({
           entity_name: tx.entities.name,
           share_ticker: tx.shares.ticker,
-          share_name: tx.shares.name,
+          share_name: tx.shares.share_name,
           date: tx.transaction_date,
           status: tx.transaction_type,
           unit_price: price,

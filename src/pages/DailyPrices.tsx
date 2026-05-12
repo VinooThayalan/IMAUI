@@ -6,13 +6,13 @@ import { useAuth } from '../contexts/AuthContext';
 interface Share {
   id: string;
   ticker: string;
-  name: string | null;
+  share_name: string | null;
 }
 
 interface PriceRow {
   share_id: string;
   ticker: string;
-  name: string | null;
+  share_name: string | null;
   previousPrice: number | null;
   existingId: string | null;
   newPrice: string;
@@ -37,7 +37,7 @@ export function DailyPrices() {
 
       const { data: sharesData, error: sharesError } = await supabase
         .from('shares')
-        .select('id, ticker, name, is_active')
+        .select('id, ticker, share_name, is_active')
         .order('ticker');
       if (sharesError) throw sharesError;
 
@@ -73,7 +73,7 @@ export function DailyPrices() {
         return {
           share_id: s.id,
           ticker: s.ticker,
-          name: s.name,
+          share_name: s.share_name,
           previousPrice: previousByShare.get(s.id) ?? null,
           existingId: existing?.id ?? null,
           newPrice: existing ? String(existing.price) : '',
@@ -143,7 +143,7 @@ export function DailyPrices() {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(
-      (r) => r.ticker.toLowerCase().includes(q) || (r.name || '').toLowerCase().includes(q)
+      (r) => r.ticker.toLowerCase().includes(q) || (r.share_name || '').toLowerCase().includes(q)
     );
   }, [rows, search]);
 
@@ -259,7 +259,7 @@ export function DailyPrices() {
                         <span className="text-sm font-bold text-blue-600">{row.ticker}</span>
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap">
-                        <span className="text-sm text-gray-900">{row.name || '-'}</span>
+                        <span className="text-sm text-gray-900">{row.share_name || '-'}</span>
                       </td>
                       <td className="px-6 py-3 whitespace-nowrap text-right">
                         <span className="text-sm text-gray-700">

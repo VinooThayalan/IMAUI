@@ -89,7 +89,7 @@ interface Entity {
 interface Share {
   id: string;
   ticker: string;
-  name: string;
+  share_name: string;
 }
 
 interface Broker {
@@ -258,7 +258,7 @@ export function BuyAndSellNotes() {
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').eq('approval_status', 'APPROVED').order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
-        supabase.from('shares').select('id, ticker, name').order('name'),
+        supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         supabase.from('brokers').select('id, broker_id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('entity_brokers').select('*'),
         supabase.from('brokerage_fee_types').select('id, name, fee_breakdown_items')
@@ -2088,7 +2088,7 @@ export function BuyAndSellNotes() {
                               className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                             >
                               <option value="">Select share...</option>
-                              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} — {s.name}</option>)}
+                              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>)}
                             </select>
                           </td>
 

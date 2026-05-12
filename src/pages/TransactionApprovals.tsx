@@ -47,7 +47,7 @@ interface Entity {
 
 interface Share {
   id: string;
-  name: string;
+  share_name: string;
   ticker: string;
 }
 
@@ -120,7 +120,7 @@ export function TransactionApprovals() {
           .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD'])
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
         supabase.from('entities').select('id, name').order('name'),
-        supabase.from('shares').select('id, name, ticker').order('name'),
+        supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('brokers').select('id, broker_name').order('broker_name')
       ]);
 
@@ -181,7 +181,7 @@ export function TransactionApprovals() {
 
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
-    return share ? `${share.ticker} - ${share.name}` : shareId;
+    return share ? `${share.ticker} - ${share.share_name}` : shareId;
   }
 
   function getBrokerName(brokerId: string | null) {
@@ -689,7 +689,7 @@ export function TransactionApprovals() {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         {shares.map(share => (
-                          <option key={share.id} value={share.id}>{share.ticker} - {share.name}</option>
+                          <option key={share.id} value={share.id}>{share.ticker} - {share.share_name}</option>
                         ))}
                       </select>
                     </div>
