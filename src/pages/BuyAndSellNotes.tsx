@@ -256,7 +256,7 @@ export function BuyAndSellNotes() {
 
       const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, entityBrokersRes, feeTypesRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('transactions').select('*').eq('approval_status', 'APPROVED').order('transaction_date', { ascending: false }),
+        supabase.from('transactions').select('*').in('approval_status', ['APPROVED', 'AUTO_APPROVED']).order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         supabase.from('brokers').select('id, broker_id, broker_name').eq('is_active', true).order('broker_name'),
@@ -270,8 +270,11 @@ export function BuyAndSellNotes() {
       if (sharesRes.error) throw sharesRes.error;
       if (brokersRes.error) throw brokersRes.error;
 
-      setNotes(notesRes.data || []);
-      setTransactions(transactionsRes.data || []);
+      const allNotes = notesRes.data || [];
+      // Exclude transactions that already have a linked buy/sell note
+      const linkedTxnIds = new Set(allNotes.map((n: any) => n.transaction_id).filter(Boolean));
+      setNotes(allNotes);
+      setTransactions((transactionsRes.data || []).filter((t: any) => !linkedTxnIds.has(t.id)));
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
@@ -1481,7 +1484,7 @@ export function BuyAndSellNotes() {
                             <span className="text-gray-400 flex-shrink-0 text-xs">{Number(selectedTxn.no_of_shares).toLocaleString()} @ {Number(selectedTxn.price_per_share).toFixed(4)}</span>
                           </span>
                         ) : (
-                          <span className="text-gray-400">Select approved transaction...</span>
+                          <span className="text-gray-400">Select pending transaction...</span>
                         )}
                         <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 ml-2 transition-transform ${txnDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                       </button>
