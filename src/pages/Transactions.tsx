@@ -160,6 +160,7 @@ export function Transactions() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
   const [feeBreakdownItems, setFeeBreakdownItems] = useState<FeeBreakdownItem[]>([]);
+  const [sharesInputFocused, setSharesInputFocused] = useState(false);
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -1665,11 +1666,20 @@ export function Transactions() {
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">No. of Shares <span className="text-red-600">*</span></label>
                     <input
-                      type="number" step="1" min="1"
-                      value={formData.no_of_shares}
+                      type={sharesInputFocused ? 'number' : 'text'}
+                      step="1" min="1"
+                      value={
+                        sharesInputFocused
+                          ? formData.no_of_shares
+                          : formData.no_of_shares
+                            ? Number(formData.no_of_shares).toLocaleString()
+                            : ''
+                      }
+                      onFocus={() => setSharesInputFocused(true)}
+                      onBlur={() => setSharesInputFocused(false)}
                       onChange={(e) => setFormData({ ...formData, no_of_shares: e.target.value })}
                       className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="e.g., 100" required
+                      placeholder="e.g., 1,000" required
                     />
                     {currentBalance && (
                       <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.total_shares.toLocaleString()}</span></p>
