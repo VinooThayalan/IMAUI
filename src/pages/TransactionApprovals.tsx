@@ -45,6 +45,7 @@ interface Transaction {
 interface Entity {
   id: string;
   name: string;
+  contact_email_company_individual: string | null;
 }
 
 interface Share {
@@ -57,6 +58,7 @@ interface Broker {
   id: string;
   broker_name: string;
   contact_person_email: string | null;
+  contact_person_name: string | null;
 }
 
 interface Bank {
@@ -136,6 +138,7 @@ export function TransactionApprovals() {
   const [emailAddress, setEmailAddress] = useState('');
   const [ccAddresses, setCcAddresses] = useState<string[]>([]);
   const [ccInput, setCcInput] = useState('');
+  const [emailNote, setEmailNote] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
@@ -157,9 +160,9 @@ export function TransactionApprovals() {
           .select('*')
           .in('approval_status', ALL_STATUSES)
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
-        supabase.from('entities').select('id, name').order('name'),
+        supabase.from('entities').select('id, name, contact_email_company_individual').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
-        supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
+        supabase.from('brokers').select('id, broker_name, contact_person_email, contact_person_name').order('broker_name'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
         supabase.from('entity_brokers').select('*'),
       ]);
@@ -411,7 +414,7 @@ export function TransactionApprovals() {
             },
             body: JSON.stringify({
               to: broker.contact_person_email,
-              transaction: buildEmailData(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`),
+              transaction: buildEmailData(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
         }
@@ -458,7 +461,7 @@ export function TransactionApprovals() {
             },
             body: JSON.stringify({
               to: broker.contact_person_email,
-              transaction: buildEmailData(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.`),
+              transaction: buildEmailData(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
         }
@@ -475,13 +478,13 @@ export function TransactionApprovals() {
     }
   }
 
-  function buildEmailData(transaction: Transaction, overrideNotes?: string) {
+  function buildEmailData(transaction: Transaction, note?: string) {
     const entity = entities.find(e => e.id === transaction.entity_id);
     const share = shares.find(s => s.id === transaction.share_id);
-    const broker = brokers.find(b => b.id === transaction.broker_id);
-    const bank = banks.find(b => b.id === transaction.bank_id);
+    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
     const entityBroker = entityBrokers.find(
-      eb => eb.entity_id === transaction.entity_id && eb.broker_id === (transaction.broker_id || '')
+      eb => eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
     );
     return {
       entity: entity?.name || 'N/A',
@@ -502,7 +505,7 @@ export function TransactionApprovals() {
       brokerage_fee: Number(transaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
       bank_name: bank?.name || 'N/A',
       bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
-      ...(overrideNotes ? { notes: overrideNotes } : {}),
+      ...(note ? { note } : {}),
     };
   }
 
@@ -526,7 +529,7 @@ export function TransactionApprovals() {
         body: JSON.stringify({
           to: emailAddress.trim(),
           cc: ccAddresses.filter(e => e.trim()),
-          transaction: buildEmailData(selectedTransaction),
+          transaction: buildEmailData(selectedTransaction, emailNote.trim() || undefined),
         }),
       });
       if (!response.ok) throw new Error('Failed to send email');
@@ -534,6 +537,7 @@ export function TransactionApprovals() {
       setShowEmailModal(false);
       setEmailAddress('');
       setCcAddresses([]);
+      setEmailNote('');
     } catch (error) {
       console.error('Error sending email:', error);
       alert('Failed to send email');
@@ -544,13 +548,16 @@ export function TransactionApprovals() {
 
   function openEmailModal(transaction: Transaction) {
     setSelectedTransaction(transaction);
-    setEmailAddress('');
-    setCcAddresses([]);
+    setEmailNote('');
     setCcInput('');
-    const broker = brokers.find(b => b.id === transaction.broker_id);
-    if (broker?.contact_person_email) {
-      setEmailAddress(broker.contact_person_email);
-    }
+    // Pre-fill To with broker's contact email
+    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    setEmailAddress(broker?.contact_person_email || '');
+    // Auto-CC from entity contact email
+    const entity = entities.find(e => e.id === transaction.entity_id);
+    const autoCc: string[] = [];
+    if (entity?.contact_email_company_individual) autoCc.push(entity.contact_email_company_individual);
+    setCcAddresses(autoCc);
     setShowEmailModal(true);
   }
 
@@ -1221,103 +1228,158 @@ export function TransactionApprovals() {
       )}
 
       {/* Email Modal */}
-      {showEmailModal && selectedTransaction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h3 className="text-lg font-bold text-gray-900">Send Transaction Details</h3>
-              <button onClick={() => setShowEmailModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-gray-50 rounded-lg p-3 text-sm">
-                <p className="font-medium text-gray-700">{getEntityName(selectedTransaction.entity_id)}</p>
-                <p className="text-gray-500">{selectedTransaction.transaction_type} — {getShareInfo(selectedTransaction.share_id)}</p>
-                <p className="text-gray-500">{Number(selectedTransaction.no_of_shares).toLocaleString()} shares @ LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</p>
+      {showEmailModal && selectedTransaction && (() => {
+        const broker = selectedTransaction.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
+        const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-xl flex flex-col" style={{ maxHeight: '90vh' }}>
+
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 flex-shrink-0">
+                <div className="flex items-center space-x-2">
+                  <Mail className="w-4 h-4 text-blue-600" />
+                  <h3 className="text-base font-bold text-gray-900">Send Transaction Details</h3>
+                </div>
+                <button onClick={() => setShowEmailModal(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">To <span className="text-red-500">*</span></label>
-                <input
-                  type="email"
-                  value={emailAddress}
-                  onChange={e => setEmailAddress(e.target.value)}
-                  placeholder="recipient@example.com"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  disabled={sendingEmail}
-                />
-                {selectedTransaction.broker_id && (() => {
-                  const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
-                  return broker?.contact_person_email ? (
+              {/* Body — scrollable if needed */}
+              <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+
+                {/* Transaction summary pill */}
+                <div className="flex items-center space-x-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {selectedTransaction.transaction_type}
+                  </span>
+                  <span className="text-sm font-medium text-gray-800">{getShareInfo(selectedTransaction.share_id)}</span>
+                  <span className="text-xs text-gray-500">·</span>
+                  <span className="text-sm text-gray-600">{Number(selectedTransaction.no_of_shares).toLocaleString()} @ LKR {Number(selectedTransaction.price_per_share).toFixed(4)}</span>
+                  <span className="text-xs text-gray-400 ml-auto">{getEntityName(selectedTransaction.entity_id)}</span>
+                </div>
+
+                {/* To */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">To <span className="text-red-500">*</span></label>
+                  <input
+                    type="email"
+                    value={emailAddress}
+                    onChange={e => setEmailAddress(e.target.value)}
+                    placeholder="recipient@example.com"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    disabled={sendingEmail}
+                  />
+                  {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
                     <button
                       type="button"
                       onClick={() => setEmailAddress(broker.contact_person_email!)}
                       className="mt-1 text-xs text-blue-600 hover:underline"
                     >
-                      Use broker email: {broker.contact_person_email}
+                      Use {broker.broker_name} contact: {broker.contact_person_email}
                     </button>
-                  ) : null;
-                })()}
+                  )}
+                </div>
+
+                {/* CC section */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">CC</label>
+                    {entity?.contact_email_company_individual && !ccAddresses.includes(entity.contact_email_company_individual) && (
+                      <button
+                        type="button"
+                        onClick={() => setCcAddresses([...ccAddresses, entity.contact_email_company_individual!])}
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        + Add {entity.name} ({entity.contact_email_company_individual})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Auto-CC chips */}
+                  {ccAddresses.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {ccAddresses.map((addr, i) => {
+                        const isEntityEmail = addr === entity?.contact_email_company_individual;
+                        return (
+                          <span key={i} className={`inline-flex items-center space-x-1 text-xs px-2 py-1 rounded-full ${isEntityEmail ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                            {isEntityEmail && <span className="font-semibold">Entity:</span>}
+                            <span>{addr}</span>
+                            <button
+                              onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))}
+                              disabled={sendingEmail}
+                              className="ml-0.5 hover:opacity-70"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Manual CC input */}
+                  <div className="flex space-x-2">
+                    <input
+                      type="email"
+                      value={ccInput}
+                      onChange={e => setCcInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && ccInput.trim()) {
+                          e.preventDefault();
+                          setCcAddresses([...ccAddresses, ccInput.trim()]);
+                          setCcInput('');
+                        }
+                      }}
+                      placeholder="Add email and press Enter"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      disabled={sendingEmail}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
+                      disabled={sendingEmail || !ccInput.trim()}
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Note */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Note / Comment</label>
+                  <textarea
+                    value={emailNote}
+                    onChange={e => setEmailNote(e.target.value)}
+                    rows={3}
+                    disabled={sendingEmail}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                    placeholder="Optional message or instructions to include in the email..."
+                  />
+                </div>
+
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">CC</label>
-                <div className="flex space-x-2">
-                  <input
-                    type="email"
-                    value={ccInput}
-                    onChange={e => setCcInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && ccInput.trim()) {
-                        e.preventDefault();
-                        setCcAddresses([...ccAddresses, ccInput.trim()]);
-                        setCcInput('');
-                      }
-                    }}
-                    placeholder="Add CC email and press Enter"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={sendingEmail}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
-                    disabled={sendingEmail || !ccInput.trim()}
-                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors disabled:opacity-50 text-sm"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-                {ccAddresses.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {ccAddresses.map((addr, i) => (
-                      <span key={i} className="inline-flex items-center space-x-1 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                        <span>{addr}</span>
-                        <button onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))} disabled={sendingEmail}>
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+              {/* Footer */}
+              <div className="flex justify-end items-center space-x-3 border-t border-gray-200 px-5 py-3 flex-shrink-0">
+                <button onClick={() => setShowEmailModal(false)} disabled={sendingEmail} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">
+                  Cancel
+                </button>
+                <button
+                  onClick={sendEmail}
+                  disabled={sendingEmail || !emailAddress.trim()}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2 font-medium"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
+                </button>
               </div>
             </div>
-            <div className="flex justify-end space-x-3 border-t border-gray-200 px-6 py-4">
-              <button onClick={() => setShowEmailModal(false)} disabled={sendingEmail} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 rounded-lg">
-                Cancel
-              </button>
-              <button
-                onClick={sendEmail}
-                disabled={sendingEmail || !emailAddress.trim()}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
-              >
-                <Mail className="w-4 h-4" />
-                <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
