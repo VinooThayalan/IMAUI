@@ -51,6 +51,11 @@ interface BuyAndSellNote {
   net_amount?: number;
   foreign_brokerage?: number;
   created_at: string;
+  status?: string;
+  has_mismatch?: boolean;
+  approval_notes?: string;
+  approved_by?: string;
+  approved_at?: string;
 }
 
 interface Transaction {
@@ -211,6 +216,7 @@ export function BuyAndSellNotes() {
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [debugRawText, setDebugRawText] = useState<string>('');
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -848,63 +854,66 @@ export function BuyAndSellNotes() {
     setShowProcessModal(true);
   }
 
-  async function handleApproval() {
-    if (validationIssues.length > 0) {
-      alert('Cannot approve with validation issues. Please resolve them first.');
-      return;
-    }
-    if (!formData.transaction_id) {
-      alert('Please select a transaction');
-      return;
-    }
+  function buildNotePayload(selectedTransaction: Transaction, noteType: 'Buy' | 'Sell', status: string, hasMismatch: boolean) {
+    const totalShares = extractedRows.reduce((s, r) => s + r.qty, 0);
+    const totalGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
+    const totalNet = extractedRows.reduce((s, r) => s + r.amount, 0);
+    const avgPrice = totalShares > 0 ? totalGross / totalShares : 0;
+    const contractNo = extractedRows[0]?.contract_no || extractedData.contract_no || '';
+    const selectedBroker = brokers.find(b => b.id === formData.broker_id);
+    const brokerName = selectedBroker?.broker_name || extractedData.broker_name || '';
+    return {
+      payload: {
+        transaction_id: formData.transaction_id,
+        note_type: noteType,
+        note_number: contractNo || 'N/A',
+        broker: brokerName,
+        broker_id: formData.broker_id || null,
+        dealer_name: formData.dealer_name || null,
+        transaction_date: extractedData.trade_date || null,
+        settlement_date: extractedData.settlement || formData.settlement_date || null,
+        file_url: uploadedFile?.name || null,
+        remarks: formData.remarks || null,
+        trade_date: extractedData.trade_date || null,
+        contract_no: contractNo,
+        no_of_shares: totalShares,
+        price_avg: avgPrice,
+        gross_amount: totalGross,
+        brokerage: extractedRows.reduce((s, r) => s + r.brokerage, 0),
+        sec: extractedRows.reduce((s, r) => s + r.sec, 0),
+        exchange: extractedRows.reduce((s, r) => s + r.cse_fees, 0),
+        cds: extractedRows.reduce((s, r) => s + r.cds_fees, 0),
+        gov_cess: extractedRows.reduce((s, r) => s + r.stl, 0),
+        clearing_fees: extractedRows.reduce((s, r) => s + r.clearing_fee, 0),
+        net_amount: totalNet,
+        foreign_brokerage: extractedRows.reduce((s, r) => s + r.foreign_br, 0),
+        status,
+        has_mismatch: hasMismatch,
+      },
+      totalNet,
+      contractNo,
+    };
+  }
 
+  async function handleApproval() {
+    if (!formData.transaction_id) { alert('Please select a transaction'); return; }
     try {
       const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
       if (!selectedTransaction) { alert('Selected transaction not found'); return; }
       const entity = entities.find(e => e.id === selectedTransaction.entity_id);
       if (!entity) { alert('Entity not found for the selected transaction'); return; }
 
-      const totalShares = extractedRows.reduce((s, r) => s + r.qty, 0);
-      const totalGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
-      const totalNet = extractedRows.reduce((s, r) => s + r.amount, 0);
-      const avgPrice = totalShares > 0 ? totalGross / totalShares : 0;
-      const contractNo = extractedRows[0]?.contract_no || extractedData.contract_no || '';
-
-      const selectedBroker = brokers.find(b => b.id === formData.broker_id);
-      const brokerName = selectedBroker?.broker_name || extractedData.broker_name || '';
       const rawType = selectedTransaction.transaction_type?.toUpperCase();
       const noteType: 'Buy' | 'Sell' = rawType === 'SELL' ? 'Sell' : 'Buy';
+      const allMatch = Object.values(fieldCompare).length > 0 && Object.values(fieldCompare).every(c => c.matches);
+
+      const { payload, totalNet, contractNo } = buildNotePayload(selectedTransaction, noteType, 'PROCESSED', !allMatch);
 
       const { data: insertedNote, error: insertError } = await supabase
         .from('buy_sell_notes')
-        .insert({
-          transaction_id: formData.transaction_id,
-          note_type: noteType,
-          note_number: contractNo || 'N/A',
-          broker: brokerName,
-          broker_id: formData.broker_id || null,
-          dealer_name: formData.dealer_name || null,
-          transaction_date: extractedData.trade_date || null,
-          settlement_date: extractedData.settlement || formData.settlement_date || null,
-          file_url: uploadedFile?.name || null,
-          remarks: formData.remarks || null,
-          trade_date: extractedData.trade_date || null,
-          contract_no: contractNo,
-          no_of_shares: totalShares,
-          price_avg: avgPrice,
-          gross_amount: totalGross,
-          brokerage: extractedRows.reduce((s, r) => s + r.brokerage, 0),
-          sec: extractedRows.reduce((s, r) => s + r.sec, 0),
-          exchange: extractedRows.reduce((s, r) => s + r.cse_fees, 0),
-          cds: extractedRows.reduce((s, r) => s + r.cds_fees, 0),
-          gov_cess: extractedRows.reduce((s, r) => s + r.stl, 0),
-          clearing_fees: extractedRows.reduce((s, r) => s + r.clearing_fee, 0),
-          net_amount: totalNet,
-          foreign_brokerage: extractedRows.reduce((s, r) => s + r.foreign_br, 0),
-        })
+        .insert(payload)
         .select()
         .maybeSingle();
-
       if (insertError) throw insertError;
 
       const transactionType = noteType === 'Buy' ? 'Deduction' : 'Addition';
@@ -933,21 +942,41 @@ export function BuyAndSellNotes() {
           created_by: 'System',
           notes: formData.remarks || null,
         });
-
       if (ledgerError) throw ledgerError;
 
       await loadData();
       handleCloseModals();
-      alert('Buy/sell note processed successfully! Cash balance has been updated.');
+      alert('Buy/sell note approved and processed. Cash balance has been updated.');
     } catch (error: any) {
       console.error('Error processing note:', error);
-      const msg = error?.message || error?.details || error?.hint || JSON.stringify(error);
-      alert(`Failed to process note:\n\n${msg}`);
+      alert(`Failed to process note:\n\n${error?.message || JSON.stringify(error)}`);
+    }
+  }
+
+  async function handleSendForApproval() {
+    if (!formData.transaction_id) { alert('Please select a transaction'); return; }
+    try {
+      const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
+      if (!selectedTransaction) { alert('Selected transaction not found'); return; }
+
+      const rawType = selectedTransaction.transaction_type?.toUpperCase();
+      const noteType: 'Buy' | 'Sell' = rawType === 'SELL' ? 'Sell' : 'Buy';
+      const { payload } = buildNotePayload(selectedTransaction, noteType, 'PENDING_APPROVAL', true);
+
+      const { error } = await supabase.from('buy_sell_notes').insert(payload);
+      if (error) throw error;
+
+      await loadData();
+      handleCloseModals();
+      alert('Note saved with mismatches. Sent for approval — no cash balance changes made yet.');
+    } catch (error: any) {
+      console.error('Error sending for approval:', error);
+      alert(`Failed to save note:\n\n${error?.message || JSON.stringify(error)}`);
     }
   }
 
   function handleReject() {
-    if (!confirm('Are you sure you want to reject this upload?')) return;
+    if (!confirm('Are you sure you want to cancel this upload?')) return;
     handleCloseModals();
   }
 
@@ -1346,66 +1375,104 @@ export function BuyAndSellNotes() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ticker</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Shares</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Price</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Net Amount</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Settlement</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-4"></th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ticker</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Shares</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Price</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Net Amount</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Settlement</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredNotes.map((note) => {
-                const txn = transactions.find(t => t.id === note.transaction_id);
-                const noteEntity = txn ? entities.find(e => e.id === txn.entity_id) : undefined;
-                const noteShare = txn ? shares.find(s => s.id === txn.share_id) : undefined;
+                const txn = transactions.find(t => t.id === note.transaction_id) ||
+                  // also search all notes' transactions even if already linked (for display)
+                  null;
+                // Re-derive entity/share from all loaded data using note's stored broker name fallback
+                const allTxns = [...transactions];
+                const matchedTxn = allTxns.find(t => t.id === note.transaction_id);
+                const noteEntity = matchedTxn ? entities.find(e => e.id === matchedTxn.entity_id) : undefined;
+                const noteShare = matchedTxn ? shares.find(s => s.id === matchedTxn.share_id) : undefined;
+                const noteBroker = note.broker_id ? brokers.find(b => b.id === note.broker_id) : null;
+                const noteStatus = note.status || 'PROCESSED';
+                const isExpanded = expandedNoteId === note.id;
+
+                const statusCfg: Record<string, { label: string; cls: string }> = {
+                  PROCESSED: { label: 'Processed', cls: 'bg-green-100 text-green-800' },
+                  PENDING_APPROVAL: { label: 'Pending Approval', cls: 'bg-amber-100 text-amber-800' },
+                  APPROVED: { label: 'Approved', cls: 'bg-blue-100 text-blue-800' },
+                };
+                const scfg = statusCfg[noteStatus] || statusCfg['PROCESSED'];
+
                 return (
-                <tr key={note.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
+                <>
+                <tr
+                  key={note.id}
+                  className={`hover:bg-gray-50 cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50' : ''}`}
+                  onClick={() => setExpandedNoteId(isExpanded ? null : note.id)}
+                >
+                  <td className="px-4 py-3 text-gray-400">
+                    <svg className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <div className="text-sm font-bold text-blue-600">{note.contract_no || note.note_number || '-'}</div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{noteEntity?.name || '-'}</div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <span className="inline-flex px-2 py-0.5 rounded text-xs font-semibold bg-gray-100 text-gray-700 font-mono">
                       {noteShare?.ticker || '-'}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                       note.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
                       {note.note_type}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                     {note.trade_date ? new Date(note.trade_date).toLocaleDateString() : '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right tabular-nums">
                     {note.no_of_shares?.toLocaleString() || '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    Rs. {note.price_avg?.toFixed(2) || '-'}
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right tabular-nums">
+                    {note.price_avg ? `Rs. ${note.price_avg.toFixed(2)}` : '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                    Rs. {note.net_amount?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '-'}
+                  <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900 text-right tabular-nums">
+                    {note.net_amount ? `Rs. ${note.net_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {new Date(note.settlement_date).toLocaleDateString()}
+                  <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                    {note.settlement_date ? new Date(note.settlement_date).toLocaleDateString() : '-'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scfg.cls}`}>
+                      {noteStatus === 'PENDING_APPROVAL' && <AlertTriangle className="w-3 h-3" />}
+                      {noteStatus === 'PROCESSED' && <CheckCircle className="w-3 h-3" />}
+                      {scfg.label}
+                    </span>
+                    {note.has_mismatch && noteStatus === 'PROCESSED' && (
+                      <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">
+                        Mismatch
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center space-x-1">
                       {note.file_url && (
                         <a
                           href={note.file_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="View PDF"
                         >
                           <Eye className="w-4 h-4" />
@@ -1413,7 +1480,7 @@ export function BuyAndSellNotes() {
                       )}
                       <button
                         onClick={() => openEditNote(note)}
-                        className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                         title="Edit"
                       >
                         <Pencil className="w-4 h-4" />
@@ -1421,7 +1488,7 @@ export function BuyAndSellNotes() {
                       <button
                         onClick={() => handleDeleteNote(note.id)}
                         disabled={deletingId === note.id}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
                         title="Delete"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1429,6 +1496,64 @@ export function BuyAndSellNotes() {
                     </div>
                   </td>
                 </tr>
+                {isExpanded && (
+                  <tr key={`${note.id}-detail`} className="bg-blue-50 border-b border-blue-100">
+                    <td colSpan={12} className="px-6 py-4">
+                      <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="bg-white rounded-lg border border-blue-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
+                          <p className="text-sm font-bold text-gray-900">{noteBroker?.broker_name || note.broker || '-'}</p>
+                          {note.dealer_name && <p className="text-xs text-gray-500 mt-0.5">Contact: {note.dealer_name}</p>}
+                        </div>
+                        <div className="bg-white rounded-lg border border-emerald-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">Client A/C Number</p>
+                          <p className="text-sm font-bold text-gray-900 font-mono">
+                            {(() => {
+                              const eb = noteEntity && note.broker_id
+                                ? entityBrokers.find(e => e.entity_id === noteEntity.entity_id && e.broker_id === note.broker_id)
+                                : null;
+                              return eb?.broker_account_number || eb?.custodian_account_number || '-';
+                            })()}
+                          </p>
+                        </div>
+                        <div className="bg-white rounded-lg border border-amber-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {note.settlement_date ? new Date(note.settlement_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+                          <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Fee Breakdown</p>
+                        </div>
+                        <div className="grid grid-cols-4 gap-0 divide-x divide-gray-100 text-sm">
+                          {[
+                            { label: 'Gross Amount', value: note.gross_amount },
+                            { label: 'Brokerage', value: note.brokerage },
+                            { label: 'SEC', value: note.sec },
+                            { label: 'CSE / Exchange', value: note.exchange },
+                            { label: 'CDS Fees', value: note.cds },
+                            { label: 'Gov. Levy (STL)', value: note.gov_cess },
+                            { label: 'Clearing Fees', value: note.clearing_fees },
+                            { label: 'Net Amount', value: note.net_amount },
+                          ].map(({ label, value }) => (
+                            <div key={label} className="px-4 py-3">
+                              <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+                              <p className={`text-sm font-semibold ${label === 'Net Amount' ? 'text-gray-900 text-base' : 'text-gray-700'}`}>
+                                {value != null ? `Rs. ${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {note.remarks && (
+                        <p className="mt-3 text-xs text-gray-500"><span className="font-semibold">Remarks:</span> {note.remarks}</p>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </>
                 );
               })}
             </tbody>
@@ -1891,16 +2016,50 @@ export function BuyAndSellNotes() {
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                  <button type="button" onClick={handleReject} className="px-6 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2">
-                    <XCircle className="w-4 h-4" />
-                    <span>Cancel</span>
-                  </button>
-                  <button type="button" onClick={handleApproval} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>Approve & Process</span>
-                  </button>
-                </div>
+                {(() => {
+                  const allMatch = Object.values(fieldCompare).length > 0 && Object.values(fieldCompare).every(c => c.matches);
+                  const anyMismatch = Object.values(fieldCompare).some(c => !c.matches);
+                  return (
+                    <div className="pt-4 border-t border-gray-200 space-y-3">
+                      {anyMismatch && (
+                        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
+                          <span>Some fields do not match the transaction. You can send for approval or approve anyway.</span>
+                        </div>
+                      )}
+                      {allMatch && (
+                        <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
+                          <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
+                          <span>All fields match the transaction. Ready to approve and process.</span>
+                        </div>
+                      )}
+                      <div className="flex justify-end space-x-3">
+                        <button type="button" onClick={handleReject} className="px-5 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center space-x-2 text-sm">
+                          <XCircle className="w-4 h-4" />
+                          <span>Cancel</span>
+                        </button>
+                        {anyMismatch && (
+                          <button
+                            type="button"
+                            onClick={handleSendForApproval}
+                            className="px-5 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center space-x-2 text-sm font-medium"
+                          >
+                            <AlertTriangle className="w-4 h-4" />
+                            <span>Send for Approval</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleApproval}
+                          className={`px-5 py-2 text-white rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium ${allMatch ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span>{allMatch ? 'Approve & Process' : 'Approve Anyway & Process'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
