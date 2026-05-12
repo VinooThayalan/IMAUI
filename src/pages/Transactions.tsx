@@ -155,7 +155,7 @@ export function Transactions() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStatus, setFilterStatus] = useState('DRAFT');
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -581,18 +581,30 @@ export function Transactions() {
 
       const documentUrl = signedData?.signedUrl || publicUrl;
 
+      const updates: Record<string, unknown> = {
+        approval_document_url: documentUrl,
+        approval_document_name: uploadFile.name,
+        approval_document_uploaded_at: new Date().toISOString()
+      };
+
+      if (selectedTransaction.approval_status === 'PENDING_APPROVAL') {
+        updates.approval_status = 'AUTO_APPROVED';
+        updates.approved_by = user?.email || 'system';
+        updates.approval_date = new Date().toISOString();
+        updates.approval_notes = 'Auto-approved upon document upload';
+      }
+
       const { error: updateError } = await supabase
         .from('transactions')
-        .update({
-          approval_document_url: documentUrl,
-          approval_document_name: uploadFile.name,
-          approval_document_uploaded_at: new Date().toISOString()
-        })
+        .update(updates)
         .eq('id', selectedTransaction.id);
 
       if (updateError) throw updateError;
 
-      alert('Document uploaded successfully');
+      alert(selectedTransaction.approval_status === 'PENDING_APPROVAL'
+        ? 'Document uploaded and transaction auto-approved successfully'
+        : 'Document uploaded successfully'
+      );
       setShowUploadModal(false);
       setUploadFile(null);
       setSelectedTransaction(null);
@@ -1213,7 +1225,7 @@ export function Transactions() {
         <div className="border-b border-gray-200">
           <div className="flex space-x-1 p-2">
             <button
-              onClick={() => setActiveTab('all')}
+              onClick={() => { setActiveTab('all'); setFilterStatus('DRAFT'); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                 activeTab === 'all'
                   ? 'bg-blue-600 text-white'
@@ -1223,7 +1235,7 @@ export function Transactions() {
               All Transactions
             </button>
             <button
-              onClick={() => setActiveTab('pending')}
+              onClick={() => { setActiveTab('pending'); setFilterStatus('PENDING_APPROVAL'); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
                 activeTab === 'pending'
                   ? 'bg-blue-600 text-white'
@@ -1282,9 +1294,9 @@ export function Transactions() {
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
             </select>
-            {(filterDateFrom || filterDateTo || filterStatus) && (
+            {(filterDateFrom || filterDateTo || (activeTab === 'all' ? filterStatus !== 'DRAFT' : filterStatus !== 'PENDING_APPROVAL')) && (
               <button
-                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus(''); }}
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus(activeTab === 'pending' ? 'PENDING_APPROVAL' : 'DRAFT'); }}
                 className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Clear
