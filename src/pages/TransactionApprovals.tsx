@@ -1,4 +1,7 @@
-import { CheckCircle, XCircle, Clock, CreditCard as Edit2, Pause, Eye } from 'lucide-react';
+import {
+  CheckCircle, XCircle, Clock, CreditCard as Edit2, Pause, Eye,
+  Search, Filter, Mail, FileText, Ban, RotateCcw, X, Plus
+} from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -30,14 +33,13 @@ interface Transaction {
   approval_date: string | null;
   approval_notes: string | null;
   rejection_reason: string | null;
+  approval_document_url: string | null;
+  approval_document_name: string | null;
+  approval_document_uploaded_at: string | null;
+  approval_document_uploaded_by: string | null;
   created_at: string;
   currency: string | null;
   settlement_date: string | null;
-}
-
-interface User {
-  id: string;
-  email: string;
 }
 
 interface Entity {
@@ -54,15 +56,36 @@ interface Share {
 interface Broker {
   id: string;
   broker_name: string;
+  contact_person_email: string | null;
 }
 
-const statusConfig = {
+interface Bank {
+  id: string;
+  name: string;
+  account_number: string;
+  entity_id: string;
+}
+
+interface EntityBroker {
+  id: string;
+  entity_id: string;
+  broker_id: string;
+  relationship_type: string;
+  broker_account_number: string | null;
+  custodian_account_number: string | null;
+  bank_account_number: string | null;
+}
+
+const ALL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'AUTO_APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD', 'CANCELLED'];
+
+const statusConfig: Record<string, { icon: any; color: string; bg: string; label: string }> = {
   PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
   APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
   AUTO_APPROVED: { icon: CheckCircle, color: 'text-emerald-700', bg: 'bg-emerald-100', label: 'Auto Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
   EXPIRED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Expired' },
-  ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' }
+  ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' },
+  CANCELLED: { icon: Ban, color: 'text-rose-700', bg: 'bg-rose-100', label: 'Cancelled' },
 };
 
 export function TransactionApprovals() {
@@ -71,12 +94,23 @@ export function TransactionApprovals() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('PENDING_APPROVAL');
+  const [filterEntity, setFilterEntity] = useState('');
+  const [filterShare, setFilterShare] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+
+  // Modal state
   const [showModal, setShowModal] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
-  const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'HOLD' | 'VIEW'>('VIEW');
+  const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'HOLD' | 'VIEW' | 'CANCEL' | 'CANCEL_APPROVE'>('VIEW');
   const [isEditing, setIsEditing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -92,17 +126,22 @@ export function TransactionApprovals() {
   const [actionFormData, setActionFormData] = useState({
     approval_notes: '',
     rejection_reason: '',
-    hold_hours: ''
+    hold_hours: '',
+    cancel_reason: '',
+    notify_broker: false,
   });
+
+  // Email modal
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailAddress, setEmailAddress] = useState('');
+  const [ccAddresses, setCcAddresses] = useState<string[]>([]);
+  const [ccInput, setCcInput] = useState('');
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     loadData();
-    const timeInterval = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    const expiryInterval = setInterval(() => {
-      checkExpiredTransactions();
-    }, 10000);
+    const timeInterval = setInterval(() => setCurrentTime(new Date()), 1000);
+    const expiryInterval = setInterval(() => checkExpiredTransactions(), 10000);
     return () => {
       clearInterval(timeInterval);
       clearInterval(expiryInterval);
@@ -112,27 +151,26 @@ export function TransactionApprovals() {
   async function loadData() {
     try {
       setLoading(true);
-
-      const [transactionsRes, entitiesRes, sharesRes, brokersRes] = await Promise.all([
+      const [transactionsRes, entitiesRes, sharesRes, brokersRes, banksRes, entityBrokersRes] = await Promise.all([
         supabase
           .from('transactions')
           .select('*')
-          .in('approval_status', ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD'])
+          .in('approval_status', ALL_STATUSES)
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
-        supabase.from('brokers').select('id, broker_name').order('broker_name')
+        supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
+        supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
+        supabase.from('entity_brokers').select('*'),
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
-      if (sharesRes.error) throw sharesRes.error;
-      if (brokersRes.error) throw brokersRes.error;
-
       setTransactions(transactionsRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
+      setBanks(banksRes.data || []);
+      setEntityBrokers(entityBrokersRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -150,25 +188,15 @@ export function TransactionApprovals() {
         .not('approval_expires_at', 'is', null);
 
       if (!data) return;
-
       const now = new Date();
       const expired = data.filter(t => new Date(t.approval_expires_at!) <= now);
-
       if (expired.length === 0) return;
 
       for (const t of expired) {
-        await supabase
-          .from('transactions')
-          .update({ approval_status: 'EXPIRED' })
-          .eq('id', t.id);
+        await supabase.from('transactions').update({ approval_status: 'EXPIRED' }).eq('id', t.id);
       }
-
-      setTransactions(prevTransactions =>
-        prevTransactions.map(trans =>
-          expired.some(exp => exp.id === trans.id)
-            ? { ...trans, approval_status: 'EXPIRED' }
-            : trans
-        )
+      setTransactions(prev =>
+        prev.map(t => expired.some(e => e.id === t.id) ? { ...t, approval_status: 'EXPIRED' } : t)
       );
     } catch (error) {
       console.error('Error checking expired transactions:', error);
@@ -191,35 +219,36 @@ export function TransactionApprovals() {
 
   function getTimeRemaining(transaction: Transaction): string {
     if (!transaction.approval_expires_at || (transaction.approval_status !== 'PENDING_APPROVAL' && transaction.approval_status !== 'ON_HOLD')) return '';
-
     const expiresAt = new Date(transaction.approval_expires_at);
     const diffMs = expiresAt.getTime() - currentTime.getTime();
-
     if (diffMs <= 0) return 'EXPIRED';
-
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${seconds}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds}s`;
-    } else {
-      return `${seconds}s`;
-    }
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
   }
 
-  function checkAutoApproval(transaction: Transaction): boolean {
-    return transaction.submitted_by === user?.email;
-  }
+  // Filtered transactions
+  const filteredTransactions = transactions.filter(t => {
+    const searchL = searchTerm.toLowerCase();
+    const matchesSearch = !searchTerm ||
+      getEntityName(t.entity_id).toLowerCase().includes(searchL) ||
+      getShareInfo(t.share_id).toLowerCase().includes(searchL);
+    const matchesStatus = !filterStatus || t.approval_status === filterStatus;
+    const matchesEntity = !filterEntity || t.entity_id === filterEntity;
+    const matchesShare = !filterShare || t.share_id === filterShare;
+    const matchesDateFrom = !filterDateFrom || t.transaction_date >= filterDateFrom;
+    const matchesDateTo = !filterDateTo || t.transaction_date <= filterDateTo;
+    return matchesSearch && matchesStatus && matchesEntity && matchesShare && matchesDateFrom && matchesDateTo;
+  });
 
-  function openModal(transaction: Transaction, type: 'VIEW' | 'APPROVE' | 'REJECT' | 'HOLD') {
+  function openModal(transaction: Transaction, type: typeof actionType) {
     setSelectedTransaction(transaction);
     setActionType(type);
     setIsEditing(false);
-    setActionFormData({ approval_notes: '', rejection_reason: '', hold_hours: '' });
-
+    setActionFormData({ approval_notes: '', rejection_reason: '', hold_hours: '', cancel_reason: '', notify_broker: false });
     if (type !== 'VIEW') {
       setEditFormData({
         entity_id: transaction.entity_id,
@@ -230,7 +259,6 @@ export function TransactionApprovals() {
         price_per_share: transaction.price_per_share.toString()
       });
     }
-
     setShowModal(true);
   }
 
@@ -242,17 +270,14 @@ export function TransactionApprovals() {
 
   async function handleApprove() {
     if (!selectedTransaction) return;
-
     try {
       setSubmitting(true);
-
       const updates: any = {
         approval_status: 'APPROVED',
         approved_by: user?.email || 'system',
         approval_date: new Date().toISOString(),
         approval_notes: actionFormData.approval_notes || null
       };
-
       if (isEditing) {
         updates.entity_id = editFormData.entity_id;
         updates.share_id = editFormData.share_id;
@@ -263,14 +288,8 @@ export function TransactionApprovals() {
         updates.total_amount_gross = updates.no_of_shares * updates.price_per_share;
         updates.total_amount = updates.total_amount_gross - (selectedTransaction.fees || 0);
       }
-
-      const { error } = await supabase
-        .from('transactions')
-        .update(updates)
-        .eq('id', selectedTransaction.id);
-
+      const { error } = await supabase.from('transactions').update(updates).eq('id', selectedTransaction.id);
       if (error) throw error;
-
       alert('Transaction approved successfully');
       closeModal();
       loadData();
@@ -287,22 +306,19 @@ export function TransactionApprovals() {
       alert('Please provide a rejection reason');
       return;
     }
-
     try {
       setSubmitting(true);
-
-      const { error } = await supabase
-        .from('transactions')
-        .update({
-          approval_status: 'REJECTED',
-          approved_by: user?.email || 'system',
-          approval_date: new Date().toISOString(),
-          rejection_reason: actionFormData.rejection_reason,
-          approval_notes: actionFormData.approval_notes || null
-        })
-        .eq('id', selectedTransaction.id);
-
+      const { error } = await supabase.from('transactions').update({
+        approval_status: 'REJECTED',
+        approved_by: user?.email || 'system',
+        approval_date: new Date().toISOString(),
+        rejection_reason: actionFormData.rejection_reason,
+        approval_notes: actionFormData.approval_notes || null
+      }).eq('id', selectedTransaction.id);
       if (error) throw error;
+
+      // Release on-hold cash
+      await releaseOnHoldCash(selectedTransaction);
 
       alert('Transaction rejected successfully');
       closeModal();
@@ -320,29 +336,20 @@ export function TransactionApprovals() {
       alert('Please specify how many hours to extend');
       return;
     }
-
     try {
       setSubmitting(true);
-
       const currentExpiry = selectedTransaction.approval_expires_at
         ? new Date(selectedTransaction.approval_expires_at)
         : new Date();
-
       const additionalHours = parseFloat(actionFormData.hold_hours);
       const newExpiry = new Date(currentExpiry.getTime() + additionalHours * 60 * 60 * 1000);
-
-      const { error } = await supabase
-        .from('transactions')
-        .update({
-          approval_expires_at: newExpiry.toISOString(),
-          approval_validity_hours: (selectedTransaction.approval_validity_hours || 0) + additionalHours,
-          approval_notes: actionFormData.approval_notes || selectedTransaction.approval_notes
-        })
-        .eq('id', selectedTransaction.id);
-
+      const { error } = await supabase.from('transactions').update({
+        approval_expires_at: newExpiry.toISOString(),
+        approval_validity_hours: (selectedTransaction.approval_validity_hours || 0) + additionalHours,
+        approval_notes: actionFormData.approval_notes || selectedTransaction.approval_notes
+      }).eq('id', selectedTransaction.id);
       if (error) throw error;
-
-      alert(`Transaction approval extended by ${additionalHours} hours`);
+      alert(`Approval extended by ${additionalHours} hour${additionalHours !== 1 ? 's' : ''}. New deadline: ${newExpiry.toLocaleString()}`);
       closeModal();
       loadData();
     } catch (error) {
@@ -351,6 +358,211 @@ export function TransactionApprovals() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function releaseOnHoldCash(transaction: Transaction) {
+    // Find any cash ledger entries with on_hold_amount > 0 for this transaction
+    const { data: ledgerEntries } = await supabase
+      .from('cash_balance_ledger')
+      .select('*')
+      .eq('entity_id', transaction.entity_id)
+      .not('on_hold_amount', 'is', null);
+
+    if (!ledgerEntries || ledgerEntries.length === 0) return;
+
+    // Zero out on_hold_amount for entries referencing this transaction
+    for (const entry of ledgerEntries) {
+      if ((entry.reference_id === transaction.id || entry.notes?.includes(transaction.id)) && (entry.on_hold_amount || 0) > 0) {
+        await supabase
+          .from('cash_balance_ledger')
+          .update({ on_hold_amount: 0 })
+          .eq('id', entry.id);
+      }
+    }
+  }
+
+  async function handleCancel() {
+    if (!selectedTransaction || !actionFormData.cancel_reason.trim()) {
+      alert('Please provide a cancellation reason');
+      return;
+    }
+    try {
+      setSubmitting(true);
+
+      const { error } = await supabase.from('transactions').update({
+        approval_status: 'CANCELLED',
+        rejection_reason: actionFormData.cancel_reason,
+        approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+      }).eq('id', selectedTransaction.id);
+      if (error) throw error;
+
+      // Release on-hold cash
+      await releaseOnHoldCash(selectedTransaction);
+
+      // Optionally notify broker
+      if (actionFormData.notify_broker && selectedTransaction.broker_id) {
+        const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
+        if (broker?.contact_person_email) {
+          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              to: broker.contact_person_email,
+              transaction: buildEmailData(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`),
+            }),
+          });
+        }
+      }
+
+      alert('Transaction cancelled and cash released');
+      closeModal();
+      loadData();
+    } catch (error) {
+      console.error('Error cancelling transaction:', error);
+      alert('Failed to cancel transaction');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCancelApprove() {
+    if (!selectedTransaction || !actionFormData.cancel_reason.trim()) {
+      alert('Please provide a reason for cancelling the approval');
+      return;
+    }
+    try {
+      setSubmitting(true);
+
+      const { error } = await supabase.from('transactions').update({
+        approval_status: 'CANCELLED',
+        rejection_reason: actionFormData.cancel_reason,
+        approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+      }).eq('id', selectedTransaction.id);
+      if (error) throw error;
+
+      // Release on-hold cash
+      await releaseOnHoldCash(selectedTransaction);
+
+      // Optionally notify broker
+      if (actionFormData.notify_broker && selectedTransaction.broker_id) {
+        const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
+        if (broker?.contact_person_email) {
+          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              to: broker.contact_person_email,
+              transaction: buildEmailData(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.`),
+            }),
+          });
+        }
+      }
+
+      alert('Approval cancelled and cash released');
+      closeModal();
+      loadData();
+    } catch (error) {
+      console.error('Error cancelling approval:', error);
+      alert('Failed to cancel approval');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function buildEmailData(transaction: Transaction, overrideNotes?: string) {
+    const entity = entities.find(e => e.id === transaction.entity_id);
+    const share = shares.find(s => s.id === transaction.share_id);
+    const broker = brokers.find(b => b.id === transaction.broker_id);
+    const bank = banks.find(b => b.id === transaction.bank_id);
+    const entityBroker = entityBrokers.find(
+      eb => eb.entity_id === transaction.entity_id && eb.broker_id === (transaction.broker_id || '')
+    );
+    return {
+      entity: entity?.name || 'N/A',
+      transaction_type: transaction.transaction_type,
+      share: share?.share_name || 'N/A',
+      ticker: share?.ticker || 'N/A',
+      transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
+      cds_acc_type: entityBroker?.relationship_type || 'N/A',
+      cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
+      order_type: transaction.order_type || 'N/A',
+      no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
+      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
+      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
+      total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      broker_name: broker?.broker_name || 'N/A',
+      brokerage_fee_type: 'N/A',
+      brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
+      brokerage_fee: Number(transaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      bank_name: bank?.name || 'N/A',
+      bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
+      ...(overrideNotes ? { notes: overrideNotes } : {}),
+    };
+  }
+
+  async function sendEmail() {
+    if (!selectedTransaction || !emailAddress.trim()) {
+      alert('Please enter an email address');
+      return;
+    }
+    if (!emailAddress.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      alert('Please enter a valid email address');
+      return;
+    }
+    try {
+      setSendingEmail(true);
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: emailAddress.trim(),
+          cc: ccAddresses.filter(e => e.trim()),
+          transaction: buildEmailData(selectedTransaction),
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to send email');
+      alert(`Transaction details sent to ${emailAddress}${ccAddresses.length ? ` (CC: ${ccAddresses.join(', ')})` : ''}`);
+      setShowEmailModal(false);
+      setEmailAddress('');
+      setCcAddresses([]);
+    } catch (error) {
+      console.error('Error sending email:', error);
+      alert('Failed to send email');
+    } finally {
+      setSendingEmail(false);
+    }
+  }
+
+  function openEmailModal(transaction: Transaction) {
+    setSelectedTransaction(transaction);
+    setEmailAddress('');
+    setCcAddresses([]);
+    setCcInput('');
+    const broker = brokers.find(b => b.id === transaction.broker_id);
+    if (broker?.contact_person_email) {
+      setEmailAddress(broker.contact_person_email);
+    }
+    setShowEmailModal(true);
+  }
+
+  const hasFilters = searchTerm || filterStatus !== 'PENDING_APPROVAL' || filterEntity || filterShare || filterDateFrom || filterDateTo;
+
+  function clearFilters() {
+    setSearchTerm('');
+    setFilterStatus('PENDING_APPROVAL');
+    setFilterEntity('');
+    setFilterShare('');
+    setFilterDateFrom('');
+    setFilterDateTo('');
   }
 
   if (loading) {
@@ -363,115 +575,267 @@ export function TransactionApprovals() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      {/* Header */}
+      <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Transaction Approvals</h1>
-          <p className="text-gray-600 mt-1">Review and approve pending transactions</p>
+          <p className="text-gray-600 mt-1">Review and manage transaction approvals</p>
+        </div>
+        <div className="flex items-center space-x-2 text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2">
+          <Clock className="w-4 h-4" />
+          <span>{currentTime.toLocaleTimeString()}</span>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+      {/* Filters */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <div className="flex flex-wrap gap-3 items-end">
+          {/* Search */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Search</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Entity or share..."
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Status */}
+          <div className="min-w-[160px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Statuses</option>
+              {ALL_STATUSES.map(s => (
+                <option key={s} value={s}>{statusConfig[s]?.label || s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Entity */}
+          <div className="min-w-[160px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Entity</label>
+            <select
+              value={filterEntity}
+              onChange={e => setFilterEntity(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Entities</option>
+              {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </div>
+
+          {/* Share */}
+          <div className="min-w-[180px]">
+            <label className="block text-xs font-semibold text-gray-500 mb-1">Share</label>
+            <select
+              value={filterShare}
+              onChange={e => setFilterShare(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Shares</option>
+              {shares.map(s => <option key={s.id} value={s.id}>{s.ticker} - {s.share_name}</option>)}
+            </select>
+          </div>
+
+          {/* Date From */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">From</label>
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={e => setFilterDateFrom(e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Date To */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">To</label>
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={e => setFilterDateTo(e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg border border-gray-300 transition-colors"
+            >
+              <X className="w-4 h-4" />
+              <span>Clear</span>
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 text-xs text-gray-500">
+          Showing {filteredTransactions.length} of {transactions.length} transactions
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Entity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Transaction Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Share</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Transaction Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">No. of Shares</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Total Value</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Shares</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">Total Value</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Doc</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Time to Approve</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {transactions.map((transaction) => {
+              {filteredTransactions.map((transaction) => {
                 const timeRemaining = getTimeRemaining(transaction);
-                const StatusIcon = statusConfig[transaction.approval_status as keyof typeof statusConfig]?.icon || Clock;
-                const statusColor = statusConfig[transaction.approval_status as keyof typeof statusConfig]?.color || 'text-gray-600';
-                const statusBg = statusConfig[transaction.approval_status as keyof typeof statusConfig]?.bg || 'bg-gray-100';
+                const cfg = statusConfig[transaction.approval_status] || statusConfig['PENDING_APPROVAL'];
+                const StatusIcon = cfg.icon;
+                const isSelf = transaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
+                const isPending = transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD';
+                const isApproved = transaction.approval_status === 'APPROVED' || transaction.approval_status === 'AUTO_APPROVED';
+                const hasDoc = !!transaction.approval_document_url;
 
                 return (
-                  <tr key={transaction.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-900">{getEntityName(transaction.entity_id)}</td>
+                  <tr key={transaction.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">{getEntityName(transaction.entity_id)}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                         transaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                       }`}>
                         {transaction.transaction_type}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{getShareInfo(transaction.share_id)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {new Date(transaction.transaction_date).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-900">
-                      {Number(transaction.no_of_shares).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 text-sm text-gray-700">{getShareInfo(transaction.share_id)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{new Date(transaction.transaction_date).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900 text-right tabular-nums">{Number(transaction.no_of_shares).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right tabular-nums">
                       LKR {Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
+                    <td className="px-4 py-3">
+                      {hasDoc ? (
+                        <a
+                          href={transaction.approval_document_url!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-700"
+                          title={transaction.approval_document_name || 'View document'}
+                        >
+                          <FileText className="w-4 h-4" />
+                        </a>
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm">
-                      {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') ? (
-                        <span className={`inline-flex items-center space-x-1 ${
+                      {isPending ? (
+                        <span className={`inline-flex items-center space-x-1 font-mono text-xs ${
                           timeRemaining === 'EXPIRED' ? 'text-red-600 font-semibold' : 'text-gray-700'
                         }`}>
-                          <Clock className="w-4 h-4" />
+                          <Clock className="w-3.5 h-3.5" />
                           <span>{timeRemaining || 'No limit'}</span>
                         </span>
                       ) : (
-                        <span className="text-gray-400">-</span>
+                        <span className="text-gray-300 text-xs">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBg} ${statusColor}`}>
+                      <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
                         <StatusIcon className="w-3 h-3" />
-                        <span>{statusConfig[transaction.approval_status as keyof typeof statusConfig]?.label}</span>
+                        <span>{cfg.label}</span>
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1">
+                        {/* View */}
                         <button
                           onClick={() => openModal(transaction, 'VIEW')}
-                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           title="View Details"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
-                        {(transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD') && (() => {
-                          const isSelfSubmitted = transaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
-                          return isSelfSubmitted ? (
-                            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded font-medium">
-                              Self-submitted
-                            </span>
-                          ) : (
-                            <>
+
+                        {/* Pending actions */}
+                        {isPending && !isSelf && (
+                          <>
+                            <button
+                              onClick={() => openModal(transaction, 'APPROVE')}
+                              className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Approve"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal(transaction, 'REJECT')}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Reject"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => openModal(transaction, 'HOLD')}
+                              className="p-1.5 text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
+                              title="Extend Time"
+                            >
+                              <Pause className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                        {isPending && isSelf && (
+                          <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">
+                            Self-submitted
+                          </span>
+                        )}
+
+                        {/* Pending cancel */}
+                        {isPending && (
+                          <button
+                            onClick={() => openModal(transaction, 'CANCEL')}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Cancel Transaction"
+                          >
+                            <Ban className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {/* Approved: email + cancel-approve (if no buy/sell note uploaded) */}
+                        {isApproved && (
+                          <>
+                            <button
+                              onClick={() => openEmailModal(transaction)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Send Email"
+                            >
+                              <Mail className="w-4 h-4" />
+                            </button>
+                            {!hasDoc && (
                               <button
-                                onClick={() => openModal(transaction, 'APPROVE')}
-                                className="p-1 text-green-600 hover:bg-green-50 rounded"
-                                title="Approve"
+                                onClick={() => openModal(transaction, 'CANCEL_APPROVE')}
+                                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                title="Cancel Approval (no note uploaded)"
                               >
-                                <CheckCircle className="w-4 h-4" />
+                                <RotateCcw className="w-4 h-4" />
                               </button>
-                              <button
-                                onClick={() => openModal(transaction, 'REJECT')}
-                                className="p-1 text-red-600 hover:bg-red-50 rounded"
-                                title="Reject"
-                              >
-                                <XCircle className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => openModal(transaction, 'HOLD')}
-                                className="p-1 text-yellow-600 hover:bg-yellow-50 rounded"
-                                title="Hold / Extend Time"
-                              >
-                                <Pause className="w-4 h-4" />
-                              </button>
-                            </>
-                          );
-                        })()}
+                            )}
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -480,160 +844,181 @@ export function TransactionApprovals() {
             </tbody>
           </table>
 
-          {transactions.length === 0 && (
-            <div className="text-center py-12 text-gray-500">
-              No transaction approvals found
+          {filteredTransactions.length === 0 && (
+            <div className="text-center py-16">
+              <Filter className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-500 font-medium">No transactions found</p>
+              {hasFilters && (
+                <button onClick={clearFilters} className="mt-2 text-sm text-blue-600 hover:underline">
+                  Clear filters
+                </button>
+              )}
             </div>
           )}
         </div>
       </div>
 
+      {/* Action Modal */}
       {showModal && selectedTransaction && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <h2 className="text-2xl font-bold text-gray-900">
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">
                 {actionType === 'VIEW' && 'Transaction Details'}
                 {actionType === 'APPROVE' && 'Approve Transaction'}
                 {actionType === 'REJECT' && 'Reject Transaction'}
-                {actionType === 'HOLD' && 'Hold / Extend Approval Time'}
+                {actionType === 'HOLD' && 'Extend Approval Deadline'}
+                {actionType === 'CANCEL' && 'Cancel Transaction'}
+                {actionType === 'CANCEL_APPROVE' && 'Cancel Approval'}
               </h2>
+              <button onClick={closeModal} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             <div className="p-6 space-y-6">
+              {/* Status banners */}
               {selectedTransaction.approval_status === 'AUTO_APPROVED' && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center space-x-2">
-                  <CheckCircle className="w-5 h-5 text-emerald-600" />
-                  <p className="text-sm text-emerald-800 font-medium">
-                    Auto-approved — submitted by the designated approver for this entity
-                  </p>
+                  <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <p className="text-sm text-emerald-800 font-medium">Auto-approved — submitted by the designated approver for this entity</p>
                 </div>
               )}
               {selectedTransaction.approval_status === 'PENDING_APPROVAL' &&
                 selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase() && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center space-x-2">
-                  <Clock className="w-5 h-5 text-amber-600" />
-                  <p className="text-sm text-amber-800 font-medium">
-                    You submitted this transaction — it must be approved by another user
+                  <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <p className="text-sm text-amber-800 font-medium">You submitted this transaction — it must be approved by another user</p>
+                </div>
+              )}
+              {(actionType === 'CANCEL' || actionType === 'CANCEL_APPROVE') && (
+                <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 flex items-center space-x-2">
+                  <Ban className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                  <p className="text-sm text-rose-800 font-medium">
+                    {actionType === 'CANCEL_APPROVE'
+                      ? 'This will cancel the approval and reverse any cash on hold. No buy/sell note has been uploaded for this transaction.'
+                      : 'This will cancel the transaction and release any cash on hold back to the entity balance.'}
                   </p>
                 </div>
               )}
 
+              {/* Approval document banner (if uploaded) */}
+              {selectedTransaction.approval_document_url && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-blue-800 font-medium">Approval Document Uploaded</p>
+                      {selectedTransaction.approval_document_name && (
+                        <p className="text-xs text-blue-600">{selectedTransaction.approval_document_name}</p>
+                      )}
+                      {selectedTransaction.approval_document_uploaded_at && (
+                        <p className="text-xs text-blue-500">
+                          Uploaded {new Date(selectedTransaction.approval_document_uploaded_at).toLocaleString()}
+                          {selectedTransaction.approval_document_uploaded_by && ` by ${selectedTransaction.approval_document_uploaded_by}`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <a
+                    href={selectedTransaction.approval_document_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                  >
+                    View
+                  </a>
+                </div>
+              )}
+
+              {/* Transaction detail grid */}
               {!isEditing ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
+                    {[
+                      { label: 'Entity', value: getEntityName(selectedTransaction.entity_id) },
+                      { label: 'Broker', value: getBrokerName(selectedTransaction.broker_id) },
+                      { label: 'Share', value: getShareInfo(selectedTransaction.share_id) },
+                      { label: 'Transaction Date', value: new Date(selectedTransaction.transaction_date).toLocaleDateString() },
+                      { label: 'No. of Shares', value: Number(selectedTransaction.no_of_shares).toLocaleString() },
+                      { label: 'Price Per Share (LKR)', value: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) },
+                      { label: 'Brokerage Fee (LKR)', value: Number(selectedTransaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) },
+                      { label: 'Net Price Per Share (LKR)', value: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) },
+                      { label: 'Total Value (LKR)', value: Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }) },
+                      { label: 'Order Type', value: selectedTransaction.order_type || 'N/A' },
+                      { label: 'CDS Account', value: selectedTransaction.cds_account_id || 'N/A' },
+                      { label: 'Currency', value: selectedTransaction.currency || 'LKR' },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+                        <p className="mt-0.5 text-sm font-semibold text-gray-900">{value}</p>
+                      </div>
+                    ))}
+
+                    {/* Transaction type */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-500">Entity</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{getEntityName(selectedTransaction.entity_id)}</div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Transaction Type</p>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold mt-0.5 ${
+                        selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {selectedTransaction.transaction_type}
+                      </span>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Transaction Type</label>
-                      <div className="mt-1">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+
+                    {/* Time remaining */}
+                    {(selectedTransaction.approval_status === 'PENDING_APPROVAL' || selectedTransaction.approval_status === 'ON_HOLD') && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Time to Approve</p>
+                        <span className={`inline-flex items-center space-x-1 text-sm font-mono font-semibold mt-0.5 ${
+                          getTimeRemaining(selectedTransaction) === 'EXPIRED' ? 'text-red-600' : 'text-gray-900'
                         }`}>
-                          {selectedTransaction.transaction_type}
+                          <Clock className="w-4 h-4" />
+                          <span>{getTimeRemaining(selectedTransaction) || 'No limit'}</span>
                         </span>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Share</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{getShareInfo(selectedTransaction.share_id)}</div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Transaction Date</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        {new Date(selectedTransaction.transaction_date).toLocaleDateString()}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Number of Shares</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        {Number(selectedTransaction.no_of_shares).toLocaleString()}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Price Per Share</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Total Purchase/Sale Value</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Broker</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{getBrokerName(selectedTransaction.broker_id)}</div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Order Type</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.order_type || 'N/A'}</div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">CDS Account</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.cds_account_id || 'N/A'}</div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Brokerage Fee</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        LKR {Number(selectedTransaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Net Price Per Share</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Currency</label>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">{selectedTransaction.currency || 'LKR'}</div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500">Time to Approve</label>
-                      <div className="mt-1">
-                        {(selectedTransaction.approval_status === 'PENDING_APPROVAL' || selectedTransaction.approval_status === 'ON_HOLD') ? (
-                          <span className={`inline-flex items-center space-x-1 text-sm font-semibold ${
-                            getTimeRemaining(selectedTransaction) === 'EXPIRED' ? 'text-red-600' : 'text-gray-900'
-                          }`}>
-                            <Clock className="w-4 h-4" />
-                            <span>{getTimeRemaining(selectedTransaction) || 'No limit'}</span>
-                          </span>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
+                        {selectedTransaction.approval_expires_at && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            Deadline: {new Date(selectedTransaction.approval_expires_at).toLocaleString()}
+                          </p>
                         )}
                       </div>
-                    </div>
+                    )}
+
+                    {/* Status */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-500">Status</label>
-                      <div className="mt-1">
-                        <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          statusConfig[selectedTransaction.approval_status as keyof typeof statusConfig]?.bg
-                        } ${statusConfig[selectedTransaction.approval_status as keyof typeof statusConfig]?.color}`}>
-                          <span>{statusConfig[selectedTransaction.approval_status as keyof typeof statusConfig]?.label}</span>
-                        </span>
-                      </div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</p>
+                      <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium mt-0.5 ${statusConfig[selectedTransaction.approval_status]?.bg} ${statusConfig[selectedTransaction.approval_status]?.color}`}>
+                        <span>{statusConfig[selectedTransaction.approval_status]?.label}</span>
+                      </span>
                     </div>
                   </div>
 
+                  {selectedTransaction.submitted_by && (
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs text-gray-400">
+                        Submitted by <span className="font-medium text-gray-600">{selectedTransaction.submitted_by}</span>
+                        {selectedTransaction.submitted_for_approval_at && ` on ${new Date(selectedTransaction.submitted_for_approval_at).toLocaleString()}`}
+                      </p>
+                      {selectedTransaction.approved_by && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {['APPROVED', 'AUTO_APPROVED'].includes(selectedTransaction.approval_status) ? 'Approved' : 'Actioned'} by{' '}
+                          <span className="font-medium text-gray-600">{selectedTransaction.approved_by}</span>
+                          {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString()}`}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {selectedTransaction.approval_notes && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-500">Previous Notes</label>
-                      <div className="mt-1 text-sm text-gray-700 bg-gray-50 rounded p-2">
-                        {selectedTransaction.approval_notes}
-                      </div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Notes</p>
+                      <div className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3">{selectedTransaction.approval_notes}</div>
                     </div>
                   )}
 
                   {selectedTransaction.rejection_reason && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-500">Rejection Reason</label>
-                      <div className="mt-1 text-sm text-red-700 bg-red-50 rounded p-2">
-                        {selectedTransaction.rejection_reason}
-                      </div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Rejection / Cancellation Reason</p>
+                      <div className="text-sm text-red-700 bg-red-50 rounded-lg p-3">{selectedTransaction.rejection_reason}</div>
                     </div>
                   )}
 
@@ -641,7 +1026,7 @@ export function TransactionApprovals() {
                     <div className="pt-4 border-t border-gray-200">
                       <button
                         onClick={() => setIsEditing(true)}
-                        className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
+                        className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium text-sm"
                       >
                         <Edit2 className="w-4 h-4" />
                         <span>Edit Transaction (Audit Trail Maintained)</span>
@@ -650,145 +1035,136 @@ export function TransactionApprovals() {
                   )}
                 </div>
               ) : (
+                /* Edit form */
                 <div className="space-y-4">
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                    <p className="text-sm text-yellow-800">
-                      Editing this transaction will maintain an audit trail of all changes.
-                    </p>
+                    <p className="text-sm text-yellow-800">Editing will maintain an audit trail of all changes.</p>
                   </div>
-
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Entity</label>
-                      <select
-                        value={editFormData.entity_id}
-                        onChange={(e) => setEditFormData({ ...editFormData, entity_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        {entities.map(entity => (
-                          <option key={entity.id} value={entity.id}>{entity.name}</option>
-                        ))}
+                      <select value={editFormData.entity_id} onChange={e => setEditFormData({ ...editFormData, entity_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                        {entities.map(entity => <option key={entity.id} value={entity.id}>{entity.name}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Type</label>
-                      <select
-                        value={editFormData.transaction_type}
-                        onChange={(e) => setEditFormData({ ...editFormData, transaction_type: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
+                      <select value={editFormData.transaction_type} onChange={e => setEditFormData({ ...editFormData, transaction_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
                         <option value="BUY">BUY</option>
                         <option value="SELL">SELL</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Share</label>
-                      <select
-                        value={editFormData.share_id}
-                        onChange={(e) => setEditFormData({ ...editFormData, share_id: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        {shares.map(share => (
-                          <option key={share.id} value={share.id}>{share.ticker} - {share.share_name}</option>
-                        ))}
+                      <select value={editFormData.share_id} onChange={e => setEditFormData({ ...editFormData, share_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                        {shares.map(share => <option key={share.id} value={share.id}>{share.ticker} - {share.share_name}</option>)}
                       </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
-                      <input
-                        type="date"
-                        value={editFormData.transaction_date}
-                        onChange={(e) => setEditFormData({ ...editFormData, transaction_date: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      <input type="date" value={editFormData.transaction_date} onChange={e => setEditFormData({ ...editFormData, transaction_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Number of Shares</label>
-                      <input
-                        type="number"
-                        step="1"
-                        value={editFormData.no_of_shares}
-                        onChange={(e) => setEditFormData({ ...editFormData, no_of_shares: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      <input type="number" step="1" value={editFormData.no_of_shares} onChange={e => setEditFormData({ ...editFormData, no_of_shares: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Price Per Share</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editFormData.price_per_share}
-                        onChange={(e) => setEditFormData({ ...editFormData, price_per_share: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                      <input type="number" step="0.01" value={editFormData.price_per_share} onChange={e => setEditFormData({ ...editFormData, price_per_share: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
                     </div>
                   </div>
-
                   <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
-                    >
-                      Cancel Edit
-                    </button>
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      Save Changes
-                    </button>
+                    <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancel Edit</button>
+                    <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Changes</button>
                   </div>
                 </div>
               )}
 
-              {actionType !== 'VIEW' && !isEditing && (
+              {/* Action-specific fields */}
+              {!isEditing && actionType !== 'VIEW' && (
                 <div className="space-y-4 pt-4 border-t border-gray-200">
                   {actionType === 'REJECT' && (
-                    <>
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                        <p className="text-sm text-amber-800">
-                          Upon rejection, any on-hold cash will be released back to the entity's available balance.
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Rejection Reason <span className="text-red-500">*</span>
-                        </label>
-                        <textarea
-                          value={actionFormData.rejection_reason}
-                          onChange={(e) => setActionFormData({ ...actionFormData, rejection_reason: e.target.value })}
-                          rows={3}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Provide reason for rejection..."
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  {actionType === 'HOLD' && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Extend Approval Time By (hours) <span className="text-red-500">*</span>
+                        Rejection Reason <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="number"
-                        step="0.5"
-                        min="0.5"
-                        value={actionFormData.hold_hours}
-                        onChange={(e) => setActionFormData({ ...actionFormData, hold_hours: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="e.g., 2 for 2 hours, 0.5 for 30 minutes"
+                      <textarea
+                        value={actionFormData.rejection_reason}
+                        onChange={e => setActionFormData({ ...actionFormData, rejection_reason: e.target.value })}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        placeholder="Provide reason for rejection..."
                       />
                     </div>
                   )}
 
+                  {actionType === 'HOLD' && (
+                    <div className="space-y-3">
+                      {selectedTransaction.approval_expires_at && (
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700">
+                          <span className="font-medium">Current deadline:</span>{' '}
+                          {new Date(selectedTransaction.approval_expires_at).toLocaleString()}
+                          {actionFormData.hold_hours && parseFloat(actionFormData.hold_hours) > 0 && (
+                            <span className="ml-2 text-blue-600 font-medium">
+                              → New deadline: {new Date(new Date(selectedTransaction.approval_expires_at).getTime() + parseFloat(actionFormData.hold_hours) * 3600000).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Extend by (hours) <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0.5"
+                          value={actionFormData.hold_hours}
+                          onChange={e => setActionFormData({ ...actionFormData, hold_hours: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                          placeholder="e.g., 2 for 2 hours, 0.5 for 30 minutes"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {(actionType === 'CANCEL' || actionType === 'CANCEL_APPROVE') && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          {actionType === 'CANCEL' ? 'Cancellation Reason' : 'Reason for Cancelling Approval'} <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          value={actionFormData.cancel_reason}
+                          onChange={e => setActionFormData({ ...actionFormData, cancel_reason: e.target.value })}
+                          rows={3}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-500 text-sm"
+                          placeholder="Provide reason for cancellation..."
+                        />
+                      </div>
+                      {selectedTransaction.broker_id && brokers.find(b => b.id === selectedTransaction.broker_id)?.contact_person_email && (
+                        <label className="flex items-center space-x-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={actionFormData.notify_broker}
+                            onChange={e => setActionFormData({ ...actionFormData, notify_broker: e.target.checked })}
+                            className="w-4 h-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                          />
+                          <span className="text-sm text-gray-700">
+                            Notify broker ({brokers.find(b => b.id === selectedTransaction.broker_id)?.broker_name}) by email
+                          </span>
+                        </label>
+                      )}
+                    </div>
+                  )}
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
                     <textarea
                       value={actionFormData.approval_notes}
-                      onChange={(e) => setActionFormData({ ...actionFormData, approval_notes: e.target.value })}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onChange={e => setActionFormData({ ...actionFormData, approval_notes: e.target.value })}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       placeholder="Add any additional notes..."
                     />
                   </div>
@@ -796,14 +1172,12 @@ export function TransactionApprovals() {
               )}
             </div>
 
+            {/* Footer buttons */}
             <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
-              <button
-                onClick={closeModal}
-                disabled={submitting}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg"
-              >
+              <button onClick={closeModal} disabled={submitting} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 rounded-lg disabled:opacity-50">
                 {actionType === 'VIEW' ? 'Close' : 'Cancel'}
               </button>
+
               {actionType === 'APPROVE' && !isEditing && (() => {
                 const isSelf = selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
                 return (
@@ -811,30 +1185,135 @@ export function TransactionApprovals() {
                     onClick={handleApprove}
                     disabled={submitting || isSelf}
                     title={isSelf ? 'Cannot approve your own submission' : ''}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {submitting ? 'Approving...' : 'Approve Transaction'}
                   </button>
                 );
               })()}
+
               {actionType === 'REJECT' && (
-                <button
-                  onClick={handleReject}
-                  disabled={submitting}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                >
+                <button onClick={handleReject} disabled={submitting} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
                   {submitting ? 'Rejecting...' : 'Reject Transaction'}
                 </button>
               )}
+
               {actionType === 'HOLD' && (
-                <button
-                  onClick={handleHold}
-                  disabled={submitting}
-                  className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50"
-                >
-                  {submitting ? 'Processing...' : 'Extend Time'}
+                <button onClick={handleHold} disabled={submitting} className="px-4 py-2 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50">
+                  {submitting ? 'Processing...' : 'Extend Deadline'}
                 </button>
               )}
+
+              {actionType === 'CANCEL' && (
+                <button onClick={handleCancel} disabled={submitting} className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">
+                  {submitting ? 'Cancelling...' : 'Cancel Transaction'}
+                </button>
+              )}
+
+              {actionType === 'CANCEL_APPROVE' && (
+                <button onClick={handleCancelApprove} disabled={submitting} className="px-4 py-2 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">
+                  {submitting ? 'Processing...' : 'Cancel Approval'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Modal */}
+      {showEmailModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-gray-900">Send Transaction Details</h3>
+              <button onClick={() => setShowEmailModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <p className="font-medium text-gray-700">{getEntityName(selectedTransaction.entity_id)}</p>
+                <p className="text-gray-500">{selectedTransaction.transaction_type} — {getShareInfo(selectedTransaction.share_id)}</p>
+                <p className="text-gray-500">{Number(selectedTransaction.no_of_shares).toLocaleString()} shares @ LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">To <span className="text-red-500">*</span></label>
+                <input
+                  type="email"
+                  value={emailAddress}
+                  onChange={e => setEmailAddress(e.target.value)}
+                  placeholder="recipient@example.com"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  disabled={sendingEmail}
+                />
+                {selectedTransaction.broker_id && (() => {
+                  const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
+                  return broker?.contact_person_email ? (
+                    <button
+                      type="button"
+                      onClick={() => setEmailAddress(broker.contact_person_email!)}
+                      className="mt-1 text-xs text-blue-600 hover:underline"
+                    >
+                      Use broker email: {broker.contact_person_email}
+                    </button>
+                  ) : null;
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">CC</label>
+                <div className="flex space-x-2">
+                  <input
+                    type="email"
+                    value={ccInput}
+                    onChange={e => setCcInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && ccInput.trim()) {
+                        e.preventDefault();
+                        setCcAddresses([...ccAddresses, ccInput.trim()]);
+                        setCcInput('');
+                      }
+                    }}
+                    placeholder="Add CC email and press Enter"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    disabled={sendingEmail}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
+                    disabled={sendingEmail || !ccInput.trim()}
+                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors disabled:opacity-50 text-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                {ccAddresses.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {ccAddresses.map((addr, i) => (
+                      <span key={i} className="inline-flex items-center space-x-1 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+                        <span>{addr}</span>
+                        <button onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))} disabled={sendingEmail}>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 border-t border-gray-200 px-6 py-4">
+              <button onClick={() => setShowEmailModal(false)} disabled={sendingEmail} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-200 rounded-lg">
+                Cancel
+              </button>
+              <button
+                onClick={sendEmail}
+                disabled={sendingEmail || !emailAddress.trim()}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
+              >
+                <Mail className="w-4 h-4" />
+                <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
+              </button>
             </div>
           </div>
         </div>
