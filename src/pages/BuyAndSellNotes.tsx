@@ -227,6 +227,7 @@ export function BuyAndSellNotes() {
   const [txnSearchTerm, setTxnSearchTerm] = useState('');
   const [txnDropdownOpen, setTxnDropdownOpen] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [viewingFileNoteId, setViewingFileNoteId] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData>({
     trade_date: '',
@@ -863,7 +864,34 @@ export function BuyAndSellNotes() {
     setShowProcessModal(true);
   }
 
-  function buildNotePayload(selectedTransaction: Transaction, noteType: 'Buy' | 'Sell', status: string, hasMismatch: boolean) {
+  async function uploadNoteFile(file: File): Promise<string | null> {
+    const ext = file.name.split('.').pop() || 'pdf';
+    const path = `buy-sell-notes/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await supabase.storage.from('transaction-documents').upload(path, file, { upsert: false });
+    if (error) { console.error('File upload error:', error); return null; }
+    return path;
+  }
+
+  async function handleViewFile(note: BuyAndSellNote) {
+    if (!note.file_url) return;
+    setViewingFileNoteId(note.id);
+    try {
+      // If it looks like a storage path (no http), generate a signed URL
+      if (!note.file_url.startsWith('http')) {
+        const { data, error } = await supabase.storage
+          .from('transaction-documents')
+          .createSignedUrl(note.file_url, 3600);
+        if (error || !data?.signedUrl) { alert('Could not retrieve file. It may have been deleted.'); return; }
+        window.open(data.signedUrl, '_blank');
+      } else {
+        window.open(note.file_url, '_blank');
+      }
+    } finally {
+      setViewingFileNoteId(null);
+    }
+  }
+
+  function buildNotePayload(selectedTransaction: Transaction, noteType: 'Buy' | 'Sell', status: string, hasMismatch: boolean, storagePath?: string | null) {
     const totalShares = extractedRows.reduce((s, r) => s + r.qty, 0);
     const totalGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
     const totalNet = extractedRows.reduce((s, r) => s + r.amount, 0);
@@ -881,7 +909,7 @@ export function BuyAndSellNotes() {
         dealer_name: formData.dealer_name || null,
         transaction_date: extractedData.trade_date || null,
         settlement_date: extractedData.settlement || formData.settlement_date || null,
-        file_url: uploadedFile?.name || null,
+        file_url: storagePath ?? uploadedFile?.name ?? null,
         remarks: formData.remarks || null,
         trade_date: extractedData.trade_date || null,
         contract_no: contractNo,
@@ -916,7 +944,8 @@ export function BuyAndSellNotes() {
       const noteType: 'Buy' | 'Sell' = rawType === 'SELL' ? 'Sell' : 'Buy';
       const allMatch = Object.values(fieldCompare).length > 0 && Object.values(fieldCompare).every(c => c.matches);
 
-      const { payload, totalNet, contractNo } = buildNotePayload(selectedTransaction, noteType, 'PROCESSED', !allMatch);
+      const storagePath = uploadedFile ? await uploadNoteFile(uploadedFile) : null;
+      const { payload, totalNet, contractNo } = buildNotePayload(selectedTransaction, noteType, 'PROCESSED', !allMatch, storagePath);
 
       const { data: insertedNote, error: insertError } = await supabase
         .from('buy_sell_notes')
@@ -970,7 +999,8 @@ export function BuyAndSellNotes() {
 
       const rawType = selectedTransaction.transaction_type?.toUpperCase();
       const noteType: 'Buy' | 'Sell' = rawType === 'SELL' ? 'Sell' : 'Buy';
-      const { payload } = buildNotePayload(selectedTransaction, noteType, 'PENDING_APPROVAL', true);
+      const storagePath = uploadedFile ? await uploadNoteFile(uploadedFile) : null;
+      const { payload } = buildNotePayload(selectedTransaction, noteType, 'PENDING_APPROVAL', true, storagePath);
 
       const { error } = await supabase.from('buy_sell_notes').insert(payload);
       if (error) throw error;
@@ -1472,15 +1502,17 @@ export function BuyAndSellNotes() {
                   <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center space-x-1">
                       {note.file_url && (
-                        <a
-                          href={note.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="View PDF"
+                        <button
+                          onClick={() => handleViewFile(note)}
+                          disabled={viewingFileNoteId === note.id}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="View uploaded file"
                         >
-                          <Eye className="w-4 h-4" />
-                        </a>
+                          {viewingFileNoteId === note.id
+                            ? <span className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin inline-block" />
+                            : <Eye className="w-4 h-4" />
+                          }
+                        </button>
                       )}
                       <button
                         onClick={() => openEditNote(note)}
@@ -1551,9 +1583,24 @@ export function BuyAndSellNotes() {
                           ))}
                         </div>
                       </div>
-                      {note.remarks && (
-                        <p className="mt-3 text-xs text-gray-500"><span className="font-semibold">Remarks:</span> {note.remarks}</p>
-                      )}
+                      <div className="mt-3 flex items-center gap-4">
+                        {note.remarks && (
+                          <p className="text-xs text-gray-500"><span className="font-semibold">Remarks:</span> {note.remarks}</p>
+                        )}
+                        {note.file_url && (
+                          <button
+                            onClick={() => handleViewFile(note)}
+                            disabled={viewingFileNoteId === note.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 ml-auto"
+                          >
+                            {viewingFileNoteId === note.id
+                              ? <span className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin inline-block" />
+                              : <Eye className="w-3.5 h-3.5" />
+                            }
+                            View Document
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )}
