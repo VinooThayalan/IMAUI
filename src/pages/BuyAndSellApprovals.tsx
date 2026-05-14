@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, Mail, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -74,7 +74,7 @@ interface EntityBroker {
   custodian_account_number?: string;
 }
 
-type ModalAction = 'approve' | 'reject' | 'inform' | null;
+type ModalAction = 'approve' | 'reject' | null;
 
 export function BuyAndSellApprovals() {
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
@@ -91,8 +91,6 @@ export function BuyAndSellApprovals() {
   const [modalAction, setModalAction] = useState<ModalAction>(null);
   const [selectedNote, setSelectedNote] = useState<BuyAndSellNote | null>(null);
   const [actionRemarks, setActionRemarks] = useState('');
-  const [informSubject, setInformSubject] = useState('');
-  const [informBody, setInformBody] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => { loadData(); }, []);
@@ -137,31 +135,12 @@ export function BuyAndSellApprovals() {
     setSelectedNote(note);
     setModalAction(action);
     setActionRemarks('');
-    if (action === 'inform') {
-      const { txn, entity, share, broker, eb } = getDetails(note);
-      setInformSubject(`Contract Note Query — ${note.contract_no || note.note_number}`);
-      setInformBody(
-        `Dear ${broker?.contact_person_name || 'Sir/Madam'},\n\n` +
-        `We are reviewing the contract note for the following transaction and have identified discrepancies that require clarification:\n\n` +
-        `Contract No: ${note.contract_no || note.note_number || '-'}\n` +
-        `Type: ${note.note_type}\n` +
-        `Security: ${share?.share_name || '-'} (${share?.ticker || '-'})\n` +
-        `Entity: ${entity?.name || '-'}\n` +
-        (eb?.broker_account_number ? `Client A/C: ${eb.broker_account_number}\n` : '') +
-        `Trade Date: ${note.trade_date ? new Date(note.trade_date).toLocaleDateString() : '-'}\n` +
-        `Settlement Date: ${note.settlement_date ? new Date(note.settlement_date).toLocaleDateString() : '-'}\n` +
-        `Net Amount: Rs. ${note.net_amount?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '-'}\n\n` +
-        `Please review and revert at your earliest convenience.\n\nThank you.`
-      );
-    }
   }
 
   function closeModal() {
     setModalAction(null);
     setSelectedNote(null);
     setActionRemarks('');
-    setInformSubject('');
-    setInformBody('');
     setIsSubmitting(false);
   }
 
@@ -245,14 +224,7 @@ export function BuyAndSellApprovals() {
     }
   }
 
-  function handleInformCopy() {
-    const broker = selectedNote ? getDetails(selectedNote).broker : null;
-    const email = broker?.contact_person_email || '';
-    navigator.clipboard.writeText(`To: ${email}\nSubject: ${informSubject}\n\n${informBody}`)
-      .then(() => alert('Email content copied to clipboard.'));
-  }
-
-  const displayNotes = notes.filter(n => {
+const displayNotes = notes.filter(n => {
     const status = n.status || 'PROCESSED';
     if (filterStatus !== 'all' && status !== filterStatus) return false;
     if (!searchTerm) return true;
@@ -410,10 +382,7 @@ export function BuyAndSellApprovals() {
                           <button onClick={() => openModal(note, 'reject')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
-                          <button onClick={() => openModal(note, 'inform')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                            <Mail className="w-3.5 h-3.5" /> Broker
-                          </button>
-                          {note.file_url && (
+{note.file_url && (
                             <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
                               <Eye className="w-3.5 h-3.5" />
                             </a>
@@ -604,60 +573,6 @@ export function BuyAndSellApprovals() {
         </div>
       )}
 
-      {/* Inform Broker Modal */}
-      {modalAction === 'inform' && selectedNote && (() => {
-        const { broker } = getDetails(selectedNote);
-        return (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full">
-              <div className="px-6 py-4 border-b border-gray-200 flex items-center gap-3">
-                <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Mail className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900">Inform Broker</h2>
-                  <p className="text-xs text-gray-500">{selectedNote.contract_no || selectedNote.note_number}</p>
-                </div>
-              </div>
-              <div className="p-6 space-y-4">
-                {broker?.contact_person_email ? (
-                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-sm">
-                    <Mail className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                    <span className="text-blue-700 font-medium">{broker.contact_person_email}</span>
-                    {broker.contact_person_name && <span className="text-blue-500">— {broker.contact_person_name}</span>}
-                  </div>
-                ) : (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700">
-                    No email address on file for this broker. Copy and send manually.
-                  </div>
-                )}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Subject</label>
-                  <input type="text" value={informSubject} onChange={e => setInformSubject(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Message</label>
-                  <textarea value={informBody} onChange={e => setInformBody(e.target.value)} rows={10} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
-                </div>
-                <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
-                  <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
-                  <button onClick={handleInformCopy} className="px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
-                    <Mail className="w-4 h-4" /> Copy to Clipboard
-                  </button>
-                  {broker?.contact_person_email && (
-                    <a
-                      href={`mailto:${broker.contact_person_email}?subject=${encodeURIComponent(informSubject)}&body=${encodeURIComponent(informBody)}`}
-                      className="px-5 py-2 text-sm font-medium bg-gray-800 text-white rounded-lg hover:bg-gray-900 transition-colors flex items-center gap-2"
-                    >
-                      <Mail className="w-4 h-4" /> Open Email Client
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
