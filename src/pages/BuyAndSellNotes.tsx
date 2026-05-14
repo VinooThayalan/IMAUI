@@ -281,10 +281,10 @@ export function BuyAndSellNotes() {
 
       const allNotes = notesRes.data || [];
       const allTxns = transactionsRes.data || [];
-      // Exclude transactions that already have an active (non-rejected) linked note from the dropdown
+      // Exclude transactions that already have a PROCESSED note linked
       const linkedTxnIds = new Set(
         allNotes
-          .filter((n: any) => n.status !== 'REJECTED')
+          .filter((n: any) => n.status === 'PROCESSED')
           .map((n: any) => n.transaction_id)
           .filter(Boolean)
       );
@@ -1174,17 +1174,17 @@ export function BuyAndSellNotes() {
           trade_date: editNote.trade_date || null,
           settlement_date: editNote.settlement_date,
           contract_no: editNote.contract_no || null,
-          no_of_shares: editNote.no_of_shares ? Number(editNote.no_of_shares) : null,
-          price_avg: editNote.price_avg ? Number(editNote.price_avg) : null,
-          gross_amount: editNote.gross_amount ? Number(editNote.gross_amount) : null,
-          brokerage: editNote.brokerage ? Number(editNote.brokerage) : null,
-          sec: editNote.sec ? Number(editNote.sec) : null,
-          exchange: editNote.exchange ? Number(editNote.exchange) : null,
-          cds: editNote.cds ? Number(editNote.cds) : null,
-          gov_cess: editNote.gov_cess ? Number(editNote.gov_cess) : null,
-          clearing_fees: editNote.clearing_fees ? Number(editNote.clearing_fees) : null,
-          net_amount: editNote.net_amount ? Number(editNote.net_amount) : null,
-          foreign_brokerage: editNote.foreign_brokerage ? Number(editNote.foreign_brokerage) : null,
+          no_of_shares: editNote.no_of_shares !== '' ? Number(editNote.no_of_shares) : null,
+          price_avg: editNote.price_avg !== '' ? Number(editNote.price_avg) : null,
+          gross_amount: editNote.gross_amount !== '' ? Number(editNote.gross_amount) : null,
+          brokerage: editNote.brokerage !== '' ? Number(editNote.brokerage) : null,
+          sec: editNote.sec !== '' ? Number(editNote.sec) : null,
+          exchange: editNote.exchange !== '' ? Number(editNote.exchange) : null,
+          cds: editNote.cds !== '' ? Number(editNote.cds) : null,
+          gov_cess: editNote.gov_cess !== '' ? Number(editNote.gov_cess) : null,
+          clearing_fees: editNote.clearing_fees !== '' ? Number(editNote.clearing_fees) : null,
+          net_amount: editNote.net_amount !== '' ? Number(editNote.net_amount) : null,
+          foreign_brokerage: editNote.foreign_brokerage !== '' ? Number(editNote.foreign_brokerage) : null,
           remarks: editNote.remarks || null,
         })
         .eq('id', editNote.id);
@@ -1531,7 +1531,7 @@ export function BuyAndSellNotes() {
                 {isExpanded && (
                   <tr key={`${note.id}-detail`} className="bg-blue-50 border-b border-blue-100">
                     <td colSpan={11} className="px-6 py-4">
-                      <div className="grid grid-cols-4 gap-4 mb-4">
+                      <div className="grid grid-cols-3 gap-4 mb-3">
                         <div className="bg-white rounded-lg border border-blue-200 px-4 py-3">
                           <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
                           <p className="text-sm font-bold text-gray-900">{noteBroker?.broker_name || note.broker || '-'}</p>
@@ -1551,6 +1551,20 @@ export function BuyAndSellNotes() {
                               return eb?.broker_account_number || eb?.custodian_account_number || '-';
                             })()}
                           </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="bg-white rounded-lg border border-sky-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-sky-500 uppercase tracking-wide mb-0.5">Share</p>
+                          <p className="text-sm font-bold text-gray-900">{noteShare?.share_name || '-'}</p>
+                          <p className="text-xs text-gray-500 font-mono mt-0.5">{noteShare?.ticker || ''}</p>
+                        </div>
+                        <div className="bg-white rounded-lg border border-violet-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-violet-500 uppercase tracking-wide mb-0.5">Avg. Price</p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {note.price_avg != null ? `Rs. ${Number(note.price_avg).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">{note.no_of_shares != null ? `${Number(note.no_of_shares).toLocaleString()} shares` : ''}</p>
                         </div>
                         <div className="bg-white rounded-lg border border-amber-200 px-4 py-3">
                           <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
