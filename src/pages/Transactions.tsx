@@ -562,7 +562,10 @@ export function Transactions() {
 
       const { error } = await supabase
         .from('transactions')
-        .delete()
+        .update({
+          approval_status: 'CANCELLED',
+          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString()}`,
+        })
         .eq('id', transaction.id);
 
       if (error) throw error;
@@ -886,6 +889,15 @@ export function Transactions() {
   }
 
   function handleEmailTransaction(transaction: Transaction) {
+    setSelectedTransaction(transaction);
+    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    setEmailAddress(broker?.contact_person_email || '');
+    setCcAddresses([]);
+    setCcInput('');
+    setShowEmailModal(true);
+  }
+
+  function handleCancelNotifyBroker(transaction: Transaction) {
     setSelectedTransaction(transaction);
     const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
     setEmailAddress(broker?.contact_person_email || '');
@@ -1322,7 +1334,9 @@ export function Transactions() {
               <option value="DRAFT">Draft</option>
               <option value="PENDING_APPROVAL">Pending</option>
               <option value="APPROVED">Approved</option>
+              <option value="AUTO_APPROVED">Auto Approved</option>
               <option value="REJECTED">Rejected</option>
+              <option value="CANCELLED">Cancelled</option>
             </select>
             {(filterDateFrom || filterDateTo || (activeTab === 'all' ? filterStatus !== 'DRAFT' : filterStatus !== 'PENDING_APPROVAL')) && (
               <button
@@ -1399,14 +1413,24 @@ export function Transactions() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex flex-col space-y-1">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        transaction.approval_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
-                        transaction.approval_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
-                        transaction.approval_status === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {transaction.approval_status === 'PENDING_APPROVAL' ? 'PENDING' : transaction.approval_status}
-                      </span>
+                      {(() => {
+                        const s = transaction.approval_status;
+                        const cls =
+                          s === 'APPROVED' || s === 'AUTO_APPROVED' ? 'bg-green-100 text-green-800' :
+                          s === 'REJECTED' ? 'bg-red-100 text-red-800' :
+                          s === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
+                          s === 'CANCELLED' ? 'bg-rose-100 text-rose-800' :
+                          'bg-gray-100 text-gray-800';
+                        const label =
+                          s === 'PENDING_APPROVAL' ? 'PENDING' :
+                          s === 'AUTO_APPROVED' ? 'APPROVED' :
+                          s;
+                        return (
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
+                            {label}
+                          </span>
+                        );
+                      })()}
                       {transaction.offline_approval && (
                         <span className="text-xs text-blue-600 font-medium">Offline</span>
                       )}
@@ -1438,11 +1462,20 @@ export function Transactions() {
                       >
                         <Printer className="w-5 h-5" />
                       </button>
-                      {transaction.approval_status === 'APPROVED' && (
+                      {(transaction.approval_status === 'APPROVED' || transaction.approval_status === 'AUTO_APPROVED') && (
                         <button
                           onClick={() => handleEmailTransaction(transaction)}
                           className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
                           title="Email Transaction"
+                        >
+                          <Mail className="w-5 h-5" />
+                        </button>
+                      )}
+                      {transaction.approval_status === 'CANCELLED' && transaction.broker_id && (
+                        <button
+                          onClick={() => handleCancelNotifyBroker(transaction)}
+                          className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Send cancellation notice to broker"
                         >
                           <Mail className="w-5 h-5" />
                         </button>
@@ -1464,14 +1497,16 @@ export function Transactions() {
                           )}
                         </button>
                       )}
-                      <button
-                        onClick={() => handleCancelTransaction(transaction)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Cancel Transaction"
-                        disabled={submitting}
-                      >
-                        <XCircle className="w-5 h-5" />
-                      </button>
+                      {transaction.approval_status !== 'CANCELLED' && transaction.approval_status !== 'APPROVED' && transaction.approval_status !== 'AUTO_APPROVED' && transaction.approval_status !== 'REJECTED' && (
+                        <button
+                          onClick={() => handleCancelTransaction(transaction)}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Cancel Transaction"
+                          disabled={submitting}
+                        >
+                          <XCircle className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

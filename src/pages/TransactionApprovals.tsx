@@ -83,7 +83,7 @@ const ALL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'AUTO_APPROVED', 'REJECTED
 const statusConfig: Record<string, { icon: any; color: string; bg: string; label: string }> = {
   PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
   APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
-  AUTO_APPROVED: { icon: CheckCircle, color: 'text-emerald-700', bg: 'bg-emerald-100', label: 'Auto Approved' },
+  AUTO_APPROVED: { icon: CheckCircle, color: 'text-green-700', bg: 'bg-green-100', label: 'Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
   EXPIRED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Expired' },
   ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' },
@@ -822,6 +822,17 @@ export function TransactionApprovals() {
                           </button>
                         )}
 
+                        {/* Cancelled: send cancel notification to broker */}
+                        {transaction.approval_status === 'CANCELLED' && transaction.broker_id && (
+                          <button
+                            onClick={() => openEmailModal(transaction)}
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Send cancellation notice to broker"
+                          >
+                            <Mail className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {/* Approved: email + cancel-approve (if no buy/sell note uploaded) */}
                         {isApproved && (
                           <>
@@ -1149,19 +1160,6 @@ export function TransactionApprovals() {
                           placeholder="Provide reason for cancellation..."
                         />
                       </div>
-                      {selectedTransaction.broker_id && brokers.find(b => b.id === selectedTransaction.broker_id)?.contact_person_email && (
-                        <label className="flex items-center space-x-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={actionFormData.notify_broker}
-                            onChange={e => setActionFormData({ ...actionFormData, notify_broker: e.target.checked })}
-                            className="w-4 h-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
-                          />
-                          <span className="text-sm text-gray-700">
-                            Notify broker ({brokers.find(b => b.id === selectedTransaction.broker_id)?.broker_name}) by email
-                          </span>
-                        </label>
-                      )}
                     </div>
                   )}
 
