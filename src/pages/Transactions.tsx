@@ -477,6 +477,15 @@ export function Transactions() {
       return;
     }
 
+    if (formData.transaction_type === 'BUY') {
+      const entity = entities.find(e => e.id === formData.entity_id);
+      const totalRequired = calculateTotalAmountNet ? calculateTotalAmountNet() : 0;
+      if (entity && totalRequired > 0 && entity.current_balance < totalRequired) {
+        alert('Insufficient funds to create the transaction.');
+        return;
+      }
+    }
+
     if (formData.transaction_type === 'SELL') {
       const balKey = `${formData.entity_id}-${formData.share_id}`;
       const bal = shareBalances.get(balKey);
@@ -526,9 +535,18 @@ export function Transactions() {
       setShowModal(false);
       resetForm();
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating transaction:', error);
-      alert('Failed to create transaction');
+      const msg: string = error?.message || error?.error_description || '';
+      if (
+        msg.toLowerCase().includes('insufficient') ||
+        msg.toLowerCase().includes('balance') ||
+        msg.toLowerCase().includes('fund')
+      ) {
+        alert('Insufficient funds to create the transaction.');
+      } else {
+        alert('Failed to create transaction');
+      }
     } finally {
       setSubmitting(false);
     }
