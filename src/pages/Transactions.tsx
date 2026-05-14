@@ -142,6 +142,7 @@ export function Transactions() {
   const [emailAddress, setEmailAddress] = useState('');
   const [ccAddresses, setCcAddresses] = useState<string[]>([]);
   const [ccInput, setCcInput] = useState('');
+  const [emailNote, setEmailNote] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -229,7 +230,7 @@ export function Transactions() {
         supabase.from('entities').select('id, name, current_balance').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
-        supabase.from('brokers').select('id, broker_name, contact_person_email').eq('is_active', true).order('broker_name'),
+        supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
         supabase.from('entity_brokers').select('*, bank:banks(id, name, balance)').eq('is_active', true),
         supabase.from('cash_balance_ledger').select('bank_id, type, amount')
@@ -894,6 +895,7 @@ export function Transactions() {
     setEmailAddress(broker?.contact_person_email || '');
     setCcAddresses([]);
     setCcInput('');
+    setEmailNote('');
     setShowEmailModal(true);
   }
 
@@ -903,6 +905,7 @@ export function Transactions() {
     setEmailAddress(broker?.contact_person_email || '');
     setCcAddresses([]);
     setCcInput('');
+    setEmailNote('');
     setShowEmailModal(true);
   }
 
@@ -950,7 +953,8 @@ export function Transactions() {
         brokerage_fee_rate: selectedTransaction.brokerage_fee_rate ? `${selectedTransaction.brokerage_fee_rate}%` : 'N/A',
         brokerage_fee: Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
         bank_name: bank?.name || 'N/A',
-        bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
+        bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
+        ...(emailNote.trim() ? { note: emailNote.trim() } : {}),
       };
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
@@ -2240,7 +2244,7 @@ export function Transactions() {
                   <Mail className="w-4 h-4 text-blue-600" />
                   <h2 className="text-base font-bold text-gray-900">Send Transaction Details</h2>
                 </div>
-                <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setEmailNote(''); setSelectedTransaction(null); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -2281,16 +2285,35 @@ export function Transactions() {
                     );
                   })}
                 </div>
+                {emailNote && (
+                  <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs font-semibold text-amber-700 mb-0.5">Note</p>
+                    <p className="text-xs text-amber-800 whitespace-pre-line">{emailNote}</p>
+                  </div>
+                )}
               </div>
 
               {/* Divider */}
               <div className="border-t border-gray-200 mx-5 flex-shrink-0" />
 
-              {/* To / CC / Actions */}
+              {/* Note / To / CC / Actions */}
               <div className="px-5 py-3 space-y-2.5 flex-shrink-0">
+                {/* Note */}
+                <div className="flex items-start gap-3">
+                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0 pt-1.5">Note</label>
+                  <textarea
+                    value={emailNote}
+                    onChange={(e) => setEmailNote(e.target.value)}
+                    rows={2}
+                    disabled={sendingEmail}
+                    placeholder="Optional note to include in the email..."
+                    className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                  />
+                </div>
+
                 {/* To */}
                 <div className="flex items-center gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0">To</label>
+                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0">To</label>
                   <div className="flex-1">
                     <input
                       type="email"
@@ -2310,7 +2333,7 @@ export function Transactions() {
 
                 {/* CC */}
                 <div className="flex items-start gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0 pt-1.5">CC</label>
+                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0 pt-1.5">CC</label>
                   <div className="flex-1 space-y-1.5">
                     {ccAddresses.length > 0 && (
                       <div className="flex flex-wrap gap-1">
@@ -2350,7 +2373,7 @@ export function Transactions() {
 
                 {/* Actions */}
                 <div className="flex justify-end gap-2 pt-1">
-                  <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }} disabled={sendingEmail} className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
+                  <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setEmailNote(''); setSelectedTransaction(null); }} disabled={sendingEmail} className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
                     Cancel
                   </button>
                   <button onClick={sendEmail} disabled={sendingEmail || !emailAddress.trim()} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
