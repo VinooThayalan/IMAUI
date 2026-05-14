@@ -215,6 +215,7 @@ export function BuyAndSellNotes() {
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
+  const [banks, setBanks] = useState<Array<{ id: string; entity_id: string; name: string; account_number: string | null }>>([]);
   const [fieldCompare, setFieldCompare] = useState<Record<string, FieldCompare>>({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [debugRawText, setDebugRawText] = useState<string>('');
@@ -263,14 +264,15 @@ export function BuyAndSellNotes() {
     try {
       setLoading(true);
 
-      const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, entityBrokersRes, feeTypesRes] = await Promise.all([
+      const [notesRes, transactionsRes, entitiesRes, sharesRes, brokersRes, entityBrokersRes, feeTypesRes, banksRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('*').in('approval_status', ['APPROVED', 'AUTO_APPROVED']).order('transaction_date', { ascending: false }),
         supabase.from('entities').select('id, entity_id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         supabase.from('brokers').select('id, broker_id, broker_name').eq('is_active', true).order('broker_name'),
         supabase.from('entity_brokers').select('*'),
-        supabase.from('brokerage_fee_types').select('id, name, fee_breakdown_items')
+        supabase.from('brokerage_fee_types').select('id, name, fee_breakdown_items'),
+        supabase.from('banks').select('id, entity_id, name, account_number').eq('is_active', true),
       ]);
 
       if (notesRes.error) throw notesRes.error;
@@ -303,6 +305,7 @@ export function BuyAndSellNotes() {
             : (ft.fee_breakdown_items || []),
         }))
       );
+      setBanks(banksRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('Failed to load data');
@@ -1531,46 +1534,22 @@ export function BuyAndSellNotes() {
                 {isExpanded && (
                   <tr key={`${note.id}-detail`} className="bg-blue-50 border-b border-blue-100">
                     <td colSpan={11} className="px-6 py-4">
-                      <div className="grid grid-cols-3 gap-4 mb-3">
-                        <div className="bg-white rounded-lg border border-blue-200 px-4 py-3">
-                          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
-                          <p className="text-sm font-bold text-gray-900">{noteBroker?.broker_name || note.broker || '-'}</p>
-                          {note.dealer_name && <p className="text-xs text-gray-500 mt-0.5">Contact: {note.dealer_name}</p>}
-                        </div>
+                      <div className="grid grid-cols-3 gap-4 mb-4">
                         <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Contract No.</p>
                           <p className="text-sm font-bold text-gray-900 font-mono">{note.contract_no || note.note_number || '-'}</p>
                         </div>
-                        <div className="bg-white rounded-lg border border-emerald-200 px-4 py-3">
-                          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">Client A/C Number</p>
-                          <p className="text-sm font-bold text-gray-900 font-mono">
-                            {(() => {
-                              const eb = noteEntity && note.broker_id
-                                ? entityBrokers.find(e => e.entity_id === noteEntity.id && e.broker_id === note.broker_id)
-                                : null;
-                              return eb?.broker_account_number || eb?.custodian_account_number || '-';
-                            })()}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-4 mb-4">
                         <div className="bg-white rounded-lg border border-sky-200 px-4 py-3">
                           <p className="text-xs font-semibold text-sky-500 uppercase tracking-wide mb-0.5">Share</p>
                           <p className="text-sm font-bold text-gray-900">{noteShare?.share_name || '-'}</p>
                           <p className="text-xs text-gray-500 font-mono mt-0.5">{noteShare?.ticker || ''}</p>
                         </div>
-                        <div className="bg-white rounded-lg border border-violet-200 px-4 py-3">
-                          <p className="text-xs font-semibold text-violet-500 uppercase tracking-wide mb-0.5">Avg. Price</p>
+                        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Avg. Price</p>
                           <p className="text-sm font-bold text-gray-900">
                             {note.price_avg != null ? `Rs. ${Number(note.price_avg).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '-'}
                           </p>
                           <p className="text-xs text-gray-500 mt-0.5">{note.no_of_shares != null ? `${Number(note.no_of_shares).toLocaleString()} shares` : ''}</p>
-                        </div>
-                        <div className="bg-white rounded-lg border border-amber-200 px-4 py-3">
-                          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
-                          <p className="text-sm font-bold text-gray-900">
-                            {note.settlement_date ? new Date(note.settlement_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
-                          </p>
                         </div>
                       </div>
                       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -1748,25 +1727,35 @@ export function BuyAndSellNotes() {
                 const selEb = selEntity && formData.broker_id
                   ? entityBrokers.find(eb => eb.entity_id === selEntity.id && eb.broker_id === formData.broker_id)
                   : null;
+                const entityBank = selEntity ? banks.find(b => b.entity_id === selEntity.id) : null;
                 return (
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 grid grid-cols-2 gap-3 text-xs">
-                    <div>
-                      <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Transaction</p>
-                      <p className="font-bold text-gray-900">{selShare?.share_name || selShare?.ticker || '-'} <span className="font-mono text-gray-500">({selShare?.ticker || '-'})</span></p>
-                      <p className="text-gray-600 mt-0.5">{selEntity?.name || '-'}</p>
-                      <p className="text-gray-500 mt-0.5">
-                        {selTxn.transaction_type} · {Number(selTxn.no_of_shares).toLocaleString()} shares @ Rs.&nbsp;{Number(selTxn.price_per_share).toFixed(4)}
-                      </p>
-                      <p className="text-gray-400 mt-0.5">Date: {selTxn.transaction_date ? new Date(selTxn.transaction_date).toLocaleDateString() : '-'}</p>
-                    </div>
-                    {selBroker && (
-                      <div>
-                        <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Broker</p>
-                        <p className="font-bold text-gray-900">{selBroker.broker_name}</p>
-                        {selEb?.broker_account_number && <p className="text-gray-500 mt-0.5">A/C: <span className="font-mono">{selEb.broker_account_number}</span></p>}
-                        {selEb?.custodian_account_number && <p className="text-gray-500 mt-0.5">CDS: <span className="font-mono">{selEb.custodian_account_number}</span></p>}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-white rounded border border-blue-100 px-3 py-2">
+                        <p className="text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Entity</p>
+                        <p className="font-bold text-gray-900">{selEntity?.name || '-'}</p>
                       </div>
-                    )}
+                      <div className="bg-white rounded border border-blue-100 px-3 py-2">
+                        <p className="text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Transaction Date</p>
+                        <p className="font-bold text-gray-900">{selTxn.transaction_date ? new Date(selTxn.transaction_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</p>
+                        <p className="text-gray-500 mt-0.5">{selTxn.transaction_type} · {Number(selTxn.no_of_shares).toLocaleString()} @ Rs.&nbsp;{Number(selTxn.price_per_share).toFixed(4)}</p>
+                      </div>
+                      {selBroker && (
+                        <div className="bg-white rounded border border-blue-100 px-3 py-2">
+                          <p className="text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Broker</p>
+                          <p className="font-bold text-gray-900">{selBroker.broker_name}</p>
+                          {selEb?.broker_account_number && <p className="text-gray-500 mt-0.5">Client A/C: <span className="font-mono">{selEb.broker_account_number}</span></p>}
+                          {selEb?.custodian_account_number && <p className="text-gray-500 mt-0.5">CDS: <span className="font-mono">{selEb.custodian_account_number}</span></p>}
+                        </div>
+                      )}
+                      {entityBank && (
+                        <div className="bg-white rounded border border-blue-100 px-3 py-2">
+                          <p className="text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Entity Bank Account</p>
+                          <p className="font-bold text-gray-900">{entityBank.name}</p>
+                          {entityBank.account_number && <p className="text-gray-500 mt-0.5 font-mono">{entityBank.account_number}</p>}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })()}
@@ -1933,33 +1922,28 @@ export function BuyAndSellNotes() {
                 {(() => {
                   const selectedBroker = formData.broker_id ? brokers.find(b => b.id === formData.broker_id) : null;
                   const settlementDate = extractedData.settlement || formData.settlement_date;
-                  const txnForAc = transactions.find(t => t.id === formData.transaction_id);
+                  const txnForAc = transactions.find(t => t.id === formData.transaction_id) || allTransactions.find(t => t.id === formData.transaction_id);
                   const entityForAc = txnForAc ? entities.find(e => e.id === txnForAc.entity_id) : null;
                   const matchedEb = entityForAc
                     ? entityBrokers.find(eb => eb.entity_id === entityForAc.id && eb.broker_id === formData.broker_id)
                     : null;
                   const clientAc = matchedEb?.broker_account_number || matchedEb?.custodian_account_number || extractedData.account_no || null;
-                  if (!selectedBroker && !clientAc && !settlementDate) return null;
                   return (
                     <div className="grid grid-cols-3 gap-3">
-                      {selectedBroker && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
-                          <p className="text-sm font-bold text-blue-900">{selectedBroker.broker_name}</p>
-                        </div>
-                      )}
-                      {clientAc && (
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">Client A/C Number</p>
-                          <p className="text-sm font-bold text-emerald-900 font-mono">{clientAc}</p>
-                        </div>
-                      )}
-                      {settlementDate && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
-                          <p className="text-sm font-bold text-amber-900">{new Date(settlementDate).toLocaleDateString()}</p>
-                        </div>
-                      )}
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5">
+                        <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
+                        <p className="text-sm font-bold text-blue-900">{selectedBroker?.broker_name || '-'}</p>
+                      </div>
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+                        <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">Client A/C Number</p>
+                        <p className="text-sm font-bold text-emerald-900 font-mono">{clientAc || '-'}</p>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                        <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
+                        <p className="text-sm font-bold text-amber-900">
+                          {settlementDate ? new Date(settlementDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}
+                        </p>
+                      </div>
                     </div>
                   );
                 })()}
@@ -2219,7 +2203,7 @@ export function BuyAndSellNotes() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Dealer Name</label>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Contact Person</label>
                   <input
                     type="text"
                     value={editNote.dealer_name}
