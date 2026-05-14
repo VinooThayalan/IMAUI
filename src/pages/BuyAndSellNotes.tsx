@@ -1415,7 +1415,6 @@ export function BuyAndSellNotes() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-4"></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ticker</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
@@ -1453,9 +1452,6 @@ export function BuyAndSellNotes() {
                 >
                   <td className="px-4 py-3 text-gray-400">
                     <svg className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="text-sm font-bold text-blue-600">{note.contract_no || note.note_number || '-'}</div>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="text-sm text-gray-900">{noteEntity?.name || '-'}</div>
@@ -1534,12 +1530,16 @@ export function BuyAndSellNotes() {
                 </tr>
                 {isExpanded && (
                   <tr key={`${note.id}-detail`} className="bg-blue-50 border-b border-blue-100">
-                    <td colSpan={12} className="px-6 py-4">
-                      <div className="grid grid-cols-3 gap-4 mb-4">
+                    <td colSpan={11} className="px-6 py-4">
+                      <div className="grid grid-cols-4 gap-4 mb-4">
                         <div className="bg-white rounded-lg border border-blue-200 px-4 py-3">
                           <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Broker</p>
                           <p className="text-sm font-bold text-gray-900">{noteBroker?.broker_name || note.broker || '-'}</p>
                           {note.dealer_name && <p className="text-xs text-gray-500 mt-0.5">Contact: {note.dealer_name}</p>}
+                        </div>
+                        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">Contract No.</p>
+                          <p className="text-sm font-bold text-gray-900 font-mono">{note.contract_no || note.note_number || '-'}</p>
                         </div>
                         <div className="bg-white rounded-lg border border-emerald-200 px-4 py-3">
                           <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">Client A/C Number</p>
