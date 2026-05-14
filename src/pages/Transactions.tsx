@@ -935,7 +935,7 @@ export function Transactions() {
       const transactionData = {
         entity: entityName,
         transaction_type: selectedTransaction.transaction_type,
-        share: share?.name || 'N/A',
+        share: share?.share_name || 'N/A',
         ticker: share?.ticker || 'N/A',
         transaction_date: new Date(selectedTransaction.transaction_date).toLocaleDateString(),
         cds_acc_type: entityBroker?.relationship_type || 'N/A',
@@ -999,7 +999,7 @@ export function Transactions() {
     return {
       entity: entityName,
       transaction_type: transaction.transaction_type,
-      share: share?.name || 'N/A',
+      share: share?.share_name || 'N/A',
       ticker: share?.ticker || 'N/A',
       transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
       cds_acc_type: entityBroker?.relationship_type || 'N/A',
@@ -2226,172 +2226,144 @@ export function Transactions() {
         </div>
       )}
 
-      {showEmailModal && selectedTransaction && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '88vh' }}>
+      {showEmailModal && selectedTransaction && (() => {
+        const data = getTransactionEmailData(selectedTransaction);
+        const broker = selectedTransaction.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
+        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col" style={{ maxHeight: '92vh' }}>
 
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 flex-shrink-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 flex-shrink-0">
+                <div className="flex items-center space-x-2">
                   <Mail className="w-4 h-4 text-blue-600" />
+                  <h2 className="text-base font-bold text-gray-900">Send Transaction Details</h2>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900">Send Transaction Details</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Review the email preview on the left, then fill in recipient details on the right</p>
-                </div>
+                <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Split body */}
-            <div className="flex flex-1 min-h-0">
+              {/* Transaction data — compact grid, no scroll needed */}
+              <div className="px-5 pt-4 pb-3 flex-shrink-0">
+                {/* Type badge + share headline */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${typeColor}`}>{data.transaction_type}</span>
+                  <span className="font-semibold text-gray-900 text-sm">{data.ticker} — {data.share}</span>
+                  <span className="text-gray-400 text-xs ml-auto">{data.entity}</span>
+                </div>
 
-              {/* LEFT — Email Preview (scrollable) */}
-              <div className="flex-1 border-r border-gray-200 overflow-y-auto bg-gray-50 p-5">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Email Preview</p>
-                <div className="bg-white rounded-lg border border-gray-200 p-5 text-sm">
-                  <div className="text-center mb-4 pb-4 border-b border-gray-100">
-                    <h4 className="text-base font-bold text-gray-900">Transaction Details</h4>
-                    <p className="text-xs text-gray-400 mt-0.5">{new Date().toLocaleString()}</p>
-                  </div>
-                  {(() => {
-                    const data = getTransactionEmailData(selectedTransaction);
-                    const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-                    const rows: [string, React.ReactNode, string?][] = [
-                      ['Entity', data.entity],
-                      ['Transaction Type', <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${typeColor}`}>{data.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</span>],
-                      ['Share', `${data.ticker} — ${data.share}`],
-                      ['Transaction Date', data.transaction_date],
-                      ['CDS Acc Type', data.cds_acc_type, 'highlight'],
-                      ['CDS Acc No.', data.cds_acc_no, 'highlight'],
-                      ['Order Type', data.order_type],
-                      ['No. of Shares', data.no_of_shares],
-                      ['Gross Price / Share', `LKR ${data.gross_price_per_share}`, 'highlight'],
-                      ['Net Price / Share', `LKR ${data.net_price_per_share}`],
-                      ['Total Amount', <span className="font-bold">{`LKR ${data.total_amount}`}</span>],
-                      ['Broker', data.broker_name],
-                      ['Brokerage Fee Type', data.brokerage_fee_type],
-                      ['Brokerage Fee Rate', data.brokerage_fee_rate],
-                      ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
-                      ['Bank Name', data.bank_name, 'highlight'],
-                      ['Bank Acc No.', data.bank_acc_no, 'highlight'],
-                    ];
+                {/* Two-column grid */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0 border border-gray-200 rounded-lg overflow-hidden">
+                  {[
+                    ['Transaction Date', data.transaction_date],
+                    ['Order Type', data.order_type],
+                    ['No. of Shares', data.no_of_shares],
+                    ['Gross Price / Share', `LKR ${data.gross_price_per_share}`],
+                    ['Net Price / Share', `LKR ${data.net_price_per_share}`],
+                    ['Total Amount', `LKR ${data.total_amount}`],
+                    ['CDS Acc Type', data.cds_acc_type],
+                    ['CDS Acc No.', data.cds_acc_no],
+                    ['Broker', data.broker_name],
+                    ['Brokerage Fee Type', data.brokerage_fee_type],
+                    ['Brokerage Fee Rate', data.brokerage_fee_rate],
+                    ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
+                    ['Bank Name', data.bank_name],
+                    ['Bank Acc No.', data.bank_acc_no],
+                  ].map(([label, value], i) => {
+                    const isKey = ['Total Amount', 'CDS Acc Type', 'CDS Acc No.', 'Gross Price / Share', 'Bank Name', 'Bank Acc No.'].includes(label as string);
                     return (
-                      <table className="w-full">
-                        <tbody>
-                          {rows.map(([label, value, variant], i) => (
-                            <tr key={i} className={`border-b border-gray-100 ${variant === 'highlight' ? 'bg-blue-50' : ''}`}>
-                              <td className={`py-2 pr-4 text-xs font-semibold w-40 ${variant === 'highlight' ? 'text-blue-700' : 'text-gray-500'}`}>{label}</td>
-                              <td className={`py-2 text-sm ${variant === 'highlight' ? 'text-blue-900 font-semibold' : 'text-gray-800'}`}>{value}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <div key={i} className={`flex items-center justify-between px-3 py-1.5 border-b border-gray-100 ${isKey ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                        <span className={`text-xs font-medium ${isKey ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span>
+                        <span className={`text-xs font-semibold ${isKey ? 'text-blue-900' : 'text-gray-800'} tabular-nums`}>{value}</span>
+                      </div>
                     );
-                  })()}
-                  <p className="text-xs text-gray-400 text-center mt-4 pt-3 border-t border-gray-100">This is an automated email. Please do not reply.</p>
+                  })}
                 </div>
               </div>
 
-              {/* RIGHT — Compose form */}
-              <div className="w-80 flex-shrink-0 flex flex-col p-5 space-y-4 overflow-y-auto">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recipient</p>
+              {/* Divider */}
+              <div className="border-t border-gray-200 mx-5 flex-shrink-0" />
 
+              {/* To / CC / Actions */}
+              <div className="px-5 py-3 space-y-2.5 flex-shrink-0">
                 {/* To */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">To <span className="text-red-500">*</span></label>
-                  <input
-                    type="email"
-                    value={emailAddress}
-                    onChange={(e) => setEmailAddress(e.target.value)}
-                    placeholder="recipient@example.com"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={sendingEmail}
-                  />
-                  {(() => {
-                    const broker = selectedTransaction?.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
-                    return broker?.contact_person_email && broker.contact_person_email !== emailAddress ? (
-                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-1 text-xs text-blue-600 hover:underline">
+                <div className="flex items-center gap-3">
+                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0">To</label>
+                  <div className="flex-1">
+                    <input
+                      type="email"
+                      value={emailAddress}
+                      onChange={(e) => setEmailAddress(e.target.value)}
+                      placeholder="recipient@example.com"
+                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      disabled={sendingEmail}
+                    />
+                    {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
+                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-0.5 text-xs text-blue-600 hover:underline">
                         Use {broker.broker_name}: {broker.contact_person_email}
                       </button>
-                    ) : null;
-                  })()}
+                    )}
+                  </div>
                 </div>
 
                 {/* CC */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">CC</label>
-                  {ccAddresses.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {ccAddresses.map((addr, idx) => (
-                        <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 text-xs rounded-full border border-blue-200">
-                          {addr}
-                          <button type="button" onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))} disabled={sendingEmail} className="text-blue-400 hover:text-blue-700">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
+                <div className="flex items-start gap-3">
+                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0 pt-1.5">CC</label>
+                  <div className="flex-1 space-y-1.5">
+                    {ccAddresses.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {ccAddresses.map((addr, idx) => (
+                          <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 text-xs rounded-full border border-blue-200">
+                            {addr}
+                            <button type="button" onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))} disabled={sendingEmail} className="text-blue-400 hover:text-blue-700"><X className="w-3 h-3" /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={ccInput}
+                        onChange={(e) => setCcInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            const val = ccInput.trim();
+                            if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); }
+                          }
+                        }}
+                        placeholder="Add CC, press Enter"
+                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        disabled={sendingEmail}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { const val = ccInput.trim(); if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); } }}
+                        disabled={sendingEmail || !ccInput.trim()}
+                        className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
+                      >Add</button>
                     </div>
-                  )}
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      value={ccInput}
-                      onChange={(e) => setCcInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ',') {
-                          e.preventDefault();
-                          const val = ccInput.trim();
-                          if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); }
-                        }
-                      }}
-                      placeholder="Add CC, press Enter"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      disabled={sendingEmail}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => { const val = ccInput.trim(); if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); } }}
-                      disabled={sendingEmail || !ccInput.trim()}
-                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
-                    >
-                      Add
-                    </button>
                   </div>
                 </div>
 
-                {/* Spacer pushes actions to bottom */}
-                <div className="flex-1" />
-
                 {/* Actions */}
-                <div className="flex flex-col gap-2 pt-3 border-t border-gray-200">
-                  <button
-                    onClick={sendEmail}
-                    disabled={sendingEmail || !emailAddress.trim()}
-                    className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 text-sm"
-                  >
-                    <Mail className="w-4 h-4" />
-                    <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
-                  </button>
-                  <button
-                    onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }}
-                    disabled={sendingEmail}
-                    className="w-full px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                  >
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }} disabled={sendingEmail} className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
                     Cancel
+                  </button>
+                  <button onClick={sendEmail} disabled={sendingEmail || !emailAddress.trim()} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                    <Mail className="w-4 h-4" />
+                    {sendingEmail ? 'Sending...' : 'Send Email'}
                   </button>
                 </div>
               </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {showBulkModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-start justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl my-6">
