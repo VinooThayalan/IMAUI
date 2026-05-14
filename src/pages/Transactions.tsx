@@ -2228,138 +2228,117 @@ export function Transactions() {
 
       {showEmailModal && selectedTransaction && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4">
-              <h2 className="text-2xl font-bold text-gray-900">Email Transaction Details</h2>
-              <p className="text-sm text-gray-500 mt-1">Preview the email template and enter recipient email</p>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '88vh' }}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 flex-shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Mail className="w-4 h-4 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Send Transaction Details</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Review the email preview on the left, then fill in recipient details on the right</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Email Preview</h3>
+            {/* Split body */}
+            <div className="flex flex-1 min-h-0">
 
-                <div className="bg-white rounded-lg border border-gray-200 p-6">
-                  <div className="text-center mb-6 pb-4 border-b border-gray-200">
-                    <h4 className="text-xl font-bold text-gray-900">Transaction Details</h4>
-                    <p className="text-sm text-gray-500 mt-1">{new Date().toLocaleString()}</p>
+              {/* LEFT — Email Preview (scrollable) */}
+              <div className="flex-1 border-r border-gray-200 overflow-y-auto bg-gray-50 p-5">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Email Preview</p>
+                <div className="bg-white rounded-lg border border-gray-200 p-5 text-sm">
+                  <div className="text-center mb-4 pb-4 border-b border-gray-100">
+                    <h4 className="text-base font-bold text-gray-900">Transaction Details</h4>
+                    <p className="text-xs text-gray-400 mt-0.5">{new Date().toLocaleString()}</p>
                   </div>
-
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {(() => {
-                        const data = getTransactionEmailData(selectedTransaction);
-                        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-
-                        return (
-                          <>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Entity</td>
-                              <td className="py-3 text-gray-900">{data.entity}</td>
+                  {(() => {
+                    const data = getTransactionEmailData(selectedTransaction);
+                    const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    const rows: [string, React.ReactNode, string?][] = [
+                      ['Entity', data.entity],
+                      ['Transaction Type', <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${typeColor}`}>{data.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</span>],
+                      ['Share', `${data.ticker} — ${data.share}`],
+                      ['Transaction Date', data.transaction_date],
+                      ['CDS Acc Type', data.cds_acc_type, 'highlight'],
+                      ['CDS Acc No.', data.cds_acc_no, 'highlight'],
+                      ['Order Type', data.order_type],
+                      ['No. of Shares', data.no_of_shares],
+                      ['Gross Price / Share', `LKR ${data.gross_price_per_share}`, 'highlight'],
+                      ['Net Price / Share', `LKR ${data.net_price_per_share}`],
+                      ['Total Amount', <span className="font-bold">{`LKR ${data.total_amount}`}</span>],
+                      ['Broker', data.broker_name],
+                      ['Brokerage Fee Type', data.brokerage_fee_type],
+                      ['Brokerage Fee Rate', data.brokerage_fee_rate],
+                      ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
+                      ['Bank Name', data.bank_name, 'highlight'],
+                      ['Bank Acc No.', data.bank_acc_no, 'highlight'],
+                    ];
+                    return (
+                      <table className="w-full">
+                        <tbody>
+                          {rows.map(([label, value, variant], i) => (
+                            <tr key={i} className={`border-b border-gray-100 ${variant === 'highlight' ? 'bg-blue-50' : ''}`}>
+                              <td className={`py-2 pr-4 text-xs font-semibold w-40 ${variant === 'highlight' ? 'text-blue-700' : 'text-gray-500'}`}>{label}</td>
+                              <td className={`py-2 text-sm ${variant === 'highlight' ? 'text-blue-900 font-semibold' : 'text-gray-800'}`}>{value}</td>
                             </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Transaction Type</td>
-                              <td className="py-3">
-                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${typeColor}`}>
-                                  {data.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}
-                                </span>
-                              </td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Share</td>
-                              <td className="py-3 text-gray-900">{data.ticker} - {data.share}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Transaction Date</td>
-                              <td className="py-3 text-gray-900">{data.transaction_date}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200 bg-green-50">
-                              <td className="py-3 pr-4 font-semibold text-green-800">CDS Acc Type</td>
-                              <td className="py-3 text-green-900 font-semibold">{data.cds_acc_type}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200 bg-green-50">
-                              <td className="py-3 pr-4 font-semibold text-green-800">CDS Acc No.</td>
-                              <td className="py-3 text-green-900 font-semibold">{data.cds_acc_no}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Order Type</td>
-                              <td className="py-3 text-gray-900">{data.order_type}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">No. of Shares</td>
-                              <td className="py-3 text-gray-900">{data.no_of_shares}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200 bg-green-50">
-                              <td className="py-3 pr-4 font-semibold text-green-800">Gross Price Per Share</td>
-                              <td className="py-3 text-green-900 font-semibold">LKR {data.gross_price_per_share}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Net Price Per Share</td>
-                              <td className="py-3 text-gray-900">LKR {data.net_price_per_share}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Total Amount</td>
-                              <td className="py-3 text-gray-900 font-bold">LKR {data.total_amount}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Broker Name</td>
-                              <td className="py-3 text-gray-900">{data.broker_name}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee Type</td>
-                              <td className="py-3 text-gray-900">{data.brokerage_fee_type}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee Rate</td>
-                              <td className="py-3 text-gray-900">{data.brokerage_fee_rate}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200">
-                              <td className="py-3 pr-4 font-semibold text-gray-600">Brokerage Fee</td>
-                              <td className="py-3 text-gray-900">LKR {data.brokerage_fee}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200 bg-green-50">
-                              <td className="py-3 pr-4 font-semibold text-green-800">Bank Name</td>
-                              <td className="py-3 text-green-900 font-semibold">{data.bank_name}</td>
-                            </tr>
-                            <tr className="border-b border-gray-200 bg-green-50">
-                              <td className="py-3 pr-4 font-semibold text-green-800">Bank Acc No.</td>
-                              <td className="py-3 text-green-900 font-semibold">{data.bank_acc_no}</td>
-                            </tr>
-                          </>
-                        );
-                      })()}
-                    </tbody>
-                  </table>
-
-                  <div className="mt-6 pt-4 border-t border-gray-200 text-center text-xs text-gray-500">
-                    <p>This is an automated email containing transaction details.</p>
-                    <p>Please do not reply to this email.</p>
-                  </div>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+                  <p className="text-xs text-gray-400 text-center mt-4 pt-3 border-t border-gray-100">This is an automated email. Please do not reply.</p>
                 </div>
               </div>
 
-              <div className="space-y-4">
+              {/* RIGHT — Compose form */}
+              <div className="w-80 flex-shrink-0 flex flex-col p-5 space-y-4 overflow-y-auto">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recipient</p>
+
+                {/* To */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    To (Broker Email) <span className="text-red-500">*</span>
-                  </label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">To <span className="text-red-500">*</span></label>
                   <input
                     type="email"
                     value={emailAddress}
                     onChange={(e) => setEmailAddress(e.target.value)}
-                    placeholder="Enter recipient email address"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="recipient@example.com"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     disabled={sendingEmail}
                   />
                   {(() => {
                     const broker = selectedTransaction?.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
-                    return broker?.contact_person_email ? (
-                      <p className="mt-1 text-xs text-gray-500">Auto-populated from broker: <span className="font-medium text-gray-700">{broker.broker_name}</span></p>
+                    return broker?.contact_person_email && broker.contact_person_email !== emailAddress ? (
+                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-1 text-xs text-blue-600 hover:underline">
+                        Use {broker.broker_name}: {broker.contact_person_email}
+                      </button>
                     ) : null;
                   })()}
                 </div>
 
+                {/* CC */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">CC</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">CC</label>
+                  {ccAddresses.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {ccAddresses.map((addr, idx) => (
+                        <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 text-xs rounded-full border border-blue-200">
+                          {addr}
+                          <button type="button" onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))} disabled={sendingEmail} className="text-blue-400 hover:text-blue-700">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <input
                       type="email"
@@ -2369,74 +2348,46 @@ export function Transactions() {
                         if (e.key === 'Enter' || e.key === ',') {
                           e.preventDefault();
                           const val = ccInput.trim();
-                          if (val && val.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) && !ccAddresses.includes(val)) {
-                            setCcAddresses([...ccAddresses, val]);
-                            setCcInput('');
-                          }
+                          if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); }
                         }
                       }}
-                      placeholder="Add CC email and press Enter"
-                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Add CC, press Enter"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       disabled={sendingEmail}
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const val = ccInput.trim();
-                        if (val && val.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/) && !ccAddresses.includes(val)) {
-                          setCcAddresses([...ccAddresses, val]);
-                          setCcInput('');
-                        }
-                      }}
+                      onClick={() => { const val = ccInput.trim(); if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); } }}
                       disabled={sendingEmail || !ccInput.trim()}
-                      className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-colors disabled:opacity-50 text-sm whitespace-nowrap"
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
                     >
                       Add
                     </button>
                   </div>
-                  {ccAddresses.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {ccAddresses.map((email, idx) => (
-                        <span key={idx} className="inline-flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-800 text-sm rounded-full border border-blue-200">
-                          {email}
-                          <button
-                            type="button"
-                            onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))}
-                            disabled={sendingEmail}
-                            className="ml-1 text-blue-500 hover:text-blue-700 disabled:opacity-50"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                </div>
+
+                {/* Spacer pushes actions to bottom */}
+                <div className="flex-1" />
+
+                {/* Actions */}
+                <div className="flex flex-col gap-2 pt-3 border-t border-gray-200">
+                  <button
+                    onClick={sendEmail}
+                    disabled={sendingEmail || !emailAddress.trim()}
+                    className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 text-sm"
+                  >
+                    <Mail className="w-4 h-4" />
+                    <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
+                  </button>
+                  <button
+                    onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setSelectedTransaction(null); }}
+                    disabled={sendingEmail}
+                    className="w-full px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-            </div>
-
-            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
-              <button
-                onClick={() => {
-                  setShowEmailModal(false);
-                  setEmailAddress('');
-                  setCcAddresses([]);
-                  setCcInput('');
-                  setSelectedTransaction(null);
-                }}
-                disabled={sendingEmail}
-                className="px-6 py-2 text-gray-700 hover:bg-gray-200 rounded-lg font-medium transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={sendEmail}
-                disabled={sendingEmail || !emailAddress.trim()}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
-              >
-                <Mail className="w-4 h-4" />
-                <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
-              </button>
             </div>
           </div>
         </div>

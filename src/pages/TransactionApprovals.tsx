@@ -1229,151 +1229,173 @@ export function TransactionApprovals() {
       {showEmailModal && selectedTransaction && (() => {
         const broker = selectedTransaction.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
         const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+        const data = buildEmailData(selectedTransaction);
+        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+        const previewRows: [string, React.ReactNode, string?][] = [
+          ['Entity', data.entity],
+          ['Type', <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${typeColor}`}>{data.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</span>],
+          ['Share', `${data.ticker} — ${data.share}`],
+          ['Date', data.transaction_date],
+          ['CDS Acc Type', data.cds_acc_type, 'highlight'],
+          ['CDS Acc No.', data.cds_acc_no, 'highlight'],
+          ['Order Type', data.order_type],
+          ['Shares', data.no_of_shares],
+          ['Gross Price / Share', `LKR ${data.gross_price_per_share}`, 'highlight'],
+          ['Net Price / Share', `LKR ${data.net_price_per_share}`],
+          ['Total Amount', <span className="font-bold">{`LKR ${data.total_amount}`}</span>],
+          ['Broker', data.broker_name],
+          ['Brokerage Fee Rate', data.brokerage_fee_rate],
+          ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
+          ['Bank Name', data.bank_name, 'highlight'],
+          ['Bank Acc No.', data.bank_acc_no, 'highlight'],
+        ];
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-xl flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl flex flex-col" style={{ height: '88vh' }}>
 
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 flex-shrink-0">
-                <div className="flex items-center space-x-2">
-                  <Mail className="w-4 h-4 text-blue-600" />
-                  <h3 className="text-base font-bold text-gray-900">Send Transaction Details</h3>
+              <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 flex-shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Mail className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">Send Transaction Details</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Review the email preview on the left, then fill in recipient details on the right</p>
+                  </div>
                 </div>
-                <button onClick={() => setShowEmailModal(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
-                  <X className="w-4 h-4" />
+                <button onClick={() => setShowEmailModal(false)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Body — scrollable if needed */}
-              <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
+              {/* Split body */}
+              <div className="flex flex-1 min-h-0">
 
-                {/* Transaction summary pill */}
-                <div className="flex items-center space-x-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {selectedTransaction.transaction_type}
-                  </span>
-                  <span className="text-sm font-medium text-gray-800">{getShareInfo(selectedTransaction.share_id)}</span>
-                  <span className="text-xs text-gray-500">·</span>
-                  <span className="text-sm text-gray-600">{Number(selectedTransaction.no_of_shares).toLocaleString()} @ LKR {Number(selectedTransaction.price_per_share).toFixed(4)}</span>
-                  <span className="text-xs text-gray-400 ml-auto">{getEntityName(selectedTransaction.entity_id)}</span>
+                {/* LEFT — Email Preview */}
+                <div className="flex-1 border-r border-gray-200 overflow-y-auto bg-gray-50 p-5">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Email Preview</p>
+                  <div className="bg-white rounded-lg border border-gray-200 p-5 text-sm">
+                    <div className="text-center mb-4 pb-4 border-b border-gray-100">
+                      <h4 className="text-base font-bold text-gray-900">Transaction Details</h4>
+                      <p className="text-xs text-gray-400 mt-0.5">{new Date().toLocaleString()}</p>
+                    </div>
+                    <table className="w-full">
+                      <tbody>
+                        {previewRows.map(([label, value, variant], i) => (
+                          <tr key={i} className={`border-b border-gray-100 ${variant === 'highlight' ? 'bg-blue-50' : ''}`}>
+                            <td className={`py-2 pr-4 text-xs font-semibold w-36 ${variant === 'highlight' ? 'text-blue-700' : 'text-gray-500'}`}>{label}</td>
+                            <td className={`py-2 text-sm ${variant === 'highlight' ? 'text-blue-900 font-semibold' : 'text-gray-800'}`}>{value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {emailNote && (
+                      <div className="mt-4 pt-3 border-t border-gray-100">
+                        <p className="text-xs font-semibold text-gray-500 mb-1">Note</p>
+                        <p className="text-sm text-gray-700 whitespace-pre-line">{emailNote}</p>
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-400 text-center mt-4 pt-3 border-t border-gray-100">This is an automated email. Please do not reply.</p>
+                  </div>
                 </div>
 
-                {/* To */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">To <span className="text-red-500">*</span></label>
-                  <input
-                    type="email"
-                    value={emailAddress}
-                    onChange={e => setEmailAddress(e.target.value)}
-                    placeholder="recipient@example.com"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    disabled={sendingEmail}
-                  />
-                  {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
-                    <button
-                      type="button"
-                      onClick={() => setEmailAddress(broker.contact_person_email!)}
-                      className="mt-1 text-xs text-blue-600 hover:underline"
-                    >
-                      Use {broker.broker_name} contact: {broker.contact_person_email}
-                    </button>
-                  )}
-                </div>
+                {/* RIGHT — Compose form */}
+                <div className="w-80 flex-shrink-0 flex flex-col p-5 space-y-4 overflow-y-auto">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recipient</p>
 
-                {/* CC section */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">CC</label>
-                    {entity?.contact_email_company_individual && !ccAddresses.includes(entity.contact_email_company_individual) && (
-                      <button
-                        type="button"
-                        onClick={() => setCcAddresses([...ccAddresses, entity.contact_email_company_individual!])}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
-                        + Add {entity.name} ({entity.contact_email_company_individual})
+                  {/* To */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">To <span className="text-red-500">*</span></label>
+                    <input
+                      type="email"
+                      value={emailAddress}
+                      onChange={e => setEmailAddress(e.target.value)}
+                      placeholder="recipient@example.com"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      disabled={sendingEmail}
+                    />
+                    {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
+                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-1 text-xs text-blue-600 hover:underline">
+                        Use {broker.broker_name}: {broker.contact_person_email}
                       </button>
                     )}
                   </div>
 
-                  {/* Auto-CC chips */}
-                  {ccAddresses.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      {ccAddresses.map((addr, i) => {
-                        const isEntityEmail = addr === entity?.contact_email_company_individual;
-                        return (
-                          <span key={i} className={`inline-flex items-center space-x-1 text-xs px-2 py-1 rounded-full ${isEntityEmail ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
-                            {isEntityEmail && <span className="font-semibold">Entity:</span>}
-                            <span>{addr}</span>
-                            <button
-                              onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))}
-                              disabled={sendingEmail}
-                              className="ml-0.5 hover:opacity-70"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </span>
-                        );
-                      })}
+                  {/* CC */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-gray-600">CC</label>
+                      {entity?.contact_email_company_individual && !ccAddresses.includes(entity.contact_email_company_individual) && (
+                        <button type="button" onClick={() => setCcAddresses([...ccAddresses, entity.contact_email_company_individual!])} className="text-xs text-blue-600 hover:underline">
+                          + {entity.name}
+                        </button>
+                      )}
                     </div>
-                  )}
+                    {ccAddresses.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {ccAddresses.map((addr, i) => {
+                          const isEntity = addr === entity?.contact_email_company_individual;
+                          return (
+                            <span key={i} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${isEntity ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-blue-50 text-blue-800 border-blue-200'}`}>
+                              {addr}
+                              <button onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))} disabled={sendingEmail} className="hover:opacity-70">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={ccInput}
+                        onChange={e => setCcInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && ccInput.trim()) { e.preventDefault(); setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
+                        placeholder="Add CC, press Enter"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        disabled={sendingEmail}
+                      />
+                      <button type="button" onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }} disabled={sendingEmail || !ccInput.trim()} className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
 
-                  {/* Manual CC input */}
-                  <div className="flex space-x-2">
-                    <input
-                      type="email"
-                      value={ccInput}
-                      onChange={e => setCcInput(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && ccInput.trim()) {
-                          e.preventDefault();
-                          setCcAddresses([...ccAddresses, ccInput.trim()]);
-                          setCcInput('');
-                        }
-                      }}
-                      placeholder="Add email and press Enter"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  {/* Note */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Note / Comment</label>
+                    <textarea
+                      value={emailNote}
+                      onChange={e => setEmailNote(e.target.value)}
+                      rows={4}
                       disabled={sendingEmail}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
+                      placeholder="Optional message or instructions..."
                     />
+                  </div>
+
+                  {/* Spacer */}
+                  <div className="flex-1" />
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-2 pt-3 border-t border-gray-200">
                     <button
-                      type="button"
-                      onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
-                      disabled={sendingEmail || !ccInput.trim()}
-                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
+                      onClick={sendEmail}
+                      disabled={sendingEmail || !emailAddress.trim()}
+                      className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 text-sm"
                     >
-                      <Plus className="w-4 h-4" />
+                      <Mail className="w-4 h-4" />
+                      <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
+                    </button>
+                    <button onClick={() => setShowEmailModal(false)} disabled={sendingEmail} className="w-full px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50">
+                      Cancel
                     </button>
                   </div>
                 </div>
-
-                {/* Note */}
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Note / Comment</label>
-                  <textarea
-                    value={emailNote}
-                    onChange={e => setEmailNote(e.target.value)}
-                    rows={3}
-                    disabled={sendingEmail}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none"
-                    placeholder="Optional message or instructions to include in the email..."
-                  />
-                </div>
-
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end items-center space-x-3 border-t border-gray-200 px-5 py-3 flex-shrink-0">
-                <button onClick={() => setShowEmailModal(false)} disabled={sendingEmail} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">
-                  Cancel
-                </button>
-                <button
-                  onClick={sendEmail}
-                  disabled={sendingEmail || !emailAddress.trim()}
-                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2 font-medium"
-                >
-                  <Mail className="w-4 h-4" />
-                  <span>{sendingEmail ? 'Sending...' : 'Send Email'}</span>
-                </button>
-              </div>
             </div>
           </div>
         );
