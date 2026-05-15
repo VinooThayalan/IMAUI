@@ -32,6 +32,11 @@ const SHARE_COLORS = [
 function sectorColor(s: string) { return SECTOR_COLORS[s] || SECTOR_COLORS['Other']; }
 function shareColor(i: number) { return SHARE_COLORS[i % SHARE_COLORS.length]; }
 
+function mkPiePct<T extends { value: number }>(arr: T[]): (T & { percentage: number })[] {
+  const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
+  return arr.map(d => ({ ...d, percentage: total > 0 ? (Math.max(0, d.value) / total) * 100 : 0 }));
+}
+
 // ── Formatters ─────────────────────────────────────────────────────────────────
 
 function fmtCur(v: number) {
@@ -347,11 +352,6 @@ export function Dashboard() {
     s.marketValue += m.marketValue;
   });
 
-  const mkPiePct = <T extends { value: number }>(arr: T[]) => {
-    const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
-    return arr.map(d => ({ ...d, percentage: total > 0 ? (Math.max(0, d.value) / total) * 100 : 0 }));
-  };
-
   const sectorReturnsPie   = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.returns,     color: sectorColor(k) })));
   const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
   const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
@@ -524,6 +524,249 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Section 5: Total Returns by Sector ────────────────────────────── */}
+      <Section5TotalReturnsBySector metrics={metrics} />
+
+      {/* ── Section 6: Share Name Cards ───────────────────────────────────── */}
+      <Section6ShareCards metrics={metrics} />
+
+    </div>
+  );
+}
+
+// ── Section 5 component ───────────────────────────────────────────────────────
+
+const SECTOR_DISPLAY_ORDER = [
+  'Banking',
+  'Construction Materials',
+  'Constructions Materials',
+  'Diversified Financials',
+  'Industries',
+];
+
+function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) {
+  const held = metrics.filter(m => m.heldShares > 0);
+
+  // Overall sector returns pie
+  const sectorRetMap = new Map<string, number>();
+  held.forEach(m => sectorRetMap.set(m.sector, (sectorRetMap.get(m.sector) || 0) + m.totalReturns));
+  const sectorReturnsPie = mkPiePct(
+    Array.from(sectorRetMap.entries()).map(([k, v]) => ({ label: k, value: v, color: sectorColor(k) }))
+  );
+
+  // Per-sector: returns broken down by share
+  const targetSectors = Array.from(new Set(
+    held.map(m => m.sector).filter(s =>
+      SECTOR_DISPLAY_ORDER.some(ds => ds.toLowerCase() === s.toLowerCase())
+    )
+  )).sort((a, b) => {
+    const ia = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === a.toLowerCase());
+    const ib = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === b.toLowerCase());
+    return ia - ib;
+  });
+
+  const sectorSharePies = targetSectors.map(sector => {
+    const shares = held.filter(m => m.sector.toLowerCase() === sector.toLowerCase());
+    const pieData = mkPiePct(
+      shares.map((m, i) => ({ label: m.ticker, value: m.totalReturns, color: shareColor(i) }))
+    );
+    return { sector, pieData };
+  });
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-rose-50 to-orange-50">
+        <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Total Returns by Sector</h2>
+        <p className="text-xs text-gray-500 mt-0.5">Overall sector breakdown and per-sector share contribution</p>
+      </div>
+      <div className="p-6 space-y-8">
+        {/* Overall sector returns pie — full width centred */}
+        <div className="flex flex-col items-center">
+          <PieChart
+            data={sectorReturnsPie.filter(d => d.value > 0)}
+            title="Total Returns by Sector"
+            size={260}
+          />
+        </div>
+
+        {/* Per-sector pies — 2 columns */}
+        {sectorSharePies.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {sectorSharePies.map(({ sector, pieData }) => (
+              <div key={sector} className="bg-gray-50 rounded-xl p-5 border border-gray-100 flex flex-col items-center">
+                <p className="text-xs font-bold text-red-600 mb-4 text-center">
+                  Total Returns in {sector} by Share
+                </p>
+                <PieChart
+                  data={pieData.filter(d => d.value > 0)}
+                  title=""
+                  size={220}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Section 6 component ───────────────────────────────────────────────────────
+
+function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
+  const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
+
+  // Shares ordered ascending by total market value (heldShares > 0 first, then rest with 0)
+  const allMetrics = [...metrics].sort((a, b) => a.marketValue - b.marketValue);
+
+  const selected = selectedShareId ? allMetrics.find(m => m.shareId === selectedShareId) : null;
+
+  // Grand totals row
+  const grandTotal = allMetrics.reduce((acc, m) => ({
+    marketValue: acc.marketValue + m.marketValue,
+  }), { marketValue: 0 });
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-gray-100">
+        <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Share Portfolio Details</h2>
+        <p className="text-xs text-gray-500 mt-0.5">Ordered by total market value (ascending). Select a share to see details.</p>
+      </div>
+
+      <div className="p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* Left: Table */}
+          <div className="overflow-hidden rounded-xl border border-gray-200">
+            <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Share Names</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Total Market Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {allMetrics.map((m, i) => {
+                    const isSelected = selectedShareId === m.shareId;
+                    return (
+                      <tr
+                        key={m.shareId}
+                        onClick={() => setSelectedShareId(isSelected ? null : m.shareId)}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-blue-50 border-l-2 border-l-blue-500'
+                            : i % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/40 hover:bg-gray-100/60'
+                        }`}
+                      >
+                        <td className={`px-4 py-2.5 font-medium ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                          {m.shareName || m.ticker}
+                        </td>
+                        <td className={`px-4 py-2.5 text-right font-mono text-xs ${isSelected ? 'text-blue-700 font-bold' : 'text-gray-600'}`}>
+                          {m.marketValue > 0 ? fmtCur(m.marketValue) : <span className="text-gray-300">—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300">
+                  <tr>
+                    <td className="px-4 py-2.5 text-xs font-bold text-gray-700 uppercase">Total</td>
+                    <td className="px-4 py-2.5 text-right text-xs font-bold text-gray-900 font-mono">{fmtCur(grandTotal.marketValue)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          {/* Right: Name card detail */}
+          <div className="flex flex-col gap-4">
+            {!selected ? (
+              <div className="flex-1 flex items-center justify-center rounded-xl border-2 border-dashed border-gray-200 text-gray-400 text-sm min-h-[300px]">
+                Select a share from the table to view details
+              </div>
+            ) : (
+              <>
+                {/* Header card */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-5 text-center">
+                  <p className="text-2xl font-extrabold text-blue-900">{selected.shareName || selected.ticker}</p>
+                  <p className="text-xs text-blue-500 mt-1 font-semibold uppercase tracking-wide">Share Name</p>
+                </div>
+
+                {/* 2-column metric cards */}
+                <div className="grid grid-cols-2 gap-3">
+                  <MetricCard
+                    label="AER"
+                    value={`${selected.aer.toFixed(1)}%`}
+                    bg="bg-yellow-50"
+                    textColor={selected.aer >= 0 ? 'text-green-700' : 'text-red-600'}
+                    border="border-yellow-200"
+                  />
+                  <MetricCard
+                    label="Total Returns on Bal. Shares"
+                    value={fmtCur(selected.netMarketValue)}
+                    bg="bg-green-50"
+                    textColor="text-green-800"
+                    border="border-green-200"
+                  />
+                  <MetricCard
+                    label="Bal. No. of Shares"
+                    value={fmtNum(selected.heldShares)}
+                    bg="bg-pink-50"
+                    textColor="text-pink-800"
+                    border="border-pink-200"
+                  />
+                  <MetricCard
+                    label="Total bal. of Dividends"
+                    value={fmtCur(selected.dividends)}
+                    bg="bg-teal-50"
+                    textColor="text-teal-800"
+                    border="border-teal-200"
+                  />
+                  <MetricCard
+                    label="Market Value of current share portfolio"
+                    value={fmtCur(selected.marketValue)}
+                    bg="bg-blue-50"
+                    textColor="text-blue-800"
+                    border="border-blue-200"
+                  />
+                  <MetricCard
+                    label="Total Cost of current share portfolio"
+                    value={fmtCur(selected.cost)}
+                    bg="bg-orange-50"
+                    textColor="text-orange-800"
+                    border="border-orange-200"
+                  />
+                  <MetricCard
+                    label="Market Price per share"
+                    value={`Rs. ${selected.latestPrice.toFixed(2)}`}
+                    bg="bg-slate-50"
+                    textColor="text-slate-800"
+                    border="border-slate-200"
+                  />
+                  <MetricCard
+                    label="Costs per share"
+                    value={`Rs. ${selected.avgCostPerShare.toFixed(2)}`}
+                    bg="bg-rose-50"
+                    textColor="text-rose-800"
+                    border="border-rose-200"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, bg, textColor, border }: { label: string; value: string; bg: string; textColor: string; border: string }) {
+  return (
+    <div className={`${bg} ${border} border rounded-xl px-4 py-3 flex flex-col gap-1`}>
+      <span className={`text-lg font-extrabold ${textColor} leading-tight`}>{value}</span>
+      <span className="text-xs text-gray-500 leading-snug">{label}</span>
     </div>
   );
 }
