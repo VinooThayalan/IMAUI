@@ -43,7 +43,7 @@ export function ScripEntry() {
   const [formData, setFormData] = useState({
     entity_id: '',
     share_id: '',
-    entry_date: '',
+    entry_date: new Date().toISOString().split('T')[0],
     announcement_date: '',
     effective_date: '',
     no_of_shares: '',
@@ -108,7 +108,7 @@ export function ScripEntry() {
       setFormData({
         entity_id: '',
         share_id: '',
-        entry_date: '',
+        entry_date: new Date().toISOString().split('T')[0],
         announcement_date: '',
         effective_date: '',
         no_of_shares: '',
