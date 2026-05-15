@@ -1398,35 +1398,6 @@ export function Reports() {
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                <TrendingUp className="w-6 h-6 text-orange-600" />
-              </div>
-              <span className="text-xs font-semibold px-2 py-1 bg-orange-50 text-orange-700 rounded">
-                Detailed
-              </span>
-            </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Detailed Share Report</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              Transaction-level analysis with cumulative balances, surplus calculations, and annual equivalent rates
-            </p>
-            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-              <div className="text-xs text-gray-500">
-                Updated: Today
-              </div>
-              <button
-                onClick={generateDetailedShareReport}
-                disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {loading ? 'Loading...' : 'Generate'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
-          <div className="p-6">
-            <div className="flex items-start justify-between mb-4">
               <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
                 <FileText className="w-6 h-6 text-emerald-600" />
               </div>

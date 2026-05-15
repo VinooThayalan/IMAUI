@@ -528,7 +528,8 @@ export function Dashboard() {
       {/* ── Section 5: Total Returns by Sector ────────────────────────────── */}
       <Section5TotalReturnsBySector metrics={metrics} />
 
-      {/* Section 6 hidden */}
+      {/* ── Section 6: Share Name Cards ───────────────────────────────────── */}
+      <Section6ShareCards metrics={metrics} />
 
     </div>
   );
