@@ -1,170 +1,529 @@
-import { TrendingUp, TrendingDown, Wallet, Building2, Users, PieChart } from 'lucide-react';
-import { MainContributors } from '../components/MainContributors';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { PieChart } from '../components/PieChart';
 
-const stats = [
-  {
-    label: 'Total Portfolio Value',
-    value: 'Rs. 24,567,890',
-    change: '+12.5%',
-    isPositive: true,
-    icon: Wallet,
-  },
-  {
-    label: 'Total Entities',
-    value: '47',
-    change: '+3',
-    isPositive: true,
-    icon: Building2,
-  },
-  {
-    label: 'Active Investments',
-    value: '128',
-    change: '+8',
-    isPositive: true,
-    icon: TrendingUp,
-  },
-  {
-    label: 'Pending Approvals',
-    value: '3',
-    change: '-2',
-    isPositive: true,
-    icon: Users,
-  },
+// ── Color palettes ────────────────────────────────────────────────────────────
+
+const SECTOR_COLORS: Record<string, string> = {
+  'Banking': '#3B82F6',
+  'Diversified Financials': '#10B981',
+  'Hotels': '#F59E0B',
+  'Industries': '#EC4899',
+  'Construction Materials': '#8B5CF6',
+  'Constructions Materials': '#8B5CF6',
+  'Automobile Components': '#EF4444',
+  'Telecommunication': '#06B6D4',
+  'Manufacturing': '#F97316',
+  'Technology': '#6366F1',
+  'Healthcare': '#14B8A6',
+  'Energy': '#F43F5E',
+  'Consumer Goods': '#84CC16',
+  'Retail': '#A855F7',
+  'Insurance': '#0EA5E9',
+  'Real Estate': '#22C55E',
+  'Other': '#6B7280',
+};
+
+const SHARE_COLORS = [
+  '#1E3A5F', '#3B82F6', '#F59E0B', '#10B981', '#EF4444',
+  '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#14B8A6',
 ];
 
-const recentTransactions = [
-  { id: 1, entity: 'Fernando Family Trust', type: 'Buy', share: 'NDB', quantity: 500, value: 'Rs. 87,500', date: '2024-01-15', status: 'Completed' },
-  { id: 2, entity: 'Perera Holdings', type: 'Sell', share: 'JKH', quantity: 200, value: 'Rs. 268,000', date: '2024-01-14', status: 'Pending' },
-  { id: 3, entity: 'Silva Investment Group', type: 'Buy', share: 'Sampath', quantity: 350, value: 'Rs. 131,250', date: '2024-01-14', status: 'Completed' },
-  { id: 4, entity: 'Jayasinghe Capital', type: 'Buy', share: 'Dialog', quantity: 150, value: 'Rs. 37,500', date: '2024-01-13', status: 'Approved' },
-];
+function sectorColor(s: string) { return SECTOR_COLORS[s] || SECTOR_COLORS['Other']; }
+function shareColor(i: number) { return SHARE_COLORS[i % SHARE_COLORS.length]; }
 
-const topHoldings = [
-  { ticker: 'JKH', name: 'John Keells Holdings', value: 'Rs. 5,234,000', percentage: 21.3, change: '+2.4%' },
-  { ticker: 'NDB', name: 'National Development Bank', value: 'Rs. 4,123,500', percentage: 16.8, change: '+1.8%' },
-  { ticker: 'Sampath', name: 'Sampath Bank', value: 'Rs. 3,876,200', percentage: 15.8, change: '+3.2%' },
-  { ticker: 'Dialog', name: 'Dialog Axiata', value: 'Rs. 2,456,800', percentage: 10.0, change: '-0.5%' },
-  { ticker: 'COMB', name: 'Commercial Bank', value: 'Rs. 2,234,100', percentage: 9.1, change: '+1.2%' },
-];
+// ── Formatters ─────────────────────────────────────────────────────────────────
+
+function fmtCur(v: number) {
+  if (v >= 1_000_000_000) return `Rs. ${(v / 1_000_000_000).toFixed(2)}bn`;
+  if (v >= 1_000_000)     return `Rs. ${(v / 1_000_000).toFixed(2)}m`;
+  if (v >= 1_000)         return `Rs. ${(v / 1_000).toFixed(2)}k`;
+  return `Rs. ${v.toFixed(2)}`;
+}
+
+function fmtNum(v: number) { return v.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ShareRow {
+  id: string;
+  ticker: string;
+  share_name: string;
+  sector: string;
+}
+
+interface ShareMetrics {
+  shareId: string;
+  ticker: string;
+  shareName: string;
+  sector: string;
+  heldShares: number;
+  cost: number;        // cumulative cost of held shares
+  totalCostAll: number; // total cost ever (incl. sold)
+  marketValue: number;
+  dividends: number;
+  saleProceeds: number;
+  netMarketValue: number; // marketValue - cost (held)
+  totalReturns: number;   // (marketValue + saleProceeds + dividends) - totalCostAll
+  avgCostPerShare: number;
+  latestPrice: number;
+  aer: number; // (netMarketValue + dividends) / cost * 100
+}
+
+// ── KPI summary card ─────────────────────────────────────────────────────────
+
+function KpiCard({ label, value, bg, textColor }: { label: string; value: string; bg: string; textColor: string }) {
+  return (
+    <div className={`${bg} rounded-xl p-5 flex flex-col gap-2 shadow-sm`}>
+      <span className={`text-2xl font-extrabold ${textColor} leading-tight`}>{value}</span>
+      <span className="text-xs font-semibold text-gray-700 leading-snug">{label}</span>
+    </div>
+  );
+}
+
+// ── Bar chart (SVG, horizontal labels) ───────────────────────────────────────
+
+interface BarChartProps {
+  title: string;
+  bars: { label: string; value: number; color: string }[];
+  formatValue?: (v: number) => string;
+  yLabel?: string;
+}
+
+function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) {
+  if (bars.length === 0) return null;
+  const maxVal = Math.max(...bars.map(b => Math.abs(b.value)), 1);
+  const W = 420, H = 220, padL = 60, padR = 10, padT = 20, padB = 54;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const barW = Math.min(40, (chartW / bars.length) * 0.55);
+  const gap  = chartW / bars.length;
+
+  const yTicks = 4;
+  const yStep  = maxVal / yTicks;
+
+  return (
+    <div>
+      {title && <p className="text-xs font-bold text-gray-700 mb-2">{title}</p>}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 220 }}>
+        {/* y-axis label */}
+        {yLabel && (
+          <text x={10} y={H / 2} textAnchor="middle" fontSize={9} fill="#9CA3AF"
+            transform={`rotate(-90, 10, ${H / 2})`}>{yLabel}</text>
+        )}
+        {/* grid lines + y ticks */}
+        {Array.from({ length: yTicks + 1 }).map((_, i) => {
+          const y = padT + chartH - (i / yTicks) * chartH;
+          const val = i * yStep;
+          return (
+            <g key={i}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#E5E7EB" strokeWidth={1} />
+              <text x={padL - 4} y={y + 3} textAnchor="end" fontSize={8} fill="#9CA3AF">
+                {val >= 1_000_000 ? `${(val / 1_000_000).toFixed(1)}m` : val >= 1_000 ? `${(val / 1_000).toFixed(0)}k` : val.toFixed(0)}
+              </text>
+            </g>
+          );
+        })}
+        {/* bars */}
+        {bars.map((b, i) => {
+          const x    = padL + i * gap + gap / 2 - barW / 2;
+          const pct  = Math.abs(b.value) / maxVal;
+          const bH   = Math.max(2, pct * chartH);
+          const y    = padT + chartH - bH;
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={barW} height={bH} fill={b.color} rx={2} />
+              <text x={x + barW / 2} y={padT + chartH + 12} textAnchor="middle" fontSize={8} fill="#374151"
+                transform={`rotate(-35, ${x + barW / 2}, ${padT + chartH + 12})`}>
+                {b.label}
+              </text>
+              <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={7} fill="#6B7280">
+                {formatValue(b.value)}
+              </text>
+            </g>
+          );
+        })}
+        {/* x-axis */}
+        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1} />
+      </svg>
+    </div>
+  );
+}
+
+// ── Grouped bar chart for price vs cost ──────────────────────────────────────
+
+function PriceCostBarChart({ title, bars }: { title: string; bars: { label: string; price: number; cost: number }[] }) {
+  if (bars.length === 0) return null;
+  const maxVal = Math.max(...bars.flatMap(b => [b.price, b.cost]), 1);
+  const W = 420, H = 230, padL = 65, padR = 10, padT = 30, padB = 54;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const groupW = chartW / bars.length;
+  const barW   = Math.min(16, groupW * 0.3);
+  const yTicks = 4;
+  const yStep  = maxVal / yTicks;
+
+  return (
+    <div>
+      {title && <p className="text-xs font-bold text-gray-700 mb-2">{title}</p>}
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-1">
+        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#1E3A5F' }} /><span className="text-xs text-gray-500">Net Market Price per share</span></div>
+        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#F59E0B' }} /><span className="text-xs text-gray-500">Cost per share</span></div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 230 }}>
+        {/* y-axis label */}
+        <text x={10} y={H / 2} textAnchor="middle" fontSize={9} fill="#9CA3AF"
+          transform={`rotate(-90, 10, ${H / 2})`}>Net Market Price per share</text>
+        {/* grid + ticks */}
+        {Array.from({ length: yTicks + 1 }).map((_, i) => {
+          const y = padT + chartH - (i / yTicks) * chartH;
+          const val = i * yStep;
+          return (
+            <g key={i}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#E5E7EB" strokeWidth={1} />
+              <text x={padL - 4} y={y + 3} textAnchor="end" fontSize={8} fill="#9CA3AF">
+                {val >= 1_000 ? `${(val / 1_000).toFixed(0)}k` : val.toFixed(0)}
+              </text>
+            </g>
+          );
+        })}
+        {bars.map((b, i) => {
+          const cx    = padL + i * groupW + groupW / 2;
+          const pxH   = Math.max(2, (b.price / maxVal) * chartH);
+          const cxH   = Math.max(2, (b.cost / maxVal) * chartH);
+          const pxY   = padT + chartH - pxH;
+          const cxY   = padT + chartH - cxH;
+          return (
+            <g key={i}>
+              <rect x={cx - barW - 1} y={pxY} width={barW} height={pxH} fill="#1E3A5F" rx={2} />
+              <rect x={cx + 1}        y={cxY} width={barW} height={cxH} fill="#F59E0B" rx={2} />
+              <text x={cx} y={padT + chartH + 12} textAnchor="middle" fontSize={8} fill="#374151"
+                transform={`rotate(-35, ${cx}, ${padT + chartH + 12})`}>{b.label}</text>
+              <text x={cx - barW / 2 - 1} y={pxY - 3} textAnchor="middle" fontSize={6} fill="#6B7280">
+                {b.price >= 1000 ? `${(b.price/1000).toFixed(1)}k` : b.price.toFixed(0)}
+              </text>
+            </g>
+          );
+        })}
+        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1} />
+      </svg>
+    </div>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export function Dashboard() {
+  const [loading, setLoading] = useState(true);
+  const [shares, setShares]   = useState<ShareRow[]>([]);
+  const [metrics, setMetrics] = useState<ShareMetrics[]>([]);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes] = await Promise.all([
+        supabase.from('shares').select('id, ticker, share_name, sector').eq('is_active', true).order('share_name'),
+        supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount, price_per_share, approval_status'),
+        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+        supabase.from('dividends').select('share_id, amount_net'),
+        supabase.from('buy_sell_notes').select('transaction_id, no_of_shares, price_avg, gross_amount, note_type').not('transaction_id', 'is', null),
+      ]);
+
+      const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
+        id: s.id, ticker: s.ticker || '', share_name: s.share_name || s.ticker || '', sector: s.sector || 'Other',
+      }));
+      setShares(shareRows);
+
+      const shareMap = new Map(shareRows.map(s => [s.id, s]));
+
+      // latest price per share
+      const latestPrices = new Map<string, number>();
+      (pricesRes.data || []).forEach((p: any) => {
+        if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, Number(p.share_price) || 0);
+      });
+
+      // dividends by share
+      const divMap = new Map<string, number>();
+      (dividendsRes.data || []).forEach((d: any) => {
+        divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + Number(d.amount_net));
+      });
+
+      // build holdings from buy_sell_notes (processed) + transactions
+      // Use notes where available (more accurate), fall back to transactions
+      const txnNoteMap = new Map<string, { shares: number; gross: number; type: string }>();
+      (notesRes.data || []).forEach((n: any) => {
+        txnNoteMap.set(n.transaction_id, { shares: Number(n.no_of_shares) || 0, gross: Number(n.gross_amount) || 0, type: n.note_type });
+      });
+
+      // holdings accumulator: share_id -> { held, cost, totalCostAll, saleProceeds }
+      type HoldingAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number };
+      const holdMap = new Map<string, HoldingAcc>();
+
+      (txnsRes.data || []).forEach((tx: any) => {
+        if (!shareMap.has(tx.share_id)) return;
+        const note = txnNoteMap.get(tx.id);
+        const shares_qty = note ? note.shares : Number(tx.no_of_shares) || 0;
+        const gross      = note ? note.gross  : Number(tx.total_amount) || 0;
+        const isBuy      = (tx.transaction_type || '').toUpperCase() === 'BUY';
+
+        if (!holdMap.has(tx.share_id)) holdMap.set(tx.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0 });
+        const h = holdMap.get(tx.share_id)!;
+
+        if (isBuy) {
+          h.held += shares_qty;
+          h.cost += gross;
+          h.totalCostAll += gross;
+        } else {
+          const avgCPS = h.held > 0 ? h.cost / h.held : 0;
+          const rmCost = avgCPS * shares_qty;
+          h.held          = Math.max(0, h.held - shares_qty);
+          h.cost          = Math.max(0, h.cost - rmCost);
+          h.saleProceeds += gross;
+        }
+      });
+
+      const result: ShareMetrics[] = [];
+      holdMap.forEach((h, shareId) => {
+        const sr    = shareMap.get(shareId);
+        if (!sr) return;
+        const price = latestPrices.get(shareId) || 0;
+        const mv    = h.held * price;
+        const divs  = divMap.get(shareId) || 0;
+        const nmv   = mv - h.cost;
+        const tr    = (mv + h.saleProceeds + divs) - h.totalCostAll;
+        const aer   = h.cost > 0 ? ((nmv + divs) / h.cost) * 100 : 0;
+        const avgCPS = h.held > 0 ? h.cost / h.held : 0;
+
+        result.push({
+          shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
+          heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
+          marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
+          netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,
+          latestPrice: price, aer,
+        });
+      });
+
+      result.sort((a, b) => b.netMarketValue - a.netMarketValue);
+      setMetrics(result);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  // ── Derived data ─────────────────────────────────────────────────────────────
+
+  // Top 5 contributors by net market value (held > 0)
+  const top5 = metrics.filter(m => m.heldShares > 0).slice(0, 5);
+
+  // KPI aggregates (all shares with holdings)
+  const held = metrics.filter(m => m.heldShares > 0);
+  const totalReturnsSinceInception = held.reduce((s, m) => s + m.totalReturns, 0);
+  const totalReturnsBalShares      = held.reduce((s, m) => s + m.netMarketValue, 0);
+  const totalDividendsSinceInc     = held.reduce((s, m) => s + m.dividends, 0);
+  const totalBalDividends          = held.reduce((s, m) => s + m.dividends, 0);
+  const totalMarketValue           = held.reduce((s, m) => s + m.marketValue, 0);
+  const totalCostsBalShares        = held.reduce((s, m) => s + m.cost, 0);
+
+  // Sector aggregates
+  const sectorMap = new Map<string, { returns: number; dividends: number; marketValue: number }>();
+  held.forEach(m => {
+    if (!sectorMap.has(m.sector)) sectorMap.set(m.sector, { returns: 0, dividends: 0, marketValue: 0 });
+    const s = sectorMap.get(m.sector)!;
+    s.returns     += m.totalReturns;
+    s.dividends   += m.dividends;
+    s.marketValue += m.marketValue;
+  });
+
+  const mkPiePct = <T extends { value: number }>(arr: T[]) => {
+    const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
+    return arr.map(d => ({ ...d, percentage: total > 0 ? (Math.max(0, d.value) / total) * 100 : 0 }));
+  };
+
+  const sectorReturnsPie   = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.returns,     color: sectorColor(k) })));
+  const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
+  const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
+
+  // Top-5 pie charts
+  const top5NetMktPie  = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(i) })));
+  const top5DivPie     = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.dividends,       color: shareColor(i) })));
+  const top5ReturnsPie = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalReturns,    color: shareColor(i) })));
+  const top5CostPie    = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalCostAll,    color: shareColor(i) })));
+
+  // Top-5 bar charts
+  const top5PriceCost  = top5.map((m, i) => ({ label: m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(i) }));
+  const top5BalShares  = top5.map((m, i) => ({ label: m.ticker, value: m.heldShares,        color: shareColor(i) }));
+  const top5AER        = top5.map((m, i) => ({ label: m.ticker, value: m.aer,               color: shareColor(i) }));
+
+  // Share portfolio table — all active shares
+  const portfolioShares = shares.filter(s => held.some(m => m.shareId === s.id) || true);
+
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 mt-1">Welcome back, here's what's happening with your portfolio</p>
-      </div>
+    <div className="p-6 space-y-8">
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => (
-          <div key={stat.label} className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg transition-shadow">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-500">{stat.label}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{stat.value}</p>
-                <div className="flex items-center mt-2">
-                  {stat.isPositive ? (
-                    <TrendingUp className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <TrendingDown className="w-4 h-4 text-red-600" />
-                  )}
-                  <span className={`text-sm font-medium ml-1 ${stat.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                    {stat.change}
-                  </span>
-                  <span className="text-sm text-gray-500 ml-1">vs last month</span>
-                </div>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <stat.icon className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* ── Section 1: Share Portfolio Table + KPI cards ───────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900">Recent Transactions</h2>
+        {/* Share portfolio table */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100">
+            <h2 className="text-base font-bold text-gray-900">Metrocorp Share Portfolio</h2>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+          <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Share</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Value</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Share Names</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Sector</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {recentTransactions.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{transaction.entity}</div>
-                      <div className="text-sm text-gray-500">{transaction.date}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        transaction.type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                      }`}>
-                        {transaction.type}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">{transaction.share}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{transaction.quantity}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">{transaction.value}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        transaction.status === 'Completed' ? 'bg-blue-100 text-blue-800' :
-                        transaction.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {transaction.status}
-                      </span>
-                    </td>
+              <tbody className="divide-y divide-gray-50">
+                {portfolioShares.map((s, i) => (
+                  <tr key={s.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
+                    <td className="px-4 py-2 text-gray-800 font-medium">{s.share_name || s.ticker}</td>
+                    <td className="px-4 py-2 text-gray-500">{s.sector}</td>
                   </tr>
                 ))}
+                {portfolioShares.length === 0 && (
+                  <tr><td colSpan={2} className="px-4 py-6 text-center text-gray-400 text-xs">No shares found</td></tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-lg font-bold text-gray-900">Top Holdings</h2>
+        {/* KPI summary cards — 2×3 grid */}
+        <div className="grid grid-cols-2 gap-3">
+          <KpiCard label="Total Returns Since Inception" value={fmtCur(totalReturnsSinceInception)} bg="bg-rose-100"   textColor="text-rose-800" />
+          <KpiCard label="Total Returns on Bal. Shares"  value={fmtCur(totalReturnsBalShares)}      bg="bg-amber-100"  textColor="text-amber-800" />
+          <KpiCard label="Total Dividends since Inception" value={fmtCur(totalDividendsSinceInc)}   bg="bg-green-100"  textColor="text-green-800" />
+          <KpiCard label="Total Bal. of Dividends"       value={fmtCur(totalBalDividends)}           bg="bg-teal-100"   textColor="text-teal-800" />
+          <KpiCard label="Market Value of Current Share Portfolio" value={fmtCur(totalMarketValue)} bg="bg-blue-100"   textColor="text-blue-800" />
+          <KpiCard label="Total Costs on Bal. Shares"    value={fmtCur(totalCostsBalShares)}        bg="bg-pink-100"   textColor="text-pink-800" />
+        </div>
+      </div>
+
+      {/* ── Section 2: Sector pie charts ───────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">Portfolio by Sector</h2>
+        </div>
+        <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="flex flex-col items-center">
+            <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="Total Returns on Bal. Shares by Sector" size={210} />
           </div>
-          <div className="p-6 space-y-4">
-            {topHoldings.map((holding) => (
-              <div key={holding.ticker} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-gray-900">{holding.ticker}</p>
-                    <p className="text-xs text-gray-500">{holding.name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-gray-900">{holding.value}</p>
-                    <p className={`text-xs font-medium ${holding.change.startsWith('+') ? 'text-green-600' : 'text-red-600'}`}>
-                      {holding.change}
-                    </p>
-                  </div>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                    style={{ width: `${holding.percentage}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-gray-500">{holding.percentage}% of portfolio</p>
-              </div>
-            ))}
+          <div className="flex flex-col items-center">
+            <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="Total Dividends by Sector" size={210} />
+          </div>
+          <div className="flex flex-col items-center">
+            <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="Market Value of Share Portfolio by Sector" size={210} />
           </div>
         </div>
       </div>
 
-      <MainContributors />
+      {/* ── Section 3: Metrocorp's Main Contributors – pie charts ─────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-50 to-blue-50">
+          <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Metrocorp's Main Contributors</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Top 5 shares by net market value</p>
+          {top5.length > 0 && (
+            <div className="flex flex-wrap gap-3 mt-3">
+              {top5.map((m, i) => (
+                <span key={m.shareId} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: shareColor(i) }}>
+                  {m.ticker}
+                  <span className="opacity-80">{fmtCur(m.netMarketValue)}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+          <div className="flex flex-col items-center">
+            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Net Market by Share</p>
+            <PieChart data={top5NetMktPie} title="" size={200} />
+          </div>
+          <div className="flex flex-col items-center">
+            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Dividends by Share</p>
+            <PieChart data={top5DivPie.filter(d => d.value > 0)} title="" size={200} />
+          </div>
+          <div className="flex flex-col items-center">
+            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Returns by Share</p>
+            <PieChart data={top5ReturnsPie.filter(d => d.value > 0)} title="" size={200} />
+          </div>
+          <div className="flex flex-col items-center">
+            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Cost by Share</p>
+            <PieChart data={top5CostPie} title="" size={200} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section 4: Metrocorp's Main Contributors – bar charts ─────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-50 to-blue-50">
+          <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Metrocorp's Main Contributors</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Detailed metrics for top 5 contributors</p>
+        </div>
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+            <PriceCostBarChart title="Net Market Price per share and Cost per share by Share" bars={top5PriceCost} />
+          </div>
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+            <BarChart
+              title="AER by Share"
+              bars={top5AER}
+              formatValue={v => `${v.toFixed(1)}%`}
+              yLabel="AER %"
+            />
+          </div>
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+            <BarChart
+              title="Total Balance No. of Shares by Share"
+              bars={top5BalShares}
+              formatValue={v => fmtNum(v)}
+              yLabel="Shares"
+            />
+          </div>
+          {/* spacer / future chart */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex items-center justify-center text-gray-300 text-sm">
+            {top5.length === 0 && 'No contributor data available'}
+            {top5.length > 0 && (
+              <div className="w-full">
+                <p className="text-xs font-bold text-gray-700 mb-2">Summary — Top 5 Contributors</p>
+                <table className="w-full text-xs">
+                  <thead><tr className="text-gray-400 border-b border-gray-200">
+                    <th className="text-left py-1">Share</th>
+                    <th className="text-right py-1">Held</th>
+                    <th className="text-right py-1">Market Value</th>
+                    <th className="text-right py-1">AER</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {top5.map((m, i) => (
+                      <tr key={m.shareId}>
+                        <td className="py-1.5 font-semibold" style={{ color: shareColor(i) }}>{m.ticker}</td>
+                        <td className="py-1.5 text-right text-gray-600">{fmtNum(m.heldShares)}</td>
+                        <td className="py-1.5 text-right text-gray-800 font-semibold">{fmtCur(m.marketValue)}</td>
+                        <td className={`py-1.5 text-right font-semibold ${m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{m.aer.toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
