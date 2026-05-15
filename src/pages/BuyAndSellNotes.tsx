@@ -2117,13 +2117,19 @@ export function BuyAndSellNotes() {
                       {anyMismatch && (
                         <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
                           <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
-                          <span>Some fields do not match the transaction. You can send for approval or approve anyway.</span>
+                          <div>
+                            <p className="font-semibold">Fields do not match the transaction</p>
+                            <p className="mt-0.5">This note must be sent for approval before it can be processed. An approver will review the discrepancies.</p>
+                          </div>
                         </div>
                       )}
                       {allMatch && (
                         <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800">
                           <CheckCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-green-600" />
-                          <span>All fields match the transaction. Ready to approve and process.</span>
+                          <div>
+                            <p className="font-semibold">All fields match the transaction</p>
+                            <p className="mt-0.5">Ready to approve and process. The note will be recorded and the cash balance updated.</p>
+                          </div>
                         </div>
                       )}
                       <div className="flex justify-end space-x-3">
@@ -2131,7 +2137,7 @@ export function BuyAndSellNotes() {
                           <XCircle className="w-4 h-4" />
                           <span>Cancel</span>
                         </button>
-                        {anyMismatch && (
+                        {anyMismatch ? (
                           <button
                             type="button"
                             onClick={handleSendForApproval}
@@ -2140,15 +2146,16 @@ export function BuyAndSellNotes() {
                             <AlertTriangle className="w-4 h-4" />
                             <span>Send for Approval</span>
                           </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleApproval}
+                            className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 text-sm font-medium"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                            <span>Approve &amp; Process</span>
+                          </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={handleApproval}
-                          className={`px-5 py-2 text-white rounded-lg transition-colors flex items-center space-x-2 text-sm font-medium ${allMatch ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                          <span>{allMatch ? 'Approve & Process' : 'Approve Anyway & Process'}</span>
-                        </button>
                       </div>
                     </div>
                   );
