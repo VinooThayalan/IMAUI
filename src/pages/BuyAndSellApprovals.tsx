@@ -144,19 +144,73 @@ export function BuyAndSellApprovals() {
     setIsSubmitting(false);
   }
 
+  async function sendBrokerNotification(
+    note: BuyAndSellNote,
+    action: 'APPROVED' | 'REJECTED',
+    reviewRemarks: string,
+    entity: Entity | null,
+    share: Share | null,
+    broker: Broker | null,
+  ) {
+    const brokerEmail = broker?.contact_person_email;
+    if (!brokerEmail) return;
+
+    const reviewedAt = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const fmt = (n?: number | null) => n != null ? Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
+    const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${anonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'approval_notification',
+        to: brokerEmail,
+        notification: {
+          action,
+          contract_no: note.contract_no || note.note_number || '-',
+          note_type: note.note_type,
+          entity_name: entity?.name || '-',
+          share_name: share?.share_name || '-',
+          ticker: share?.ticker || '-',
+          no_of_shares: note.no_of_shares?.toLocaleString() || '-',
+          price_avg: fmt(note.price_avg),
+          gross_amount: fmt(note.gross_amount),
+          brokerage: fmt(note.brokerage),
+          net_amount: fmt(note.net_amount),
+          trade_date: fmtDate(note.trade_date),
+          settlement_date: fmtDate(note.settlement_date),
+          broker_name: broker?.broker_name || note.broker || '-',
+          dealer_name: note.dealer_name || undefined,
+          remarks: note.remarks || undefined,
+          approval_notes: reviewRemarks || undefined,
+          reviewed_by: 'Reviewer',
+          reviewed_at: reviewedAt,
+        },
+      }),
+    }).catch(err => console.error('Email notification failed:', err));
+  }
+
   async function handleApprove() {
     if (!selectedNote) return;
     setIsSubmitting(true);
     try {
-      const { txn, entity } = getDetails(selectedNote);
+      const { txn, entity, share, broker } = getDetails(selectedNote);
       if (!entity) throw new Error('Entity not found for this note');
+
+      const reviewedAt = new Date().toISOString();
 
       const { error: noteErr } = await supabase
         .from('buy_sell_notes')
         .update({
           status: 'PROCESSED',
           approved_by: 'Reviewer',
-          approved_at: new Date().toISOString(),
+          approved_at: reviewedAt,
           approval_notes: actionRemarks || null,
         })
         .eq('id', selectedNote.id);
@@ -192,6 +246,8 @@ export function BuyAndSellApprovals() {
         });
       if (ledgerErr) throw ledgerErr;
 
+      await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker);
+
       await loadData();
       closeModal();
     } catch (err: any) {
@@ -205,6 +261,8 @@ export function BuyAndSellApprovals() {
     if (!selectedNote || !actionRemarks.trim()) return;
     setIsSubmitting(true);
     try {
+      const { entity, share, broker } = getDetails(selectedNote);
+
       const { error } = await supabase
         .from('buy_sell_notes')
         .update({
@@ -215,6 +273,9 @@ export function BuyAndSellApprovals() {
         })
         .eq('id', selectedNote.id);
       if (error) throw error;
+
+      await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker);
+
       await loadData();
       closeModal();
     } catch (err: any) {
