@@ -451,9 +451,16 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                                   </div>
                                 )}
                                 {detail.file_url && (
-                                  <div className="flex items-center gap-1 pt-1 text-xs text-blue-600">
-                                    <FileText className="w-3 h-3 flex-shrink-0" />
-                                    <span className="truncate">{detail.file_url}</span>
+                                  <div className="pt-1">
+                                    <a
+                                      href={detail.file_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                                    >
+                                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                      View Contract Note
+                                    </a>
                                   </div>
                                 )}
                               </div>
