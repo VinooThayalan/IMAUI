@@ -948,15 +948,26 @@ export function Transactions() {
 
       const entityName = getEntityName(selectedTransaction.entity_id);
       const share = shares.find(s => s.id === selectedTransaction.share_id);
-      const brokerName = selectedTransaction.broker_id ? getBrokerName(selectedTransaction.broker_id) : 'N/A';
       const bank = selectedTransaction.bank_id ? banks.find(b => b.id === selectedTransaction.bank_id) : null;
       const brokerageFeeType = selectedTransaction.brokerage_fee_type_id
         ? brokerageFeeTypes.find(ft => ft.id === selectedTransaction.brokerage_fee_type_id)
         : null;
 
       const entityBroker = entityBrokers.find(eb =>
-        eb.entity_id === selectedTransaction.entity_id && eb.broker_id === selectedTransaction.broker_id
+        eb.entity_id === selectedTransaction.entity_id && (
+          (selectedTransaction.broker_id && eb.broker_id === selectedTransaction.broker_id) ||
+          (selectedTransaction.cds_account_id && (
+            eb.broker_account_number === selectedTransaction.cds_account_id ||
+            eb.custodian_account_number === selectedTransaction.cds_account_id
+          ))
+        )
       );
+
+      const brokerName = selectedTransaction.broker_id
+        ? getBrokerName(selectedTransaction.broker_id)
+        : entityBroker?.broker_id
+          ? getBrokerName(entityBroker.broker_id)
+          : (entityBroker as any)?.broker_text || 'N/A';
 
       const transactionData = {
         entity: entityName,
@@ -1013,15 +1024,28 @@ export function Transactions() {
   function getTransactionEmailData(transaction: Transaction) {
     const entityName = getEntityName(transaction.entity_id);
     const share = shares.find(s => s.id === transaction.share_id);
-    const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
     const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
     const brokerageFeeType = transaction.brokerage_fee_type_id
       ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
       : null;
 
+    // Match entity broker by broker_id first, then fall back to CDS account number
     const entityBroker = entityBrokers.find(eb =>
-      eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
+      eb.entity_id === transaction.entity_id && (
+        (transaction.broker_id && eb.broker_id === transaction.broker_id) ||
+        (transaction.cds_account_id && (
+          eb.broker_account_number === transaction.cds_account_id ||
+          eb.custodian_account_number === transaction.cds_account_id
+        ))
+      )
     );
+
+    // Resolve broker name: direct FK → entity_broker FK → broker_text fallback
+    const brokerName = transaction.broker_id
+      ? getBrokerName(transaction.broker_id)
+      : entityBroker?.broker_id
+        ? getBrokerName(entityBroker.broker_id)
+        : (entityBroker as any)?.broker_text || 'N/A';
 
     return {
       entity: entityName,
