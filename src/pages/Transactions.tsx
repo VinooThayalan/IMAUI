@@ -1,7 +1,18 @@
-import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+
+const ALL_STATUSES = [
+  { value: 'DRAFT', label: 'Draft' },
+  { value: 'PENDING_APPROVAL', label: 'Pending' },
+  { value: 'APPROVED', label: 'Approved' },
+  { value: 'AUTO_APPROVED', label: 'Auto Approved' },
+  { value: 'REJECTED', label: 'Rejected' },
+  { value: 'EXPIRED', label: 'Expired' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+const STATUS_LABELS: Record<string, string> = Object.fromEntries(ALL_STATUSES.map(s => [s.value, s.label]));
 
 interface Transaction {
   id: string;
@@ -156,7 +167,9 @@ export function Transactions() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterStatus, setFilterStatus] = useState('DRAFT');
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(['DRAFT']));
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -184,6 +197,16 @@ export function Transactions() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
+        setStatusDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -1150,7 +1173,7 @@ export function Transactions() {
 
     const matchesDateFrom = !filterDateFrom || txn.transaction_date >= filterDateFrom;
     const matchesDateTo = !filterDateTo || txn.transaction_date <= filterDateTo;
-    const matchesStatus = !filterStatus || txn.approval_status === filterStatus;
+    const matchesStatus = filterStatuses.size === 0 || filterStatuses.has(txn.approval_status);
 
     if (activeTab === 'pending') {
       return matchesSearch && matchesDateFrom && matchesDateTo && matchesStatus && txn.approval_status === 'PENDING_APPROVAL';
@@ -1271,7 +1294,7 @@ export function Transactions() {
         <div className="border-b border-gray-200">
           <div className="flex space-x-1 p-2">
             <button
-              onClick={() => { setActiveTab('all'); setFilterStatus('DRAFT'); }}
+              onClick={() => { setActiveTab('all'); setFilterStatuses(new Set(['DRAFT'])); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                 activeTab === 'all'
                   ? 'bg-blue-600 text-white'
@@ -1281,7 +1304,7 @@ export function Transactions() {
               All Transactions
             </button>
             <button
-              onClick={() => { setActiveTab('pending'); setFilterStatus('PENDING_APPROVAL'); }}
+              onClick={() => { setActiveTab('pending'); setFilterStatuses(new Set(['PENDING_APPROVAL'])); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
                 activeTab === 'pending'
                   ? 'bg-blue-600 text-white'
@@ -1329,22 +1352,58 @@ export function Transactions() {
                 className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">All Statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="PENDING_APPROVAL">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="AUTO_APPROVED">Auto Approved</option>
-              <option value="REJECTED">Rejected</option>
-              <option value="CANCELLED">Cancelled</option>
-            </select>
-            {(filterDateFrom || filterDateTo || (activeTab === 'all' ? filterStatus !== 'DRAFT' : filterStatus !== 'PENDING_APPROVAL')) && (
+            {/* Multi-select status filter */}
+            <div className="relative" ref={statusDropdownRef}>
               <button
-                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus(activeTab === 'pending' ? 'PENDING_APPROVAL' : 'DRAFT'); }}
+                type="button"
+                onClick={() => setStatusDropdownOpen(o => !o)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[130px]"
+              >
+                <span className="flex-1 text-left truncate text-gray-700">
+                  {filterStatuses.size === 0
+                    ? 'All Statuses'
+                    : filterStatuses.size === 1
+                    ? STATUS_LABELS[Array.from(filterStatuses)[0]] ?? Array.from(filterStatuses)[0]
+                    : `${filterStatuses.size} Statuses`}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              </button>
+              {statusDropdownOpen && (
+                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[170px] py-1">
+                  {/* All option */}
+                  <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700 border-b border-gray-100">
+                    <input
+                      type="checkbox"
+                      checked={filterStatuses.size === 0}
+                      onChange={() => setFilterStatuses(new Set())}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>All Statuses</span>
+                  </label>
+                  {ALL_STATUSES.map(({ value, label }) => (
+                    <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={filterStatuses.has(value)}
+                        onChange={() => {
+                          setFilterStatuses(prev => {
+                            const next = new Set(prev);
+                            if (next.has(value)) next.delete(value);
+                            else next.add(value);
+                            return next;
+                          });
+                        }}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            {(filterDateFrom || filterDateTo || (activeTab === 'all' ? !(filterStatuses.size === 1 && filterStatuses.has('DRAFT')) : !(filterStatuses.size === 1 && filterStatuses.has('PENDING_APPROVAL')))) && (
+              <button
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatuses(new Set([activeTab === 'pending' ? 'PENDING_APPROVAL' : 'DRAFT'])); setStatusDropdownOpen(false); }}
                 className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Clear
