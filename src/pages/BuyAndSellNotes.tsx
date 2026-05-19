@@ -135,6 +135,7 @@ interface ExtractedData {
   note_type?: 'Buy' | 'Sell';
   page_total?: string;
   grand_total?: string;
+  security?: string;
 }
 
 interface ExtractedRow {
@@ -151,6 +152,7 @@ interface ExtractedRow {
   clearing_fee: number;
   foreign_br: number;
   amount: number;
+  _settlement_date?: string; // per-row settlement date used by Trade Confirmation format
 }
 
 interface ManualRow {
@@ -444,6 +446,48 @@ export function BuyAndSellNotes() {
     return result;
   }
 
+  // Detect Capital TRUST "Trade Confirmation" format
+  function isTradeConfirmation(rawText: string): boolean {
+    return /TRADE\s+CONFIRMATION/i.test(rawText) || /CDS\s+Account\s+Number\s*[:\s]+[A-Z]{2,5}-\d{3,5}/i.test(rawText);
+  }
+
+  // Parse rows from Trade Confirmation format:
+  // Trade Date | Contract No | No of Shares | Price/Avg | Gross Amount | Brokerage | SEC | Exchange | CDS | GOV CESS | Net Amount | Settlement | Foreign Brokerage | Clearing Fees
+  function parseTradeConfirmationRows(rawText: string): ExtractedRow[] {
+    const out: ExtractedRow[] = [];
+    const NUM = '[\\d,]+(?:\\.\\d+)?';
+    // Row pattern: date  contractNo  qty  price  gross  brokerage  sec  exchange  cds  govcess  netAmount  settlementDate  foreignBrokerage  clearingFees
+    const DATE = '\\d{2}/\\d{2}/\\d{4}';
+    const rowPattern = new RegExp(
+      `(${DATE})\\s+(\\d{7,})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+      `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+      `(${NUM})\\s+(${DATE})\\s+(${NUM})(?:\\s+(${NUM}))?`,
+      'g'
+    );
+    let m: RegExpExecArray | null;
+    while ((m = rowPattern.exec(rawText)) !== null) {
+      out.push({
+        contract_no: m[2],
+        qty: parseNumber(m[3]),
+        rate: parseNumber(m[4]),
+        gross_value: parseNumber(m[5]),
+        brokerage: parseNumber(m[6]),
+        sec: parseNumber(m[7]),
+        cse_fees: parseNumber(m[8]),
+        cds_fees: parseNumber(m[9]),
+        stl: parseNumber(m[10]),
+        amount: parseNumber(m[11]),
+        // m[12] = settlement date (per-row), m[13] = foreign brokerage, m[14] = clearing fee
+        foreign_br: parseNumber(m[13] ?? '0'),
+        clearing_fee: parseNumber(m[14] ?? '0'),
+        // Derive security from context (populated in extractFromPdf after header parsing)
+        security: '',
+        _settlement_date: m[12],
+      });
+    }
+    return out;
+  }
+
   function parseRowsFromRawText(rawText: string): ExtractedRow[] {
     const out: ExtractedRow[] = [];
     const NUM = '[\\d,]+(?:\\.\\d+)?';
@@ -606,7 +650,76 @@ export function BuyAndSellNotes() {
     return out;
   }
 
-  function extractHeader(rawText: string, rows: { str: string; x: number }[][]) {
+  // Convert dd/mm/yyyy → yyyy-mm-dd
+  function dmyToIso(d: string): string {
+    const parts = d.split('/');
+    if (parts.length === 3 && parts[0].length === 2) return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    return d.replace(/\//g, '-');
+  }
+
+  function extractHeader(rawText: string, rows: { str: string; x: number }[][], extractedRows?: ExtractedRow[]) {
+    const toIso = (d: string | undefined) => d ? d.replace(/\//g, '-') : '';
+
+    // ── Trade Confirmation format (Capital TRUST) ──────────────────────────
+    if (isTradeConfirmation(rawText)) {
+      // Account number: "CDS Account Number : DSA-4328-LC/00"
+      const accountMatch = rawText.match(/CDS\s+Account\s+Number\s*[:\s]+([A-Z0-9][A-Z0-9\-\/]+)/i)
+        || rawText.match(/\b([A-Z]{2,5}-\d{3,5}-[A-Z]{2,3}\/\d{2,3})\b/);
+
+      // Transaction date: "Transaction Date : 04/03/2026" (dd/mm/yyyy)
+      const txnDateRaw = rawText.match(/Transaction\s*Date\s*[:\s]+(\d{2}\/\d{2}\/\d{4})/i)?.[1]
+        || rawText.match(/Transaction\s*Date\s*[:\s]+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i)?.[1];
+      const trade_date = txnDateRaw
+        ? (txnDateRaw.match(/^\d{2}\//) ? dmyToIso(txnDateRaw) : toIso(txnDateRaw))
+        : '';
+
+      // Settlement: take the first settlement date from the data rows (per-row in this format)
+      const firstSettlement = extractedRows?.[0]?._settlement_date || '';
+      const settlement = firstSettlement
+        ? (firstSettlement.match(/^\d{2}\//) ? dmyToIso(firstSettlement) : toIso(firstSettlement))
+        : '';
+
+      // Buyer name: "To : METROCORP (PVT) LTD"
+      const toMatch = rawText.match(/\bTo\b\s*[:\s]+([A-Z][A-Z0-9\s(),.&/-]{3,60})/);
+      const buyer_name = toMatch?.[1]?.trim().replace(/\s+/g, ' ') || '';
+
+      // Note type: "Purchase of" = Buy, "Sale of" / "Sold" = Sell
+      const noteType: 'Buy' | 'Sell' = /\bSale\s+of\b|\bSold\b/i.test(rawText) ? 'Sell' : 'Buy';
+
+      // Broker name: company heading at top (lines before TRADE CONFIRMATION)
+      const firstPageRows = rows.slice(0, 10);
+      const brokerRow = firstPageRows.find(r => /\b(securities|brokers?|stock|capital|financial)\b/i.test(r.map(c => c.str).join(' ')));
+      const broker_name = brokerRow ? brokerRow.map(c => c.str).join(' ').trim() : '';
+      const addressRow = firstPageRows.find(r => {
+        const text = r.map(c => c.str).join(' ');
+        return /\b(Sri\s*Lanka|Colombo|Mawatha|Road|Street|Lane)\b/i.test(text) && text !== broker_name;
+      });
+      const broker_address = addressRow ? addressRow.map(c => c.str).join(' ').trim() : '';
+
+      // Net settlement total
+      const netSettleMatch = rawText.match(/Net\s+Settlement\s+Value\s+([\d,]+(?:\.\d+)?)/i);
+      const grand_total = netSettleMatch?.[1] || '';
+
+      // Security ticker: "Purchase of DFCC BANK PLC ( DFCC.N0000 / ..."
+      const securityMatch = rawText.match(/(?:Purchase|Sale)\s+of\s+[^(]+\(\s*([A-Z][A-Z0-9.]{2,})/i);
+      const security = securityMatch?.[1]?.trim() || '';
+
+      return {
+        account_no: accountMatch?.[1]?.trim() || '',
+        trade_date,
+        settlement,
+        broker_name,
+        broker_address,
+        buyer_name,
+        buyer_address: '',
+        note_type: noteType,
+        page_total: '',
+        grand_total,
+        security,
+      };
+    }
+
+    // ── Bought/Sold Note format ────────────────────────────────────────────
     let accountMatch = rawText.match(/Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i);
     let txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
     let settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i);
@@ -629,7 +742,6 @@ export function BuyAndSellNotes() {
       || rawText.match(/\bTotal\b\s+([\d,]+\.\d+)(?!\S)/i);
 
     const noteType: 'Buy' | 'Sell' = /\bSOLD\s*Note\b/i.test(rawText) ? 'Sell' : 'Buy';
-    const toIso = (d: string | undefined) => d ? d.replace(/\//g, '-') : '';
 
     const firstPageRows = rows.slice(0, 12);
     const brokerRow = firstPageRows.find(r => /\b(securities|brokers?|stock|capital|financial)\b/i.test(r.map(c => c.str).join(' ')));
@@ -672,6 +784,7 @@ export function BuyAndSellNotes() {
       note_type: noteType,
       page_total: pageTotalMatch?.[1]?.trim() || '',
       grand_total: totalMatch?.[1]?.trim() || '',
+      security: '',
     };
   }
 
@@ -680,7 +793,13 @@ export function BuyAndSellNotes() {
     try {
       const { items, rawText } = await extractPdfText(file);
       const grouped = groupIntoRows(items);
-      let rows = parseBoughtNoteRows(grouped);
+
+      // Try Trade Confirmation format first if detected
+      let rows: ExtractedRow[] = [];
+      if (isTradeConfirmation(rawText)) {
+        rows = parseTradeConfirmationRows(rawText);
+      }
+      if (rows.length === 0) rows = parseBoughtNoteRows(grouped);
       if (rows.length === 0) rows = parseRowsByXColumns(items);
       if (rows.length === 0) rows = parseRowsFromRawText(rawText);
 
@@ -692,7 +811,12 @@ export function BuyAndSellNotes() {
       }
       setDebugRawText('');
 
-      const header = extractHeader(rawText, grouped);
+      const header = extractHeader(rawText, grouped, rows);
+
+      // Backfill security ticker into Trade Confirmation rows (it's in the header, not per-row)
+      if (header.security) {
+        rows = rows.map(r => r.security ? r : { ...r, security: header.security! });
+      }
 
       const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
       const totalShares = sum(r => r.qty);
