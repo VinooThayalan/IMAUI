@@ -230,6 +230,7 @@ export function BuyAndSellNotes() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [viewingFileNoteId, setViewingFileNoteId] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [extractedData, setExtractedData] = useState<ExtractedData>({
     trade_date: '',
     contract_no: '',
@@ -941,6 +942,8 @@ export function BuyAndSellNotes() {
 
   async function handleApproval() {
     if (!formData.transaction_id) { alert('Please select a transaction'); return; }
+    if (isProcessing) return;
+    setIsProcessing(true);
     try {
       const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
       if (!selectedTransaction) { alert('Selected transaction not found'); return; }
@@ -995,11 +998,15 @@ export function BuyAndSellNotes() {
     } catch (error: any) {
       console.error('Error processing note:', error);
       alert(`Failed to process note:\n\n${error?.message || JSON.stringify(error)}`);
+    } finally {
+      setIsProcessing(false);
     }
   }
 
   async function handleSendForApproval() {
     if (!formData.transaction_id) { alert('Please select a transaction'); return; }
+    if (isProcessing) return;
+    setIsProcessing(true);
     try {
       const selectedTransaction = transactions.find(t => t.id === formData.transaction_id);
       if (!selectedTransaction) { alert('Selected transaction not found'); return; }
@@ -1018,6 +1025,8 @@ export function BuyAndSellNotes() {
     } catch (error: any) {
       console.error('Error sending for approval:', error);
       alert(`Failed to save note:\n\n${error?.message || JSON.stringify(error)}`);
+    } finally {
+      setIsProcessing(false);
     }
   }
 
@@ -1302,6 +1311,7 @@ export function BuyAndSellNotes() {
     setFieldCompare({});
     setExtractedRows([]);
     setDebugRawText('');
+    setIsProcessing(false);
   }
 
   const filteredNotes = notes.filter(note => {
@@ -2145,19 +2155,21 @@ export function BuyAndSellNotes() {
                           <button
                             type="button"
                             onClick={handleSendForApproval}
-                            className="px-5 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center space-x-2 text-sm font-medium"
+                            disabled={isProcessing}
+                            className="px-5 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center space-x-2 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <AlertTriangle className="w-4 h-4" />
-                            <span>Send for Approval</span>
+                            <span>{isProcessing ? 'Saving...' : 'Send for Approval'}</span>
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={handleApproval}
-                            className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 text-sm font-medium"
+                            disabled={isProcessing}
+                            className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                           >
                             <CheckCircle className="w-4 h-4" />
-                            <span>Approve &amp; Process</span>
+                            <span>{isProcessing ? 'Processing...' : 'Approve & Process'}</span>
                           </button>
                         )}
                       </div>
