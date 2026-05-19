@@ -735,29 +735,33 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
-      const usedTxnIds = new Set<string>();
-      const autoMap: Record<number, string> = {};
       const noteType = (extracted.note_type || '').toLowerCase();
-      rows.forEach((row, idx) => {
+      const typeOk = (t: Transaction) => !noteType || t.transaction_type?.toLowerCase() === noteType;
+
+      // Group rows by security ticker and sum their quantities
+      const securityTotals: Record<string, number> = {};
+      for (const row of rows) {
         const ticker = row.security.split('.')[0].toUpperCase();
+        securityTotals[ticker] = (securityTotals[ticker] || 0) + row.qty;
+      }
+
+      // Try to auto-map to a single transaction using total qty per security
+      let bestCandidate: Transaction | undefined;
+      for (const [ticker, totalQty] of Object.entries(securityTotals)) {
         const share = shares.find(s => s.ticker?.toUpperCase() === ticker);
-        const typeOk = (t: Transaction) => !noteType || t.transaction_type?.toLowerCase() === noteType;
-        const shareOk = (t: Transaction) => !share || t.share_id === share.id;
-        const candidate = transactions.find(t =>
-          !usedTxnIds.has(t.id) && shareOk(t) && typeOk(t) &&
-          Math.abs(Number(t.no_of_shares) - row.qty) < 0.01
-        ) || transactions.find(t =>
-          !usedTxnIds.has(t.id) && shareOk(t) && typeOk(t)
-        );
-        if (candidate) {
-          autoMap[idx] = candidate.id;
-          usedTxnIds.add(candidate.id);
-        }
-      });
-      const firstMapped = transactions.find(t => t.id === autoMap[0]);
+        // Only auto-map when we can confirm the share exists in the system
+        if (!share) continue;
+        const shareOk = (t: Transaction) => t.share_id === share.id;
+        // Prefer exact total qty match, then any matching share+type
+        bestCandidate =
+          transactions.find(t => shareOk(t) && typeOk(t) && Math.abs(Number(t.no_of_shares) - totalQty) < 0.01) ||
+          transactions.find(t => shareOk(t) && typeOk(t));
+        if (bestCandidate) break;
+      }
+
       setFormData(prev => ({
         ...prev,
-        transaction_id: firstMapped?.id || prev.transaction_id,
+        transaction_id: bestCandidate?.id || '',
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
