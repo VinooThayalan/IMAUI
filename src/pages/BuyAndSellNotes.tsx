@@ -571,9 +571,11 @@ export function BuyAndSellNotes() {
     return out;
   }
 
-  function parseRowsByXColumns(items: { str: string; x: number; y: number; page: number }[]): ExtractedRow[] {
+  function parseRowsByXColumns(items: { str: string; x: number; y: number; page: number }[], securityHint = ''): ExtractedRow[] {
+    // Group items into rows by Y position with tolerance for slight misalignment
     const allRows = items.reduce<{ [key: string]: typeof items }>((acc, it) => {
-      const key = `${it.page}:${Math.round(it.y)}`;
+      // Round y to nearest 2 to merge items that are on the same visual line
+      const key = `${it.page}:${Math.round(it.y / 2) * 2}`;
       (acc[key] = acc[key] || []).push(it);
       return acc;
     }, {});
@@ -581,32 +583,52 @@ export function BuyAndSellNotes() {
       .map(r => [...r].sort((a, b) => a.x - b.x))
       .sort((a, b) => (a[0].page - b[0].page) || (b[0].y - a[0].y));
 
+    // Find the column header row — supports both Bought Note ("qty","security") and
+    // Trade Confirmation ("no of shares" / "shares", "contract no", "net amount") column names
     const headerRow = rowList.find(r => {
       const text = r.map(i => i.str).join(' ').toLowerCase();
-      return text.includes('contract') && text.includes('qty') && text.includes('security');
+      const hasContract = text.includes('contract');
+      const hasQtyOrShares = text.includes('qty') || text.includes('shares') || text.includes('no of shares');
+      const hasAmount = text.includes('amount') || text.includes('gross') || text.includes('net');
+      return hasContract && hasQtyOrShares && hasAmount;
     });
     if (!headerRow) return [];
 
-    const colX: Record<string, number> = {};
-    for (let i = 0; i < headerRow.length; i += 1) {
-      const s = headerRow[i].str.toLowerCase();
-      if (s.startsWith('contract')) colX.contract = headerRow[i].x;
-      else if (s === 'qty') colX.qty = headerRow[i].x;
-      else if (s.startsWith('security')) colX.security = headerRow[i].x;
-      else if (s === 'rate') colX.rate = headerRow[i].x;
-      else if (s.startsWith('gross')) colX.gross = headerRow[i].x;
-      else if (s.startsWith('brokerage')) colX.brokerage = headerRow[i].x;
-      else if (s.startsWith('cds')) colX.cds = headerRow[i].x;
-      else if (s.startsWith('cse')) colX.cse = headerRow[i].x;
-      else if (s === 'sec') colX.sec = headerRow[i].x;
-      else if (s === 'stl') colX.stl = headerRow[i].x;
-      else if (s.startsWith('clearing')) colX.clearing = headerRow[i].x;
-      else if (s.startsWith('foreign')) colX.foreign = headerRow[i].x;
-      else if (s.startsWith('amount')) colX.amount = headerRow[i].x;
-    }
-
+    // Also collect the next row in case multi-line headers (e.g. "No of" on one line, "Shares" below)
     const headerY = headerRow[0].y;
     const headerPage = headerRow[0].page;
+    const headerRowIdx = rowList.indexOf(headerRow);
+    // Merge any continuation row that appears within 15 pts below and has no numbers
+    const continuationRow = rowList[headerRowIdx + 1];
+    const combinedHeaderItems = [...headerRow];
+    if (continuationRow && continuationRow[0].page === headerPage &&
+        Math.abs(continuationRow[0].y - headerY) <= 15 &&
+        !continuationRow.some(i => /\d/.test(i.str))) {
+      combinedHeaderItems.push(...continuationRow);
+    }
+
+    const colX: Record<string, number> = {};
+    for (const item of combinedHeaderItems) {
+      const s = item.str.toLowerCase().trim();
+      if (s.startsWith('contract') || s === 'no') colX.contract = colX.contract ?? item.x;
+      // "No of Shares" — the "No" token sits at the column x position
+      else if (s === 'of' && colX.contract !== undefined && !colX.qty) { /* skip "of" */ }
+      else if (s === 'qty' || s === 'shares') colX.qty = item.x;
+      else if (s.startsWith('security')) colX.security = item.x;
+      else if (s === 'rate' || s === 'price/avg' || s === 'price') colX.rate = item.x;
+      else if (s.startsWith('gross')) colX.gross = item.x;
+      else if (s.startsWith('brokerage')) colX.brokerage = item.x;
+      else if (s.startsWith('cds')) colX.cds = item.x;
+      else if (s.startsWith('cse') || s === 'exchange') colX.cse = item.x;
+      else if (s === 'sec') colX.sec = item.x;
+      else if (s === 'stl' || s === 'gov' || s === 'gov cess' || s === 'cess') colX.stl = colX.stl ?? item.x;
+      else if (s.startsWith('clearing')) colX.clearing = item.x;
+      else if (s.startsWith('foreign')) colX.foreign = item.x;
+      else if (s === 'amount' || s === 'net amount') colX.amount = item.x;
+      else if (s === 'settlement') colX.settlement = item.x;
+      else if (s === 'net') colX.amount = item.x;
+    }
+
     const out: ExtractedRow[] = [];
 
     const nearest = (row: typeof headerRow, x: number, tolerance = 40) => {
@@ -626,15 +648,21 @@ export function BuyAndSellNotes() {
       if (row[0].page < headerPage) continue;
       if (row[0].page === headerPage && row[0].y >= headerY) continue;
       const joined = row.map(i => i.str).join(' ');
-      if (!/^\s*\d{7,}/.test(joined)) continue;
+      // Accept rows that contain a 7+ digit contract number anywhere (Trade Confirmation rows start with a date)
+      if (!/\b\d{7,}\b/.test(joined)) continue;
+      // Skip total/summary rows
+      if (/^\s*(total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total)/i.test(joined)) continue;
+      // Skip separator rows (dashes/equals)
+      if (/^[\s\-=]+$/.test(joined)) continue;
 
-      const contract = nearest(row, colX.contract ?? row[0].x, 60);
+      const contract = nearest(row, colX.contract ?? row[0].x, 80);
       if (!CONTRACT_TOKEN.test(contract)) continue;
 
+      const settlementStr = colX.settlement !== undefined ? nearest(row, colX.settlement, 70) : '';
       out.push({
         contract_no: contract,
         qty: parseNumber(nearest(row, colX.qty ?? 0, 60)),
-        security: nearest(row, colX.security ?? 0, 60),
+        security: securityHint || nearest(row, colX.security ?? 0, 60),
         rate: parseNumber(nearest(row, colX.rate ?? 0, 60)),
         gross_value: parseNumber(nearest(row, colX.gross ?? 0, 80)),
         brokerage: parseNumber(nearest(row, colX.brokerage ?? 0, 60)),
@@ -645,6 +673,7 @@ export function BuyAndSellNotes() {
         clearing_fee: parseNumber(nearest(row, colX.clearing ?? 0, 60)),
         foreign_br: parseNumber(nearest(row, colX.foreign ?? 0, 60)),
         amount: parseNumber(nearest(row, colX.amount ?? 0, 80)),
+        _settlement_date: settlementStr || undefined,
       });
     }
     return out;
@@ -666,9 +695,9 @@ export function BuyAndSellNotes() {
       const accountMatch = rawText.match(/CDS\s+Account\s+Number\s*[:\s]+([A-Z0-9][A-Z0-9\-\/]+)/i)
         || rawText.match(/\b([A-Z]{2,5}-\d{3,5}-[A-Z]{2,3}\/\d{2,3})\b/);
 
-      // Transaction date: "Transaction Date : 04/03/2026" (dd/mm/yyyy)
-      const txnDateRaw = rawText.match(/Transaction\s*Date\s*[:\s]+(\d{2}\/\d{2}\/\d{4})/i)?.[1]
-        || rawText.match(/Transaction\s*Date\s*[:\s]+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i)?.[1];
+      // Transaction date: "Transaction Date : 04/03/2026" or "Transaction Date 04/03/2026" (dd/mm/yyyy)
+      const txnDateRaw = rawText.match(/Transaction\s*Date\s*[:\s]*(\d{2}\/\d{2}\/\d{4})/i)?.[1]
+        || rawText.match(/Transaction\s*Date\s*[:\s]*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i)?.[1];
       const trade_date = txnDateRaw
         ? (txnDateRaw.match(/^\d{2}\//) ? dmyToIso(txnDateRaw) : toIso(txnDateRaw))
         : '';
@@ -794,10 +823,18 @@ export function BuyAndSellNotes() {
       const { items, rawText } = await extractPdfText(file);
       const grouped = groupIntoRows(items);
 
-      // Try Trade Confirmation format first if detected
+      // Extract security hint early for Trade Confirmation (security is in doc header, not per-row)
+      const securityHint = (() => {
+        const m = rawText.match(/(?:Purchase|Sale)\s+of\s+[^(]+\(\s*([A-Z][A-Z0-9.]{2,})/i);
+        return m?.[1]?.trim() || '';
+      })();
+
       let rows: ExtractedRow[] = [];
       if (isTradeConfirmation(rawText)) {
-        rows = parseTradeConfirmationRows(rawText);
+        // For Trade Confirmation, the X-position parser is most reliable since raw text is jumbled.
+        // Try it first, fall back to the regex parser, then the raw-text regex patterns.
+        rows = parseRowsByXColumns(items, securityHint);
+        if (rows.length === 0) rows = parseTradeConfirmationRows(rawText);
       }
       if (rows.length === 0) rows = parseBoughtNoteRows(grouped);
       if (rows.length === 0) rows = parseRowsByXColumns(items);
@@ -813,9 +850,10 @@ export function BuyAndSellNotes() {
 
       const header = extractHeader(rawText, grouped, rows);
 
-      // Backfill security ticker into Trade Confirmation rows (it's in the header, not per-row)
-      if (header.security) {
-        rows = rows.map(r => r.security ? r : { ...r, security: header.security! });
+      // Backfill security ticker into Trade Confirmation rows (it's in the doc header, not per-row)
+      if (header.security || securityHint) {
+        const sec = header.security || securityHint;
+        rows = rows.map(r => r.security ? r : { ...r, security: sec });
       }
 
       const sum = (fn: (r: ExtractedRow) => number) => rows.reduce((s, r) => s + fn(r), 0);
