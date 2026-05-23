@@ -178,30 +178,6 @@ interface ExtractedRow {
   _settlement_date?: string; // per-row settlement date used by Trade Confirmation format
 }
 
-interface ParserDebugInfo {
-  parserUsed: string;
-  rowCount: number;
-  totals: {
-    qty: number;
-    gross: number;
-    brokerage: number;
-    cds: number;
-    cse: number;
-    sec: number;
-    stl: number;
-    clearing: number;
-    foreign: number;
-    amount: number;
-  };
-  sampleRows: Array<{
-    contract_no: string;
-    security: string;
-    qty: number;
-    rate: number;
-    amount: number;
-  }>;
-}
-
 interface ManualRow {
   entity_id: string;
   share_id: string;
@@ -279,7 +255,6 @@ export function BuyAndSellNotes() {
   >({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [debugRawText, setDebugRawText] = useState<string>("");
-  const [parserDebug, setParserDebug] = useState<ParserDebugInfo | null>(null);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -373,22 +348,18 @@ export function BuyAndSellNotes() {
       if (sharesRes.error) throw sharesRes.error;
       if (brokersRes.error) throw brokersRes.error;
 
-      const allNotes = (notesRes.data || []) as BuyAndSellNote[];
-      const noteLinkRows = allNotes as Array<{
-        status?: string | null;
-        transaction_id?: string | null;
-      }>;
-      const allTxns = (transactionsRes.data || []) as Transaction[];
+      const allNotes = notesRes.data || [];
+      const allTxns = transactionsRes.data || [];
       // Exclude transactions that already have a PROCESSED note linked
       const linkedTxnIds = new Set(
-        noteLinkRows
-          .filter((n) => n.status === "PROCESSED")
-          .map((n) => n.transaction_id)
-          .filter((transactionId): transactionId is string => Boolean(transactionId)),
+        allNotes
+          .filter((n: any) => n.status === "PROCESSED")
+          .map((n: any) => n.transaction_id)
+          .filter(Boolean),
       );
       setNotes(allNotes);
       setAllTransactions(allTxns);
-      setTransactions(allTxns.filter((t) => !linkedTxnIds.has(t.id)));
+      setTransactions(allTxns.filter((t: any) => !linkedTxnIds.has(t.id)));
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
@@ -431,13 +402,13 @@ export function BuyAndSellNotes() {
   async function extractPdfText(
     file: File,
   ): Promise<{
-    items: { str: string; x: number; y: number; page: number; inlineSize: number }[];
+    items: { str: string; x: number; y: number; page: number; width: number }[];
     rawText: string;
   }> {
     const pdfjsLib = await loadPdfjs();
     const buffer = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
-    const items: { str: string; x: number; y: number; page: number; inlineSize: number }[] = [];
+    const items: { str: string; x: number; y: number; page: number; width: number }[] = [];
     const textParts: string[] = [];
 
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum += 1) {
@@ -452,8 +423,8 @@ export function BuyAndSellNotes() {
         if (!str) continue;
         const x = item.transform[4];
         const y = item.transform[5];
-        const inlineSize = item.width ?? 0;
-        items.push({ str, x, y, page: pageNum, inlineSize });
+        const width = item.width ?? 0;
+        items.push({ str, x, y, page: pageNum, width });
         textParts.push(str);
       }
     }
@@ -487,7 +458,6 @@ export function BuyAndSellNotes() {
 
   const NUMERIC_TOKEN = /^-?[\d,]+(?:\.\d+)?$/;
   const SECURITY_TOKEN = /^[A-Z0-9]{1,10}(?:\.[A-Z0-9]+)+$/;
-  const PLAIN_SECURITY_TOKEN = /^[A-Z][A-Z0-9&'()./-]{2,}$/;
   const CONTRACT_TOKEN = /^\d{7,}$/;
 
   function mergeAdjacentTokens(tokens: string[]): string[] {
@@ -495,18 +465,10 @@ export function BuyAndSellNotes() {
     for (let i = 0; i < tokens.length; i += 1) {
       const prev = merged[merged.length - 1];
       const cur = tokens[i];
-
-      // Only stitch tokens when a number is visibly split by punctuation across
-      // extraction boundaries (e.g. "1" + ",245.60" or "1," + "245.60").
-      // Do not merge normal adjacent numeric columns like qty + rate.
-      const shouldJoinNumericSplit =
-        !!prev &&
+      if (
+        prev &&
         /[\d,.]$/.test(prev) &&
         /^[\d,.]/.test(cur) &&
-        (/[,.]$/.test(prev) || /^[,.]/.test(cur));
-
-      if (
-        shouldJoinNumericSplit &&
         (prev + cur).match(/^[\d,]+(?:\.\d+)?$/)
       ) {
         merged[merged.length - 1] = prev + cur;
@@ -527,74 +489,6 @@ export function BuyAndSellNotes() {
       const tokens = mergeAdjacentTokens(rawTokens);
       const contractIdx = tokens.findIndex((t) => CONTRACT_TOKEN.test(t));
       if (contractIdx === -1) continue;
-
-      // Layout variant: contract | qty | security | rate | gross | brokerage | cds | cse | sec | stl | clearing | foreign | net
-      const qtyTokenAfterContract = tokens[contractIdx + 1];
-      const securityAfterQty = tokens[contractIdx + 2];
-      const qtyFirstSecurityIsCandidate =
-        !!qtyTokenAfterContract &&
-        !!securityAfterQty &&
-        NUMERIC_TOKEN.test(qtyTokenAfterContract) &&
-        !NUMERIC_TOKEN.test(securityAfterQty) &&
-        (SECURITY_TOKEN.test(securityAfterQty) ||
-          PLAIN_SECURITY_TOKEN.test(securityAfterQty));
-
-      if (qtyFirstSecurityIsCandidate) {
-        const numeric = tokens
-          .slice(contractIdx + 3)
-          .filter((t) => NUMERIC_TOKEN.test(t))
-          .map(parseNumber);
-        if (numeric.length < 10) continue;
-
-        result.push({
-          contract_no: tokens[contractIdx],
-          qty: parseNumber(qtyTokenAfterContract),
-          security: securityAfterQty,
-          rate: numeric[0] ?? 0,
-          gross_value: numeric[1] ?? 0,
-          brokerage: numeric[2] ?? 0,
-          cds_fees: numeric[3] ?? 0,
-          cse_fees: numeric[4] ?? 0,
-          sec: numeric[5] ?? 0,
-          stl: numeric[6] ?? 0,
-          clearing_fee: numeric[7] ?? 0,
-          foreign_br: numeric[8] ?? 0,
-          amount: numeric[9] ?? 0,
-        });
-        continue;
-      }
-
-      const immediateSecurity = tokens[contractIdx + 1];
-      const immediateSecurityIsCandidate =
-        !!immediateSecurity &&
-        !NUMERIC_TOKEN.test(immediateSecurity) &&
-        (SECURITY_TOKEN.test(immediateSecurity) ||
-          PLAIN_SECURITY_TOKEN.test(immediateSecurity));
-
-      if (immediateSecurityIsCandidate) {
-        const numeric = tokens
-          .slice(contractIdx + 2)
-          .filter((t) => NUMERIC_TOKEN.test(t))
-          .map(parseNumber);
-        if (numeric.length < 10) continue;
-
-        result.push({
-          contract_no: tokens[contractIdx],
-          security: immediateSecurity,
-          qty: numeric[0] ?? 0,
-          rate: numeric[1] ?? 0,
-          sec: numeric[2] ?? 0,
-          cse_fees: numeric[3] ?? 0,
-          cds_fees: numeric[4] ?? 0,
-          stl: numeric[5] ?? 0,
-          brokerage: numeric[6] ?? 0,
-          gross_value: numeric[7] ?? 0,
-          amount: numeric[8] ?? 0,
-          foreign_br: numeric[9] ?? 0,
-          clearing_fee: numeric[10] ?? 0,
-        });
-        continue;
-      }
 
       let securityIdx = tokens.findIndex(
         (t, i) => i > contractIdx && SECURITY_TOKEN.test(t),
@@ -711,223 +605,10 @@ export function BuyAndSellNotes() {
     return out;
   }
 
-  // Parse date-first bought-note rows where each line is:
-  // date | ticker | qty | price | gross | brokerage | cse | cds | sec | net
-  function parseDateFirstBoughtRows(rawText: string): ExtractedRow[] {
-    const out: ExtractedRow[] = [];
-    const NUM = "[\\d,]+(?:\\.\\d+)?";
-    const DATE = "(?:\\d{2}\\/\\d{2}\\/\\d{4}|\\d{4}\\/\\d{2}\\/\\d{2})";
-    const SECURITY = "(?:[A-Z][A-Z0-9]{0,9}(?:\\.[A-Z0-9]+)+|[A-Z][A-Z0-9&'()./-]{2,})";
-
-    const rowPattern = new RegExp(
-      `(${DATE})\\s+(${SECURITY})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
-      "g",
-    );
-
-    let m: RegExpExecArray | null;
-    while ((m = rowPattern.exec(rawText)) !== null) {
-      out.push({
-        contract_no: "",
-        security: m[2],
-        qty: parseNumber(m[3]),
-        rate: parseNumber(m[4]),
-        gross_value: parseNumber(m[5]),
-        brokerage: parseNumber(m[6]),
-        cse_fees: parseNumber(m[7]),
-        cds_fees: parseNumber(m[8]),
-        sec: parseNumber(m[9]),
-        amount: parseNumber(m[10]),
-        stl: 0,
-        foreign_br: 0,
-        clearing_fee: 0,
-      });
-    }
-
-    return out;
-  }
-
-  // Parse wrapped contract blocks where each record starts with a contract number,
-  // then qty + security, followed by 10 numeric values:
-  // rate, gross, brokerage, cds, cse, sec, stl, clearing, foreign, net
-  function parseWrappedContractBlocks(rawText: string): ExtractedRow[] {
-    const normalized = rawText
-      .replace(/\u00A0/g, " ")
-      .replace(/(\d)\s+,\s*(\d{3}(?:\.\d+)?)/g, "$1,$2")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const tokens = mergeAdjacentTokens(
-      normalized
-        .split(" ")
-        .map((t) => t.trim())
-        .filter(Boolean),
-    );
-
-    const rows: ExtractedRow[] = [];
-    for (let i = 0; i < tokens.length; i += 1) {
-      const rawContractToken = tokens[i];
-      const contractMatch = rawContractToken.match(/(\d{10})$/);
-      if (!contractMatch) continue;
-      const contract = contractMatch[1];
-
-      const qtyToken = tokens[i + 1];
-      const security = tokens[i + 2];
-      if (!qtyToken || !security) continue;
-      if (!NUMERIC_TOKEN.test(qtyToken) || NUMERIC_TOKEN.test(security)) continue;
-
-      const nums: string[] = [];
-      let j = i + 3;
-      while (j < tokens.length && nums.length < 10) {
-        const t = tokens[j];
-        if (/(\d{10})$/.test(t)) break;
-        if (NUMERIC_TOKEN.test(t)) nums.push(t);
-        j += 1;
-      }
-
-      if (nums.length < 10) continue;
-
-      rows.push({
-        contract_no: contract,
-        qty: parseNumber(qtyToken),
-        security,
-        rate: parseNumber(nums[0] ?? "0"),
-        gross_value: parseNumber(nums[1] ?? "0"),
-        brokerage: parseNumber(nums[2] ?? "0"),
-        cds_fees: parseNumber(nums[3] ?? "0"),
-        cse_fees: parseNumber(nums[4] ?? "0"),
-        sec: parseNumber(nums[5] ?? "0"),
-        stl: parseNumber(nums[6] ?? "0"),
-        clearing_fee: parseNumber(nums[7] ?? "0"),
-        foreign_br: parseNumber(nums[8] ?? "0"),
-        amount: parseNumber(nums[9] ?? "0"),
-      });
-
-      // Skip ahead to avoid reprocessing tokens inside the same contract block.
-      i = j - 1;
-    }
-
-    return rows;
-  }
-
   function parseRowsFromRawText(rawText: string): ExtractedRow[] {
     const out: ExtractedRow[] = [];
     const NUM = "[\\d,]+(?:\\.\\d+)?";
-    const PLAIN_SECURITY = "[A-Z][A-Z0-9&'()./-]{2,}";
     const TICKER = "[A-Z][A-Z0-9]{0,9}(?:\\.[A-Z0-9]+)+";
-
-    const contractQtySecurityPattern = new RegExp(
-      `(\\d{7,})\\s+(${NUM})\\s+(${PLAIN_SECURITY}|${TICKER})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
-      "g",
-    );
-
-    let m: RegExpExecArray | null;
-    while ((m = contractQtySecurityPattern.exec(rawText)) !== null) {
-      out.push({
-        contract_no: m[1],
-        qty: parseNumber(m[2]),
-        security: m[3],
-        rate: parseNumber(m[4]),
-        gross_value: parseNumber(m[5]),
-        brokerage: parseNumber(m[6]),
-        cds_fees: parseNumber(m[7]),
-        cse_fees: parseNumber(m[8]),
-        sec: parseNumber(m[9]),
-        stl: parseNumber(m[10]),
-        clearing_fee: parseNumber(m[11]),
-        foreign_br: parseNumber(m[12]),
-        amount: parseNumber(m[13]),
-      });
-    }
-    if (out.length > 0) return out;
-
-    // Token-stream fallback for contract-first bought-note rows where PDF text
-    // extraction may split numeric chunks unpredictably.
-    const streamTokens = mergeAdjacentTokens(
-      rawText
-        .replace(/\u00A0/g, " ")
-        .split(/\s+/)
-        .map((t) => t.trim())
-        .filter(Boolean),
-    );
-    for (let i = 0; i < streamTokens.length; i += 1) {
-      const contract = streamTokens[i];
-      if (!CONTRACT_TOKEN.test(contract)) continue;
-
-      const security = streamTokens[i + 1];
-      if (
-        !security ||
-        NUMERIC_TOKEN.test(security) ||
-        !(SECURITY_TOKEN.test(security) || PLAIN_SECURITY_TOKEN.test(security))
-      ) {
-        continue;
-      }
-
-      const nums: string[] = [];
-      let j = i + 2;
-      let hitNextContract = false;
-      while (j < streamTokens.length && nums.length < 11) {
-        const tok = streamTokens[j];
-        if (CONTRACT_TOKEN.test(tok)) {
-          hitNextContract = true;
-          break;
-        }
-        if (NUMERIC_TOKEN.test(tok)) nums.push(tok);
-        j += 1;
-      }
-
-      if (nums.length >= 10) {
-        out.push({
-          contract_no: contract,
-          security,
-          qty: parseNumber(nums[0] ?? "0"),
-          rate: parseNumber(nums[1] ?? "0"),
-          sec: parseNumber(nums[2] ?? "0"),
-          cse_fees: parseNumber(nums[3] ?? "0"),
-          cds_fees: parseNumber(nums[4] ?? "0"),
-          stl: parseNumber(nums[5] ?? "0"),
-          brokerage: parseNumber(nums[6] ?? "0"),
-          gross_value: parseNumber(nums[7] ?? "0"),
-          amount: parseNumber(nums[8] ?? "0"),
-          foreign_br: parseNumber(nums[9] ?? "0"),
-          clearing_fee: parseNumber(nums[10] ?? "0"),
-        });
-      }
-
-      if (hitNextContract) {
-        // Re-check the next contract token in the outer loop.
-        i = j - 1;
-      }
-    }
-    if (out.length > 0) return out;
-
-    const contractFirstPlainSecurityPattern = new RegExp(
-      `(\\d{7,})\\s+(${PLAIN_SECURITY})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})`,
-      "g",
-    );
-
-    while ((m = contractFirstPlainSecurityPattern.exec(rawText)) !== null) {
-      out.push({
-        contract_no: m[1],
-        security: m[2],
-        qty: parseNumber(m[3]),
-        rate: parseNumber(m[4]),
-        sec: parseNumber(m[5]),
-        cse_fees: parseNumber(m[6]),
-        cds_fees: parseNumber(m[7]),
-        stl: parseNumber(m[8]),
-        brokerage: parseNumber(m[9]),
-        gross_value: parseNumber(m[10]),
-        amount: parseNumber(m[11]),
-        foreign_br: parseNumber(m[12]),
-        clearing_fee: parseNumber(m[13]),
-      });
-    }
-    if (out.length > 0) return out;
 
     const capitalTrustPattern = new RegExp(
       `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})\\s+(${NUM})\\s+` +
@@ -936,6 +617,7 @@ export function BuyAndSellNotes() {
       "g",
     );
 
+    let m: RegExpExecArray | null;
     while ((m = capitalTrustPattern.exec(rawText)) !== null) {
       out.push({
         contract_no: m[1],
@@ -1006,57 +688,8 @@ export function BuyAndSellNotes() {
     return out;
   }
 
-  function normalizeRowAmountsByNoteType(
-    rows: ExtractedRow[],
-    noteType?: "Buy" | "Sell",
-  ): ExtractedRow[] {
-    const tolerance = 0.05;
-    return rows.map((row) => {
-      const fees =
-        row.brokerage +
-        row.cds_fees +
-        row.cse_fees +
-        row.sec +
-        row.stl +
-        row.clearing_fee +
-        row.foreign_br;
-
-      if (!(Number.isFinite(row.gross_value) && Number.isFinite(row.amount))) {
-        return row;
-      }
-
-      const buyLooksCorrect =
-        Math.abs(row.gross_value + fees - row.amount) <= tolerance;
-      const buyLooksSwapped =
-        Math.abs(row.amount + fees - row.gross_value) <= tolerance;
-      const sellLooksCorrect =
-        Math.abs(row.gross_value - fees - row.amount) <= tolerance;
-      const sellLooksSwapped =
-        Math.abs(row.amount - fees - row.gross_value) <= tolerance;
-
-      if (noteType === "Buy" && buyLooksSwapped && !buyLooksCorrect) {
-        return { ...row, gross_value: row.amount, amount: row.gross_value };
-      }
-      if (noteType === "Sell" && sellLooksSwapped && !sellLooksCorrect) {
-        return { ...row, gross_value: row.amount, amount: row.gross_value };
-      }
-
-      // If note type is missing, infer the safer orientation from fee identity.
-      if (!noteType) {
-        if (buyLooksSwapped && !buyLooksCorrect) {
-          return { ...row, gross_value: row.amount, amount: row.gross_value };
-        }
-        if (sellLooksSwapped && !sellLooksCorrect) {
-          return { ...row, gross_value: row.amount, amount: row.gross_value };
-        }
-      }
-
-      return row;
-    });
-  }
-
   function parseRowsByXColumns(
-    items: { str: string; x: number; y: number; page: number; inlineSize: number }[],
+    items: { str: string; x: number; y: number; page: number; width: number }[],
     securityHint = "",
   ): ExtractedRow[] {
     // Group items into rows by Y position with tolerance for slight misalignment
@@ -1115,10 +748,10 @@ export function BuyAndSellNotes() {
       const s = item.str.toLowerCase().trim();
       const nextStr = combinedHeaderItems[i + 1]?.str.toLowerCase().trim();
       
-      // Store the RIGHT EDGE of each header token (item.x + item.inlineSize).
+      // Store the RIGHT EDGE of each header token (item.x + item.width).
       // For right-aligned columns, all data values end at the same X as the header's right edge,
       // so comparing right edges is more accurate than comparing left edges.
-      const rx = item.x + item.inlineSize;
+      const rx = item.x + item.width;
       if (s.startsWith("contract")) {
         colX.contract = colX.contract ?? rx;
       }
@@ -1178,12 +811,12 @@ export function BuyAndSellNotes() {
     };
 
     // Voronoi-based column value extractor using RIGHT EDGES.
-    // colX stores the right edge of each column header (item.x + item.inlineSize).
-    // Data items are also matched by their right edge (item.x + item.inlineSize),
+    // colX stores the right edge of each column header (item.x + item.width).
+    // Data items are also matched by their right edge (item.x + item.width),
     // because in right-aligned columns every value ends at the same X position
     // regardless of the value's length. This prevents small numbers (which start
     // further right) from crossing into the next column's region.
-    const rEdge = (it: { x: number; inlineSize: number }) => it.x + it.inlineSize;
+    const rEdge = (it: { x: number; width: number }) => it.x + it.width;
     const voronoiGet = (row: typeof headerRow, colName: string): string => {
       const idx = colEntries.findIndex(([k]) => k === colName);
       if (idx === -1) return "";
@@ -1263,7 +896,7 @@ export function BuyAndSellNotes() {
       // Account number: "CDS Account Number : DSA-4328-LC/00"
       const accountMatch =
         rawText.match(
-          /CDS\s+Account\s+Number\s*[:\s]+([A-Z0-9][A-Z0-9-/]+)/i,
+          /CDS\s+Account\s+Number\s*[:\s]+([A-Z0-9][A-Z0-9\-\/]+)/i,
         ) || rawText.match(/\b([A-Z]{2,5}-\d{3,5}-[A-Z]{2,3}\/\d{2,3})\b/);
 
       // Transaction date: "Transaction Date : 04/03/2026" or "Transaction Date 04/03/2026" (dd/mm/yyyy)
@@ -1271,7 +904,9 @@ export function BuyAndSellNotes() {
         rawText.match(
           /Transaction\s*Date\s*[:\s]*(\d{2}\/\d{2}\/\d{4})/i,
         )?.[1] ||
-        rawText.match(/Transaction\s*Date\s*[:\s]*(\d{4}[/-]\d{2}[/-]\d{2})/i)?.[1];
+        rawText.match(
+          /Transaction\s*Date\s*[:\s]*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
+        )?.[1];
       const trade_date = txnDateRaw
         ? txnDateRaw.match(/^\d{2}\//)
           ? dmyToIso(txnDateRaw)
@@ -1353,14 +988,18 @@ export function BuyAndSellNotes() {
 
     // ── Bought/Sold Note format ────────────────────────────────────────────
     let accountMatch = rawText.match(
-      /Account\s*No\.?\s*([A-Z0-9][A-Z0-9-/]+)/i,
+      /Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i,
     );
-    let txnDateMatch = rawText.match(/Transaction\s*Date\s*(\d{4}[/-]\d{2}[/-]\d{2})/i);
-    let settleMatch = rawText.match(/Settlement\s*Date\s*(\d{4}[/-]\d{2}[/-]\d{2})/i);
+    let txnDateMatch = rawText.match(
+      /Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
+    );
+    let settleMatch = rawText.match(
+      /Settlement\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
+    );
 
     if (!txnDateMatch || !settleMatch || !accountMatch) {
       const jumbled = rawText.match(
-        /(\d{4}[/-]\d{2}[/-]\d{2})\s+([A-Z]{2,}[A-Z0-9-/]+)\s+(?:Buyer|Seller)\s+(\d{4}[/-]\d{2}[/-]\d{2})/i,
+        /(\d{4}[\/\-]\d{2}[\/\-]\d{2})\s+([A-Z]{2,}[A-Z0-9\-\/]+)\s+(?:Buyer|Seller)\s+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
       );
       if (jumbled) {
         txnDateMatch =
@@ -1441,7 +1080,7 @@ export function BuyAndSellNotes() {
     }
     if (!buyer_name) {
       const buyerJumbled = rawText.match(
-        /(?:Bought|Sold)\s+([A-Z][A-Z0-9\s(),.&/-]+?)\s+(\d{4}[/-]\d{2}[/-]\d{2})/,
+        /(?:Bought|Sold)\s+([A-Z][A-Z0-9\s(),.&/-]+?)\s+(\d{4}[\/\-]\d{2}[\/\-]\d{2})/,
       );
       if (buyerJumbled) {
         const parts = buyerJumbled[1].split(/\s+NO\.|,\s*NO\./i);
@@ -1479,91 +1118,21 @@ export function BuyAndSellNotes() {
         return m?.[1]?.trim() || "";
       })();
 
-      const isParseQualityAcceptable = (candidateRows: ExtractedRow[]) => {
-        if (candidateRows.length === 0) return false;
-        const contractMatches = rawText.match(/\b\d{10}\b/g) || [];
-        const contractCount = contractMatches.length;
-        const positiveAmountCount = candidateRows.filter(
-          (r) => Number.isFinite(r.amount) && r.amount > 0,
-        ).length;
-
-        if (positiveAmountCount === 0) return false;
-
-        // When the PDF clearly has many contract rows, reject tiny partial parses.
-        if (contractCount >= 8) {
-          const minRequired = Math.max(4, Math.floor(contractCount * 0.6));
-          if (candidateRows.length < minRequired) return false;
-        }
-
-        return true;
-      };
-
       let rows: ExtractedRow[] = [];
-      let parserUsed = "";
       if (isTradeConfirmation(rawText)) {
         // For Trade Confirmation, the X-position parser is most reliable since raw text is jumbled.
         // Try it first, fall back to the regex parser, then the raw-text regex patterns.
         rows = parseRowsByXColumns(items, securityHint);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "x_columns_trade_confirmation";
-        } else {
-          rows = [];
-        }
-        if (rows.length === 0) {
-          rows = parseTradeConfirmationRows(rawText);
-          if (isParseQualityAcceptable(rows)) {
-            parserUsed = "regex_trade_confirmation";
-          } else {
-            rows = [];
-          }
-        }
+        if (rows.length === 0) rows = parseTradeConfirmationRows(rawText);
       }
-      if (rows.length === 0) {
-        rows = parseWrappedContractBlocks(rawText);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "wrapped_contract_blocks";
-        } else {
-          rows = [];
-        }
-      }
-      if (rows.length === 0) {
-        rows = parseDateFirstBoughtRows(rawText);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "date_first_bought_rows";
-        } else {
-          rows = [];
-        }
-      }
-      if (rows.length === 0) {
-        rows = parseBoughtNoteRows(grouped);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "grouped_row_parser";
-        } else {
-          rows = [];
-        }
-      }
-      if (rows.length === 0) {
-        rows = parseRowsByXColumns(items);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "x_columns_generic";
-        } else {
-          rows = [];
-        }
-      }
-      if (rows.length === 0) {
-        rows = parseRowsFromRawText(rawText);
-        if (isParseQualityAcceptable(rows)) {
-          parserUsed = "raw_text_regex_fallback";
-        } else {
-          rows = [];
-        }
-      }
+      if (rows.length === 0) rows = parseBoughtNoteRows(grouped);
+      if (rows.length === 0) rows = parseRowsByXColumns(items);
+      if (rows.length === 0) rows = parseRowsFromRawText(rawText);
 
       if (rows.length === 0) {
         console.warn("PDF raw text (no rows parsed):", rawText);
         setDebugRawText(rawText);
         setExtractedRows([]);
-        setParserDebug(null);
         return;
       }
       setDebugRawText("");
@@ -1575,10 +1144,6 @@ export function BuyAndSellNotes() {
         const sec = header.security || securityHint;
         rows = rows.map((r) => (r.security ? r : { ...r, security: sec }));
       }
-
-      // Some broker layouts invert Gross/Net positions in extracted token streams.
-      // Normalize row amounts using fee identities and detected note type.
-      rows = normalizeRowAmountsByNoteType(rows, header.note_type);
 
       const sum = (fn: (r: ExtractedRow) => number) =>
         rows.reduce((s, r) => s + fn(r), 0);
@@ -1622,29 +1187,6 @@ export function BuyAndSellNotes() {
 
       setExtractedRows(rows);
       setExtractedData(extracted);
-      setParserDebug({
-        parserUsed: parserUsed || "unknown",
-        rowCount: rows.length,
-        totals: {
-          qty: totalShares,
-          gross: totalGross,
-          brokerage: totalBrokerage,
-          cds: totalCds,
-          cse: totalCse,
-          sec: totalSec,
-          stl: totalStl,
-          clearing: totalClearing,
-          foreign: totalForeign,
-          amount: totalAmount,
-        },
-        sampleRows: rows.slice(0, 3).map((r) => ({
-          contract_no: r.contract_no,
-          security: r.security,
-          qty: r.qty,
-          rate: r.rate,
-          amount: r.amount,
-        })),
-      });
 
       const noteType = (extracted.note_type || "").toLowerCase();
       const typeOk = (t: Transaction) =>
@@ -1677,8 +1219,7 @@ export function BuyAndSellNotes() {
 
       setFormData((prev) => ({
         ...prev,
-        // Keep user's manual selection; only auto-map when no transaction is selected yet.
-        transaction_id: prev.transaction_id || bestCandidate?.id || "",
+        transaction_id: bestCandidate?.id || "",
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
@@ -1771,12 +1312,6 @@ export function BuyAndSellNotes() {
       const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
       const pdfNet = extractedRows.reduce((s, r) => s + r.amount, 0);
 
-      // Transaction-side gross is often derived from a rounded average price,
-      // while PDF gross is sum of per-contract exact values. Allow a small
-      // quantity-scaled tolerance to avoid false mismatches.
-      const grossTolerance = Math.max(1, expectedShares * 0.001);
-      const netTolerance = grossTolerance + 5;
-
       const check = (
         key: string,
         actual: number,
@@ -1790,14 +1325,14 @@ export function BuyAndSellNotes() {
       };
       check("no_of_shares", pdfShares, expectedShares, 0.01);
       check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.01);
-      check("gross_amount", pdfGross, expectedGross, grossTolerance);
+      check("gross_amount", pdfGross, expectedGross, 0.5);
       check("brokerage", pdfBrokerage, expectedFees.brokerage, 1);
       check("sec", pdfSec, expectedFees.sec, 1);
       check("exchange", pdfExchange, expectedFees.exchange, 1);
       check("cds", pdfCds, expectedFees.cds, 1);
       check("gov_cess", pdfStl, expectedFees.gov_cess, 1);
       check("clearing_fees", pdfClearing, expectedFees.clearing_fees, 1);
-      check("net_amount", pdfNet, expectedNet, netTolerance);
+      check("net_amount", pdfNet, expectedNet, 1);
     }
 
     setFieldCompare(compare);
@@ -1854,6 +1389,7 @@ export function BuyAndSellNotes() {
   }
 
   function buildNotePayload(
+    selectedTransaction: Transaction,
     noteType: "Buy" | "Sell",
     status: string,
     hasMismatch: boolean,
@@ -1935,6 +1471,7 @@ export function BuyAndSellNotes() {
         ? await uploadNoteFile(uploadedFile)
         : null;
       const { payload, totalNet, contractNo } = buildNotePayload(
+        selectedTransaction,
         noteType,
         "PROCESSED",
         !allMatch,
@@ -1987,12 +1524,10 @@ export function BuyAndSellNotes() {
       alert(
         "Buy/sell note approved and processed. Cash balance has been updated.",
       );
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error("Error processing note:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
       alert(
-        `Failed to process note:\n\n${errorMessage}`,
+        `Failed to process note:\n\n${error?.message || JSON.stringify(error)}`,
       );
     } finally {
       setIsProcessing(false);
@@ -2021,6 +1556,7 @@ export function BuyAndSellNotes() {
         ? await uploadNoteFile(uploadedFile)
         : null;
       const { payload } = buildNotePayload(
+        selectedTransaction,
         noteType,
         "PENDING_APPROVAL",
         true,
@@ -2035,12 +1571,10 @@ export function BuyAndSellNotes() {
       alert(
         "Note saved with mismatches. Sent for approval — no cash balance changes made yet.",
       );
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error("Error sending for approval:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
       alert(
-        `Failed to save note:\n\n${errorMessage}`,
+        `Failed to save note:\n\n${error?.message || JSON.stringify(error)}`,
       );
     } finally {
       setIsProcessing(false);
@@ -2377,7 +1911,6 @@ export function BuyAndSellNotes() {
     setFieldCompare({});
     setExtractedRows([]);
     setDebugRawText("");
-    setParserDebug(null);
     setIsProcessing(false);
   }
 
@@ -2407,6 +1940,23 @@ export function BuyAndSellNotes() {
     return matchesSearch && matchesDateFrom && matchesDateTo && matchesType;
   });
 
+  const availableEntityAccounts =
+    formData.broker_id && formData.transaction_id
+      ? (() => {
+          const transaction = transactions.find(
+            (t) => t.id === formData.transaction_id,
+          );
+          if (!transaction) return [];
+          const entity = entities.find((e) => e.id === transaction.entity_id);
+          if (!entity) return [];
+          return entityBrokers.filter(
+            (eb) =>
+              eb.entity_id === entity.entity_id &&
+              eb.broker_id === formData.broker_id,
+          );
+        })()
+      : [];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -2429,7 +1979,6 @@ export function BuyAndSellNotes() {
               <span>Manual Entry</span>
             </button>
             <button
-                title="Close dialog"
               onClick={() => setShowModal(true)}
               className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
@@ -2450,7 +1999,6 @@ export function BuyAndSellNotes() {
             <input
               type="text"
               placeholder="Search by contract no, entity, ticker, dealer..."
-              title="Search buy/sell notes"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2462,7 +2010,6 @@ export function BuyAndSellNotes() {
             </label>
             <input
               type="date"
-              title="Filter from date"
               value={filterDateFrom}
               onChange={(e) => setFilterDateFrom(e.target.value)}
               className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2474,7 +2021,6 @@ export function BuyAndSellNotes() {
             </label>
             <input
               type="date"
-              title="Filter to date"
               value={filterDateTo}
               onChange={(e) => setFilterDateTo(e.target.value)}
               className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2482,7 +2028,6 @@ export function BuyAndSellNotes() {
           </div>
           <select
             value={filterNoteType}
-            title="Filter by note type"
             onChange={(e) => setFilterNoteType(e.target.value)}
             className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -2497,7 +2042,6 @@ export function BuyAndSellNotes() {
                 setFilterDateTo("");
                 setFilterNoteType("");
               }}
-              title="Clear filters"
               className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Clear
@@ -2555,6 +2099,9 @@ export function BuyAndSellNotes() {
                 const noteShare = matchedTxn
                   ? shares.find((s) => s.id === matchedTxn.share_id)
                   : undefined;
+                const noteBroker = note.broker_id
+                  ? brokers.find((b) => b.id === note.broker_id)
+                  : null;
                 const noteStatus = note.status || "PROCESSED";
                 const isExpanded = expandedNoteId === note.id;
 
@@ -3020,6 +2567,7 @@ export function BuyAndSellNotes() {
                 const selEntity = entities.find(
                   (e) => e.id === selTxn.entity_id,
                 );
+                const selShare = shares.find((s) => s.id === selTxn.share_id);
                 const selBroker = formData.broker_id
                   ? brokers.find((b) => b.id === formData.broker_id)
                   : null;
@@ -3119,7 +2667,6 @@ export function BuyAndSellNotes() {
                   </label>
                   <select
                     value={formData.broker_id}
-                    title="Select broker"
                     onChange={(e) =>
                       setFormData({ ...formData, broker_id: e.target.value })
                     }
@@ -3159,7 +2706,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="file"
                     accept=".pdf"
-                    title="Upload PDF file"
                     onChange={handleFileUpload}
                     className="flex-1 px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -3196,7 +2742,6 @@ export function BuyAndSellNotes() {
                           <textarea
                             readOnly
                             value={debugRawText}
-                            title="Extracted PDF text"
                             className="mt-1.5 w-full h-28 text-xs font-mono p-1.5 border border-amber-300 rounded bg-white text-gray-700"
                           />
                         </div>
@@ -3215,7 +2760,6 @@ export function BuyAndSellNotes() {
                     setFormData({ ...formData, remarks: e.target.value })
                   }
                   rows={2}
-                  title="Remarks"
                   className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Additional notes..."
                 />
@@ -3451,94 +2995,6 @@ export function BuyAndSellNotes() {
                             ))}
                           </ul>
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {parserDebug && (
-                    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-indigo-900">
-                          Parser Debug
-                        </h3>
-                        <span className="text-xs font-mono text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded">
-                          {parserDebug.parserUsed}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2 text-xs">
-                        <div className="bg-white border border-indigo-100 rounded px-2 py-1.5">
-                          <p className="text-indigo-500">Rows</p>
-                          <p className="font-semibold text-indigo-900">
-                            {parserDebug.rowCount.toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="bg-white border border-indigo-100 rounded px-2 py-1.5">
-                          <p className="text-indigo-500">Qty</p>
-                          <p className="font-semibold text-indigo-900">
-                            {parserDebug.totals.qty.toLocaleString()}
-                          </p>
-                        </div>
-                        <div className="bg-white border border-indigo-100 rounded px-2 py-1.5">
-                          <p className="text-indigo-500">Net</p>
-                          <p className="font-semibold text-indigo-900">
-                            {parserDebug.totals.amount.toLocaleString(
-                              undefined,
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              },
-                            )}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs bg-white border border-indigo-100 rounded">
-                          <thead className="bg-indigo-100/60">
-                            <tr>
-                              <th className="px-2 py-1 text-left text-indigo-700 font-semibold">
-                                Contract
-                              </th>
-                              <th className="px-2 py-1 text-left text-indigo-700 font-semibold">
-                                Security
-                              </th>
-                              <th className="px-2 py-1 text-right text-indigo-700 font-semibold">
-                                Qty
-                              </th>
-                              <th className="px-2 py-1 text-right text-indigo-700 font-semibold">
-                                Rate
-                              </th>
-                              <th className="px-2 py-1 text-right text-indigo-700 font-semibold">
-                                Amount
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {parserDebug.sampleRows.map((r, idx) => (
-                              <tr key={`${r.contract_no || "row"}-${idx}`}>
-                                <td className="px-2 py-1 font-mono text-indigo-900">
-                                  {r.contract_no || "-"}
-                                </td>
-                                <td className="px-2 py-1 text-indigo-900">
-                                  {r.security || "-"}
-                                </td>
-                                <td className="px-2 py-1 text-right text-indigo-900">
-                                  {r.qty.toLocaleString()}
-                                </td>
-                                <td className="px-2 py-1 text-right text-indigo-900">
-                                  {r.rate.toFixed(2)}
-                                </td>
-                                <td className="px-2 py-1 text-right text-indigo-900">
-                                  {r.amount.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
                       </div>
                     </div>
                   )}
@@ -3981,7 +3437,6 @@ export function BuyAndSellNotes() {
               </div>
               <button
                 onClick={() => setEditNote(null)}
-                title="Close edit dialog"
                 className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <XCircle className="w-5 h-5" />
@@ -3995,7 +3450,6 @@ export function BuyAndSellNotes() {
                   </label>
                   <select
                     value={editNote.note_type}
-                    title="Edit note type"
                     onChange={(e) =>
                       setEditNote({
                         ...editNote,
@@ -4015,7 +3469,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="text"
                     value={editNote.note_number}
-                    title="Edit note number"
                     onChange={(e) =>
                       setEditNote({ ...editNote, note_number: e.target.value })
                     }
@@ -4029,7 +3482,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="text"
                     value={editNote.broker}
-                    title="Edit broker"
                     onChange={(e) =>
                       setEditNote({ ...editNote, broker: e.target.value })
                     }
@@ -4043,7 +3495,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="text"
                     value={editNote.dealer_name}
-                    title="Edit contact person"
                     onChange={(e) =>
                       setEditNote({ ...editNote, dealer_name: e.target.value })
                     }
@@ -4057,7 +3508,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="date"
                     value={editNote.trade_date}
-                    title="Edit trade date"
                     onChange={(e) =>
                       setEditNote({ ...editNote, trade_date: e.target.value })
                     }
@@ -4071,7 +3521,6 @@ export function BuyAndSellNotes() {
                   <input
                     type="date"
                     value={editNote.settlement_date}
-                    title="Edit settlement date"
                     onChange={(e) =>
                       setEditNote({
                         ...editNote,
@@ -4111,7 +3560,6 @@ export function BuyAndSellNotes() {
                         type="number"
                         step="0.01"
                         value={editNote[field]}
-                        title={label}
                         onChange={(e) =>
                           setEditNote({ ...editNote, [field]: e.target.value })
                         }
@@ -4129,7 +3577,6 @@ export function BuyAndSellNotes() {
                 <textarea
                   rows={2}
                   value={editNote.remarks}
-                  title="Edit remarks"
                   onChange={(e) =>
                     setEditNote({ ...editNote, remarks: e.target.value })
                   }
@@ -4140,7 +3587,6 @@ export function BuyAndSellNotes() {
               <div className="flex justify-end space-x-3 pt-3 border-t border-gray-200">
                 <button
                   onClick={() => setEditNote(null)}
-                  title="Cancel edit"
                   className="px-5 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-sm"
                 >
                   Cancel
@@ -4148,7 +3594,6 @@ export function BuyAndSellNotes() {
                 <button
                   onClick={handleSaveEdit}
                   disabled={isSavingEdit}
-                  title="Save changes"
                   className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 flex items-center space-x-2"
                 >
                   {isSavingEdit && (
@@ -4180,7 +3625,6 @@ export function BuyAndSellNotes() {
                   setShowManualModal(false);
                   setManualRows([emptyManualRow()]);
                 }}
-                title="Close manual entry dialog"
                 className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <XCircle className="w-5 h-5" />
@@ -4241,7 +3685,6 @@ export function BuyAndSellNotes() {
                           <td className="px-1 py-1">
                             <select
                               value={row.entity_id}
-                              title="Select entity"
                               onChange={(e) =>
                                 updateManualRow(
                                   idx,
@@ -4264,7 +3707,6 @@ export function BuyAndSellNotes() {
                           <td className="px-1 py-1">
                             <select
                               value={row.share_id}
-                              title="Select share"
                               onChange={(e) =>
                                 updateManualRow(idx, "share_id", e.target.value)
                               }
@@ -4283,7 +3725,6 @@ export function BuyAndSellNotes() {
                           <td className="px-1 py-1">
                             <select
                               value={row.note_type}
-                              title="Select buy or sell"
                               onChange={(e) =>
                                 updateManualRow(
                                   idx,
@@ -4305,7 +3746,6 @@ export function BuyAndSellNotes() {
                               step="1"
                               min="0"
                               value={row.no_of_shares}
-                              title="Number of shares"
                               onChange={(e) =>
                                 updateManualRow(
                                   idx,
@@ -4323,7 +3763,6 @@ export function BuyAndSellNotes() {
                             <input
                               type="date"
                               value={row.settlement_date}
-                              title="Settlement date"
                               onChange={(e) =>
                                 updateManualRow(
                                   idx,
@@ -4375,7 +3814,6 @@ export function BuyAndSellNotes() {
                           <td className="px-1 py-1 text-center">
                             <button
                               onClick={() => removeManualRow(idx)}
-                              title="Remove row"
                               className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
