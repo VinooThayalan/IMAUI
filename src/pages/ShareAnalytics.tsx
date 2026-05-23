@@ -203,6 +203,8 @@ interface NoteDetail {
   remarks: string | null;
   file_url: string | null;
   broker_name: string | null;
+  approval_document_url: string | null;
+  approval_document_name: string | null;
 }
 
 // ── Breakdown modal ──────────────────────────────────────────────────────────
@@ -230,13 +232,26 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
           id, note_number, contract_no, note_type, trade_date, settlement_date,
           no_of_shares, price_avg, gross_amount, brokerage, sec, exchange,
           cds, gov_cess, clearing_fees, net_amount, foreign_brokerage,
-          dealer_name, remarks, file_url,
+          dealer_name, remarks, file_url, transaction_id,
           broker:brokers(broker_name)
         `)
         .eq('id', noteId)
         .maybeSingle();
 
       if (data) {
+        // Fetch approval document from the linked transaction in parallel
+        let approvalDocUrl: string | null = null;
+        let approvalDocName: string | null = null;
+        if (data.transaction_id) {
+          const { data: txn } = await supabase
+            .from('transactions')
+            .select('approval_document_url, approval_document_name')
+            .eq('id', data.transaction_id)
+            .maybeSingle();
+          approvalDocUrl  = txn?.approval_document_url  ?? null;
+          approvalDocName = txn?.approval_document_name ?? null;
+        }
+
         setNoteDetails(prev => new Map(prev).set(noteId, {
           id: data.id,
           note_number: data.note_number,
@@ -259,6 +274,8 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
           remarks: data.remarks,
           file_url: data.file_url,
           broker_name: (data.broker as any)?.broker_name ?? null,
+          approval_document_url: approvalDocUrl,
+          approval_document_name: approvalDocName,
         }));
       }
     } finally {
@@ -450,17 +467,30 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                                     <span className="text-xs font-semibold text-gray-800">{detail.dealer_name}</span>
                                   </div>
                                 )}
-                                {detail.file_url && (
-                                  <div className="pt-1">
-                                    <a
-                                      href={detail.file_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-                                    >
-                                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                      View Contract Note
-                                    </a>
+                                {(detail.file_url || detail.approval_document_url) && (
+                                  <div className="pt-1 flex flex-col gap-1.5">
+                                    {detail.file_url && (
+                                      <a
+                                        href={detail.file_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                                      >
+                                        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                        View Contract Note
+                                      </a>
+                                    )}
+                                    {detail.approval_document_url && (
+                                      <a
+                                        href={detail.approval_document_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
+                                      >
+                                        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                        {detail.approval_document_name || 'View Approval Document'}
+                                      </a>
+                                    )}
                                   </div>
                                 )}
                               </div>
