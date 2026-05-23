@@ -38,6 +38,7 @@ const navSections: NavSection[] = [
       { icon: SplitSquareVertical, label: 'Share Subdivisions', href: '#share-subdivisions', menuName: 'share-subdivisions' },
       { icon: Calendar, label: 'Daily Prices', href: '#daily-prices', menuName: 'daily-prices' },
       { icon: BarChart3, label: 'Share Analytics', href: '#share-analytics', menuName: 'share-analytics' },
+      { icon: TrendingUp, label: 'Share Specific Values', href: '#share-specific-values', menuName: 'share-specific-values' },
       { icon: PieChart, label: 'Portfolio', href: '#portfolio', menuName: 'portfolio' },
     ]
   },

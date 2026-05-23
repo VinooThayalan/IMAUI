@@ -22,6 +22,7 @@ const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.S
 const DailyPrices = lazy(() => import('./pages/DailyPrices').then(m => ({ default: m.DailyPrices })));
 const CashBalance = lazy(() => import('./pages/CashBalance').then(m => ({ default: m.CashBalance })));
 const ShareAnalytics = lazy(() => import('./pages/ShareAnalytics').then(m => ({ default: m.ShareAnalytics })));
+const ShareSpecificValues = lazy(() => import('./pages/ShareSpecificValues').then(m => ({ default: m.ShareSpecificValues })));
 const PortfolioSummary = lazy(() => import('./pages/PortfolioSummary').then(m => ({ default: m.PortfolioSummary })));
 const BrokerageFeeTypes = lazy(() => import('./pages/BrokerageFeeTypes').then(m => ({ default: m.BrokerageFeeTypes })));
 const RightsIssues = lazy(() => import('./pages/RightsIssues').then(m => ({ default: m.RightsIssues })));
@@ -130,6 +131,8 @@ function App() {
         return <CashBalance />;
       case 'share-analytics':
         return <ShareAnalytics />;
+      case 'share-specific-values':
+        return <ShareSpecificValues />;
       case 'portfolio-summary':
         return <PortfolioSummary />;
       case 'brokerage-fee-types':
