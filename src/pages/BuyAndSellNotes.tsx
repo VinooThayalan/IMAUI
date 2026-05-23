@@ -433,7 +433,7 @@ export function BuyAndSellNotes() {
 
   function groupIntoRows(
     items: { str: string; x: number; y: number; page: number }[],
-    tolerance = 5,
+    tolerance = 4,
   ): { str: string; x: number }[][] {
     const sorted = [...items].sort(
       (a, b) => a.page - b.page || b.y - a.y || a.x - b.x,
@@ -457,7 +457,8 @@ export function BuyAndSellNotes() {
   }
 
   const NUMERIC_TOKEN = /^-?[\d,]+(?:\.\d+)?$/;
-  const SECURITY_TOKEN = /^[A-Z0-9]{1,10}(?:\.[A-Z0-9]+)+$/;
+  // Matches both dotted tickers (DFCC.N0000) and plain uppercase words (AMBEON)
+  const SECURITY_TOKEN = /^[A-Z][A-Z0-9]{1,12}(?:\.[A-Z0-9]+)*$/;
   const CONTRACT_TOKEN = /^\d{7,}$/;
 
   function mergeAdjacentTokens(tokens: string[]): string[] {
@@ -494,11 +495,14 @@ export function BuyAndSellNotes() {
         (t, i) => i > contractIdx && SECURITY_TOKEN.test(t),
       );
       if (securityIdx === -1) {
+        // Fallback: first non-numeric ALL-CAPS word after contractIdx that isn't a known header word
+        const SKIP_WORDS = /^(BOUGHT|SOLD|TOTAL|PAGE|BUYER|SELLER|ACCOUNT|IMPORTANT|THIS|THE|AND|FOR|BY|OF|AS|IN|IS|NOT)$/i;
         securityIdx = tokens.findIndex(
           (t, i) =>
             i > contractIdx &&
             /^[A-Z][A-Z0-9.]{2,}$/.test(t) &&
-            !NUMERIC_TOKEN.test(t),
+            !NUMERIC_TOKEN.test(t) &&
+            !SKIP_WORDS.test(t),
         );
       }
       if (securityIdx === -1 || securityIdx <= contractIdx) continue;
@@ -514,7 +518,7 @@ export function BuyAndSellNotes() {
         .slice(securityIdx + 1)
         .filter((t) => NUMERIC_TOKEN.test(t))
         .map(parseNumber);
-      if (numeric.length < 6) continue;
+      if (numeric.length < 4) continue;
 
       const pad = (idx: number) => numeric[idx] ?? 0;
       const amount = numeric[numeric.length - 1] ?? 0;
@@ -608,42 +612,46 @@ export function BuyAndSellNotes() {
   function parseRowsFromRawText(rawText: string): ExtractedRow[] {
     const out: ExtractedRow[] = [];
     const NUM = "[\\d,]+(?:\\.\\d+)?";
-    const TICKER = "[A-Z][A-Z0-9]{0,9}(?:\\.[A-Z0-9]+)+";
+    // Matches dotted tickers (DFCC.N0000) AND plain uppercase names (AMBEON, COMB, DIAL)
+    const TICKER = "[A-Z][A-Z0-9]{2,12}(?:\\.[A-Z0-9]*)?";
 
-    const capitalTrustPattern = new RegExp(
-      `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})\\s+(${NUM})\\s+` +
-        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+    let m: RegExpExecArray | null;
+
+    // Pattern A: contractNo  TICKER  qty  rate  10 more numbers
+    // (covers formats where ticker comes before qty in raw text)
+    const tickerFirstPattern = new RegExp(
+      `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})\\s+` +
+        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
       "g",
     );
-
-    let m: RegExpExecArray | null;
-    while ((m = capitalTrustPattern.exec(rawText)) !== null) {
+    while ((m = tickerFirstPattern.exec(rawText)) !== null) {
       out.push({
         contract_no: m[1],
         security: m[2],
         qty: parseNumber(m[3]),
         rate: parseNumber(m[4]),
-        sec: parseNumber(m[5]),
-        cse_fees: parseNumber(m[6]),
+        gross_value: parseNumber(m[5]),
+        brokerage: parseNumber(m[6]),
         cds_fees: parseNumber(m[7]),
-        stl: parseNumber(m[8]),
-        brokerage: parseNumber(m[9]),
-        amount: parseNumber(m[10]),
-        gross_value: parseNumber(m[11]),
+        cse_fees: parseNumber(m[8]),
+        sec: parseNumber(m[9]),
+        stl: parseNumber(m[10]),
+        clearing_fee: parseNumber(m[11]),
         foreign_br: parseNumber(m[12]),
-        clearing_fee: parseNumber(m[13]),
+        amount: parseNumber(m[13]),
       });
     }
     if (out.length > 0) return out;
 
-    const visualOrderPattern = new RegExp(
+    // Pattern B: contractNo  qty  TICKER  rate  10 more numbers (visual left-to-right order)
+    const qtyFirstPattern = new RegExp(
       `(\\d{7,})\\s+(${NUM})\\s+(${TICKER})\\s+` +
         `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})`,
       "g",
     );
-    while ((m = visualOrderPattern.exec(rawText)) !== null) {
+    while ((m = qtyFirstPattern.exec(rawText)) !== null) {
       out.push({
         contract_no: m[1],
         qty: parseNumber(m[2]),
@@ -662,6 +670,7 @@ export function BuyAndSellNotes() {
     }
     if (out.length > 0) return out;
 
+    // Loose fallback: contractNo  TICKER  qty  then any 8–12 numbers
     const looser = new RegExp(
       `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})((?:\\s+${NUM}){8,12})`,
       "g",
@@ -674,15 +683,15 @@ export function BuyAndSellNotes() {
         security: m[2],
         qty: parseNumber(m[3]),
         rate: nums[0] ?? 0,
-        sec: nums[1] ?? 0,
-        cse_fees: nums[2] ?? 0,
+        gross_value: nums[1] ?? 0,
+        brokerage: nums[2] ?? 0,
         cds_fees: nums[3] ?? 0,
-        stl: nums[4] ?? 0,
-        brokerage: nums[5] ?? 0,
-        amount: nums[6] ?? 0,
-        gross_value: nums[7] ?? 0,
+        cse_fees: nums[4] ?? 0,
+        sec: nums[5] ?? 0,
+        stl: nums[6] ?? 0,
+        clearing_fee: nums[7] ?? 0,
         foreign_br: nums[8] ?? 0,
-        clearing_fee: nums[9] ?? 0,
+        amount: nums[9] ?? 0,
       });
     }
     return out;
