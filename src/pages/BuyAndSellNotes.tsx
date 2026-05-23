@@ -433,12 +433,12 @@ export function BuyAndSellNotes() {
 
   function groupIntoRows(
     items: { str: string; x: number; y: number; page: number }[],
+    tolerance = 5,
   ): { str: string; x: number }[][] {
     const sorted = [...items].sort(
       (a, b) => a.page - b.page || b.y - a.y || a.x - b.x,
     );
     const rows: { str: string; x: number; y: number; page: number }[][] = [];
-    const tolerance = 3;
     for (const item of sorted) {
       const last = rows[rows.length - 1];
       if (
@@ -692,14 +692,20 @@ export function BuyAndSellNotes() {
     items: { str: string; x: number; y: number; page: number; width: number }[],
     securityHint = "",
   ): ExtractedRow[] {
-    // Group items into rows by Y position with tolerance for slight misalignment
-    const allRows = items.reduce<{ [key: string]: typeof items }>((acc, it) => {
-      // Round y to nearest 2 to merge items that are on the same visual line
-      const key = `${it.page}:${Math.round(it.y / 2) * 2}`;
-      (acc[key] = acc[key] || []).push(it);
-      return acc;
-    }, {});
-    const rowList = Object.values(allRows)
+    // Group items into rows using tolerance-based approach (same as groupIntoRows)
+    // Tolerance 5 ensures multi-page PDFs where same-row items differ by up to 5 Y units work correctly
+    const ROW_Y_TOL = 5;
+    const sortedItems = [...items].sort((a, b) => a.page - b.page || b.y - a.y || a.x - b.x);
+    const groups: (typeof items)[] = [];
+    for (const it of sortedItems) {
+      const last = groups[groups.length - 1];
+      if (last && last[0].page === it.page && Math.abs(last[0].y - it.y) <= ROW_Y_TOL) {
+        last.push(it);
+      } else {
+        groups.push([it]);
+      }
+    }
+    const rowList = groups
       .map((r) => [...r].sort((a, b) => a.x - b.x))
       .sort((a, b) => a[0].page - b[0].page || b[0].y - a[0].y);
 
