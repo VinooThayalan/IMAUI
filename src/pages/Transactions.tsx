@@ -1,5 +1,5 @@
-import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, ChevronDown } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -11,7 +11,6 @@ const ALL_STATUSES = [
   { value: 'EXPIRED', label: 'Expired' },
   { value: 'CANCELLED', label: 'Cancelled' },
 ];
-const STATUS_LABELS: Record<string, string> = Object.fromEntries(ALL_STATUSES.map(s => [s.value, s.label]));
 
 interface Transaction {
   id: string;
@@ -167,8 +166,6 @@ export function Transactions() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
-  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
-  const statusDropdownRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
@@ -196,16 +193,6 @@ export function Transactions() {
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
-        setStatusDropdownOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -1250,6 +1237,11 @@ export function Transactions() {
 
   const pendingCount = transactions.filter(t => t.approval_status === 'PENDING_APPROVAL').length;
 
+  const statusCounts = ALL_STATUSES.reduce((acc, { value }) => {
+    acc[value] = transactions.filter(t => t.approval_status === value).length;
+    return acc;
+  }, {} as Record<string, number>);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -1343,7 +1335,7 @@ export function Transactions() {
         <div className="border-b border-gray-200">
           <div className="flex space-x-1 p-2">
             <button
-              onClick={() => { setActiveTab('all'); setFilterStatuses(new Set(['DRAFT'])); }}
+              onClick={() => { setActiveTab('all'); setFilterStatuses(new Set()); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                 activeTab === 'all'
                   ? 'bg-blue-600 text-white'
@@ -1353,7 +1345,7 @@ export function Transactions() {
               All Transactions
             </button>
             <button
-              onClick={() => { setActiveTab('pending'); setFilterStatuses(new Set(['PENDING_APPROVAL'])); }}
+              onClick={() => { setActiveTab('pending'); setFilterStatuses(new Set()); }}
               className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
                 activeTab === 'pending'
                   ? 'bg-blue-600 text-white'
@@ -1371,7 +1363,41 @@ export function Transactions() {
           </div>
         </div>
 
-        <div className="p-4 border-b border-gray-200">
+        <div className="p-4 border-b border-gray-200 space-y-3">
+          {/* Status filter tabs */}
+          <div className="flex gap-2 flex-wrap">
+            {(() => {
+              const STATUS_TAB_CFG: { value: string; label: string; activeClass: string }[] = [
+                { value: '', label: 'All', activeClass: 'bg-gray-800 text-white border-gray-800' },
+                { value: 'DRAFT', label: 'Draft', activeClass: 'bg-gray-500 text-white border-gray-500' },
+                { value: 'PENDING_APPROVAL', label: 'Pending', activeClass: 'bg-amber-500 text-white border-amber-500' },
+                { value: 'MANUAL_APPROVED', label: 'Approved', activeClass: 'bg-green-600 text-white border-green-600' },
+                { value: 'REJECTED', label: 'Rejected', activeClass: 'bg-red-600 text-white border-red-600' },
+                { value: 'EXPIRED', label: 'Expired', activeClass: 'bg-gray-400 text-white border-gray-400' },
+                { value: 'ON_HOLD', label: 'On Hold', activeClass: 'bg-orange-500 text-white border-orange-500' },
+                { value: 'CANCELLED', label: 'Cancelled', activeClass: 'bg-rose-700 text-white border-rose-700' },
+              ];
+              return STATUS_TAB_CFG.map(({ value, label, activeClass }) => {
+                const count = value === '' ? transactions.length : (statusCounts[value] ?? 0);
+                const isActive = value === ''
+                  ? filterStatuses.size === 0
+                  : filterStatuses.size === 1 && filterStatuses.has(value);
+                return (
+                  <button
+                    key={value || 'all'}
+                    onClick={() => setFilterStatuses(value === '' ? new Set() : new Set([value]))}
+                    className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors flex items-center gap-1.5 ${isActive ? activeClass : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
+                  >
+                    {label}
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white bg-opacity-25 text-current' : 'bg-gray-100 text-gray-600'}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              });
+            })()}
+          </div>
+          {/* Search and date filters */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex-1 min-w-48 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1401,58 +1427,9 @@ export function Transactions() {
                 className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            {/* Multi-select status filter */}
-            <div className="relative" ref={statusDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setStatusDropdownOpen(o => !o)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[130px]"
-              >
-                <span className="flex-1 text-left truncate text-gray-700">
-                  {filterStatuses.size === 0
-                    ? 'All Statuses'
-                    : filterStatuses.size === 1
-                    ? STATUS_LABELS[Array.from(filterStatuses)[0]] ?? Array.from(filterStatuses)[0]
-                    : `${filterStatuses.size} Statuses`}
-                </span>
-                <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-              </button>
-              {statusDropdownOpen && (
-                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg min-w-[170px] py-1">
-                  {/* All option */}
-                  <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700 border-b border-gray-100">
-                    <input
-                      type="checkbox"
-                      checked={filterStatuses.size === 0}
-                      onChange={() => setFilterStatuses(new Set())}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>All Statuses</span>
-                  </label>
-                  {ALL_STATUSES.map(({ value, label }) => (
-                    <label key={value} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={filterStatuses.has(value)}
-                        onChange={() => {
-                          setFilterStatuses(prev => {
-                            const next = new Set(prev);
-                            if (next.has(value)) next.delete(value);
-                            else next.add(value);
-                            return next;
-                          });
-                        }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
             {(filterDateFrom || filterDateTo || filterStatuses.size > 0) && (
               <button
-                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatuses(new Set()); setStatusDropdownOpen(false); }}
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatuses(new Set()); }}
                 className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Clear
