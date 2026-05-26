@@ -6,8 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
   { value: 'PENDING_APPROVAL', label: 'Pending' },
-  { value: 'APPROVED', label: 'Approved' },
-  { value: 'AUTO_APPROVED', label: 'Auto Approved' },
+  { value: 'MANUAL_APPROVED', label: 'Manual Approved' },
   { value: 'REJECTED', label: 'Rejected' },
   { value: 'EXPIRED', label: 'Expired' },
   { value: 'CANCELLED', label: 'Cancelled' },
@@ -577,6 +576,12 @@ export function Transactions() {
   }
 
   async function handleCancelTransaction(transaction: Transaction) {
+    const reason = prompt('Please enter a reason for cancellation:');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      alert('A cancellation reason is required.');
+      return;
+    }
     if (!confirm('Are you sure you want to cancel this transaction? This action cannot be undone.')) {
       return;
     }
@@ -588,13 +593,33 @@ export function Transactions() {
         .from('transactions')
         .update({
           approval_status: 'CANCELLED',
-          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString()}`,
+          rejection_reason: reason.trim(),
+          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString()}. Reason: ${reason.trim()}`,
         })
         .eq('id', transaction.id);
 
       if (error) throw error;
 
-      alert('Transaction cancelled successfully');
+      // Send email notification to broker if one is assigned
+      if (transaction.broker_id) {
+        const broker = brokers.find(b => b.id === transaction.broker_id);
+        if (broker?.contact_person_email) {
+          const txnData = getTransactionEmailData(transaction);
+          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              to: broker.contact_person_email,
+              transaction: { ...txnData, note: `CANCELLATION NOTICE — Reason: ${reason.trim()}` },
+            }),
+          }).catch(err => console.error('Broker email failed:', err));
+        }
+      }
+
+      alert('Transaction cancelled successfully' + (transaction.broker_id && brokers.find(b => b.id === transaction.broker_id)?.contact_person_email ? ' and broker notified by email.' : '.'));
       loadData();
     } catch (error) {
       console.error('Error cancelling transaction:', error);
@@ -645,10 +670,10 @@ export function Transactions() {
       };
 
       if (selectedTransaction.approval_status === 'PENDING_APPROVAL') {
-        updates.approval_status = 'AUTO_APPROVED';
+        updates.approval_status = 'MANUAL_APPROVED';
         updates.approved_by = user?.email || 'system';
         updates.approval_date = new Date().toISOString();
-        updates.approval_notes = 'Auto-approved upon document upload';
+        updates.approval_notes = 'Approved upon document upload';
       }
 
       const { error: updateError } = await supabase
@@ -659,7 +684,7 @@ export function Transactions() {
       if (updateError) throw updateError;
 
       alert(selectedTransaction.approval_status === 'PENDING_APPROVAL'
-        ? 'Document uploaded and transaction auto-approved successfully'
+        ? 'Document uploaded and transaction approved successfully'
         : 'Document uploaded successfully'
       );
       setShowUploadModal(false);
@@ -735,7 +760,7 @@ export function Transactions() {
           fees: 0,
           net_price_per_share: price,
           total_amount: grossAmount,
-          approval_status: 'APPROVED',
+          approval_status: 'MANUAL_APPROVED',
           cds_account_id: row.cds_account || null,
           ...(row.transaction_id ? { id: undefined } : {}),
         });
@@ -1135,10 +1160,10 @@ export function Transactions() {
         };
 
         if (isApprover) {
-          updatePayload.approval_status = 'AUTO_APPROVED';
+          updatePayload.approval_status = 'MANUAL_APPROVED';
           updatePayload.approved_by = currentEmail;
           updatePayload.approval_date = now.toISOString();
-          updatePayload.approval_notes = 'Auto-approved: submitted by designated approver';
+          updatePayload.approval_notes = 'Approved: submitted by designated approver';
           autoApprovedCount++;
         } else {
           updatePayload.approval_status = 'PENDING_APPROVAL';
@@ -1503,14 +1528,14 @@ export function Transactions() {
                       {(() => {
                         const s = transaction.approval_status;
                         const cls =
-                          s === 'APPROVED' || s === 'AUTO_APPROVED' ? 'bg-green-100 text-green-800' :
+                          s === 'MANUAL_APPROVED' ? 'bg-green-100 text-green-800' :
                           s === 'REJECTED' ? 'bg-red-100 text-red-800' :
                           s === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
                           s === 'CANCELLED' ? 'bg-rose-100 text-rose-800' :
                           'bg-gray-100 text-gray-800';
                         const label =
                           s === 'PENDING_APPROVAL' ? 'PENDING' :
-                          s === 'AUTO_APPROVED' ? 'APPROVED' :
+                          s === 'MANUAL_APPROVED' ? 'APPROVED' :
                           s;
                         return (
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
@@ -1549,7 +1574,7 @@ export function Transactions() {
                       >
                         <Printer className="w-5 h-5" />
                       </button>
-                      {(transaction.approval_status === 'APPROVED' || transaction.approval_status === 'AUTO_APPROVED') && (
+                      {transaction.approval_status === 'MANUAL_APPROVED' && (
                         <button
                           onClick={() => handleEmailTransaction(transaction)}
                           className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
@@ -1584,11 +1609,12 @@ export function Transactions() {
                           )}
                         </button>
                       )}
-                      {transaction.approval_status !== 'CANCELLED' && transaction.approval_status !== 'APPROVED' && transaction.approval_status !== 'AUTO_APPROVED' && transaction.approval_status !== 'REJECTED' && (
+                      {transaction.approval_status !== 'CANCELLED' && transaction.approval_status !== 'REJECTED' &&
+                       !(transaction.approval_status === 'MANUAL_APPROVED' && transaction.approval_document_name) && (
                         <button
                           onClick={() => handleCancelTransaction(transaction)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Cancel Transaction"
+                          title={transaction.approval_status === 'MANUAL_APPROVED' ? 'Cancel Approved Transaction' : 'Cancel Transaction'}
                           disabled={submitting}
                         >
                           <XCircle className="w-5 h-5" />
@@ -2164,12 +2190,13 @@ export function Transactions() {
                   <p className="text-sm font-medium text-gray-500">Approval Status</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
-                      selectedTransaction.approval_status === 'APPROVED' ? 'bg-green-100 text-green-800' :
+                      selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'bg-green-100 text-green-800' :
                       selectedTransaction.approval_status === 'REJECTED' ? 'bg-red-100 text-red-800' :
                       selectedTransaction.approval_status === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800' :
+                      selectedTransaction.approval_status === 'CANCELLED' ? 'bg-rose-100 text-rose-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {selectedTransaction.approval_status}
+                      {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'APPROVED' : selectedTransaction.approval_status}
                     </span>
                     {selectedTransaction.offline_approval && (
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>
@@ -2683,7 +2710,7 @@ export function Transactions() {
 
               <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-xs text-amber-700">
-                  <span className="font-semibold">Note:</span> Fields marked <span className="text-red-500">*</span> are required. Selecting a Transaction auto-fills the row. Only complete rows (Entity, Share, Shares, Price) are saved. Transactions are saved with <span className="font-semibold">APPROVED</span> status immediately.
+                  <span className="font-semibold">Note:</span> Fields marked <span className="text-red-500">*</span> are required. Selecting a Transaction auto-fills the row. Only complete rows (Entity, Share, Shares, Price) are saved. Transactions are saved with <span className="font-semibold">MANUAL APPROVED</span> status immediately.
                 </p>
               </div>
             </div>

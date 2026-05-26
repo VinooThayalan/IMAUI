@@ -78,12 +78,11 @@ interface EntityBroker {
   bank_account_number: string | null;
 }
 
-const ALL_STATUSES = ['PENDING_APPROVAL', 'APPROVED', 'AUTO_APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD', 'CANCELLED'];
+const ALL_STATUSES = ['PENDING_APPROVAL', 'MANUAL_APPROVED', 'REJECTED', 'EXPIRED', 'ON_HOLD', 'CANCELLED'];
 
 const statusConfig: Record<string, { icon: any; color: string; bg: string; label: string }> = {
   PENDING_APPROVAL: { icon: Clock, color: 'text-yellow-600', bg: 'bg-yellow-100', label: 'Pending' },
-  APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
-  AUTO_APPROVED: { icon: CheckCircle, color: 'text-green-700', bg: 'bg-green-100', label: 'Approved' },
+  MANUAL_APPROVED: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-100', label: 'Approved' },
   REJECTED: { icon: XCircle, color: 'text-red-600', bg: 'bg-red-100', label: 'Rejected' },
   EXPIRED: { icon: XCircle, color: 'text-gray-600', bg: 'bg-gray-100', label: 'Expired' },
   ON_HOLD: { icon: Pause, color: 'text-orange-600', bg: 'bg-orange-100', label: 'On Hold' },
@@ -276,7 +275,7 @@ export function TransactionApprovals() {
     try {
       setSubmitting(true);
       const updates: any = {
-        approval_status: 'APPROVED',
+        approval_status: 'MANUAL_APPROVED',
         approved_by: user?.email || 'system',
         approval_date: new Date().toISOString(),
         approval_notes: actionFormData.approval_notes || null
@@ -716,7 +715,7 @@ export function TransactionApprovals() {
                 const StatusIcon = cfg.icon;
                 const isSelf = transaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
                 const isPending = transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD';
-                const isApproved = transaction.approval_status === 'APPROVED' || transaction.approval_status === 'AUTO_APPROVED';
+                const isApproved = transaction.approval_status === 'MANUAL_APPROVED';
                 const hasDoc = !!transaction.approval_document_url;
 
                 return (
@@ -896,7 +895,7 @@ export function TransactionApprovals() {
 
             <div className="p-6 space-y-6">
               {/* Status banners */}
-              {selectedTransaction.approval_status === 'AUTO_APPROVED' && (
+              {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center space-x-2">
                   <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                   <p className="text-sm text-emerald-800 font-medium">Auto-approved — submitted by the designated approver for this entity</p>
@@ -1018,7 +1017,7 @@ export function TransactionApprovals() {
                       </p>
                       {selectedTransaction.approved_by && (
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {['APPROVED', 'AUTO_APPROVED'].includes(selectedTransaction.approval_status) ? 'Approved' : 'Actioned'} by{' '}
+                          {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'Approved' : 'Actioned'} by{' '}
                           <span className="font-medium text-gray-600">{selectedTransaction.approved_by}</span>
                           {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString()}`}
                         </p>
