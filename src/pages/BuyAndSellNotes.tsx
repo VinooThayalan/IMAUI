@@ -483,6 +483,7 @@ export function BuyAndSellNotes() {
   function parseBoughtNoteRows(
     rows: { str: string; x: number }[][],
   ): ExtractedRow[] {
+    console.log('[BoughtNote] all rows:', rows.map((r, i) => `[${i}] ${r.map(c => c.str).join(' | ')}`).join('\n'));
     const result: ExtractedRow[] = [];
     for (const row of rows) {
       if (row.length < 5) continue;
