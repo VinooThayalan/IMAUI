@@ -738,21 +738,31 @@ export function BuyAndSellNotes() {
     });
     if (!headerRow) return [];
 
-    // Also collect the next row in case multi-line headers (e.g. "No of" on one line, "Shares" below)
+    // Also collect adjacent rows in case multi-line headers (e.g. "No of" on one line, "Shares" below,
+    // or when the right-side column headers render at a slightly different Y than the left-side ones)
     const headerY = headerRow[0].y;
     const headerPage = headerRow[0].page;
     const headerRowIdx = rowList.indexOf(headerRow);
-    // Merge any continuation row that appears within 15 pts below and has no numbers
-    const continuationRow = rowList[headerRowIdx + 1];
+
+    const isHeaderCandidate = (row: typeof headerRow) =>
+      row[0].page === headerPage &&
+      Math.abs(row[0].y - headerY) <= 20 &&
+      !row.some((i) => /\d/.test(i.str));
+
     let combinedHeaderItems = [...headerRow];
-    if (
-      continuationRow &&
-      continuationRow[0].page === headerPage &&
-      Math.abs(continuationRow[0].y - headerY) <= 15 &&
-      !continuationRow.some((i) => /\d/.test(i.str))
-    ) {
-      combinedHeaderItems.push(...continuationRow);
+
+    // Merge the row immediately above (higher Y = earlier in sorted list)
+    const rowAbove = headerRowIdx > 0 ? rowList[headerRowIdx - 1] : null;
+    if (rowAbove && isHeaderCandidate(rowAbove)) {
+      combinedHeaderItems.push(...rowAbove);
     }
+
+    // Merge the row immediately below (lower Y = later in sorted list)
+    const rowBelow = rowList[headerRowIdx + 1];
+    if (rowBelow && isHeaderCandidate(rowBelow)) {
+      combinedHeaderItems.push(...rowBelow);
+    }
+
     // Sort combined header items by X position to ensure correct column order
     combinedHeaderItems = combinedHeaderItems.sort((a, b) => a.x - b.x);
 
