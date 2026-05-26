@@ -167,7 +167,7 @@ export function Transactions() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set(['DRAFT']));
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const statusDropdownRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1425,9 +1425,9 @@ export function Transactions() {
                 </div>
               )}
             </div>
-            {(filterDateFrom || filterDateTo || (activeTab === 'all' ? !(filterStatuses.size === 1 && filterStatuses.has('DRAFT')) : !(filterStatuses.size === 1 && filterStatuses.has('PENDING_APPROVAL')))) && (
+            {(filterDateFrom || filterDateTo || filterStatuses.size > 0) && (
               <button
-                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatuses(new Set([activeTab === 'pending' ? 'PENDING_APPROVAL' : 'DRAFT'])); setStatusDropdownOpen(false); }}
+                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); setFilterStatuses(new Set()); setStatusDropdownOpen(false); }}
                 className="px-2.5 py-1.5 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Clear
