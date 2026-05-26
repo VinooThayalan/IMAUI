@@ -766,6 +766,12 @@ export function BuyAndSellNotes() {
     // Sort combined header items by X position to ensure correct column order
     combinedHeaderItems = combinedHeaderItems.sort((a, b) => a.x - b.x);
 
+    console.log('[PDF] headerY=', headerY, 'headerIdx=', headerRowIdx);
+    console.log('[PDF] headerRow tokens:', headerRow.map(i => `"${i.str}"@y${i.y.toFixed(1)}`).join(', '));
+    if (rowAbove) console.log('[PDF] rowAbove tokens:', rowAbove.map(i => `"${i.str}"@y${i.y.toFixed(1)}`).join(', '), 'merged=', isHeaderCandidate(rowAbove));
+    if (rowBelow) console.log('[PDF] rowBelow tokens:', rowBelow.map(i => `"${i.str}"@y${i.y.toFixed(1)}`).join(', '), 'merged=', isHeaderCandidate(rowBelow));
+    console.log('[PDF] combinedHeader:', combinedHeaderItems.map(i => `"${i.str}"`).join(', '));
+
     const colX: Record<string, number> = {};
     
     for (let i = 0; i < combinedHeaderItems.length; i += 1) {
@@ -815,6 +821,8 @@ export function BuyAndSellNotes() {
       else if (s === "settlement") colX.settlement = rx;
       else if (s === "net") colX.amount = rx;
     }
+
+    console.log('[PDF] colX:', JSON.stringify(colX));
 
     // Build Voronoi column boundaries sorted by X position.
     // Each column "owns" the midpoint range between itself and its neighbors.
