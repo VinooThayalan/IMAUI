@@ -37,6 +37,21 @@ interface Share {
   share_name: string;
 }
 
+interface Bank {
+  id: string;
+  name: string;
+  account_number: string | null;
+  entity_id: string;
+}
+
+interface EntityBroker {
+  id: string;
+  entity_id: string;
+  relationship_type: string;
+  custodian_account_number: string | null;
+  broker_account_number: string | null;
+}
+
 const EMPTY_FORM = {
   entity_id: '',
   share_id: '',
@@ -48,6 +63,7 @@ const EMPTY_FORM = {
   announcement_date: '',
   payment_date: '',
   effective_date: '',
+  selected_bank_id: '',
   bank_name: '',
   bank_account_no: '',
   payment_method: '',
@@ -62,6 +78,8 @@ export function Dividends() {
   const [dividends, setDividends] = useState<Dividend[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [search, setSearch] = useState('');
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
@@ -81,10 +99,12 @@ export function Dividends() {
   async function loadData() {
     try {
       setLoading(true);
-      const [dividendsRes, entitiesRes, sharesRes] = await Promise.all([
+      const [dividendsRes, entitiesRes, sharesRes, banksRes, entityBrokersRes] = await Promise.all([
         supabase.from('dividends').select('*').order('created_at', { ascending: false }),
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('ticker'),
+        supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
+        supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number'),
       ]);
       if (dividendsRes.error) throw dividendsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
@@ -92,6 +112,8 @@ export function Dividends() {
       setDividends(dividendsRes.data || []);
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
+      setBanks(banksRes.data || []);
+      setEntityBrokers(entityBrokersRes.data || []);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -120,6 +142,8 @@ export function Dividends() {
       const net = gross * (1 - rate / 100);
       const qty = parseFloat(formData.quantity) || 0;
 
+      const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
+
       const { error } = await supabase.from('dividends').insert({
         entity_id: formData.entity_id,
         share_id: formData.share_id,
@@ -134,8 +158,8 @@ export function Dividends() {
         announcement_date: formData.announcement_date || null,
         payment_date: formData.payment_date || null,
         effective_date: formData.effective_date || null,
-        bank_name: formData.bank_name || null,
-        bank_account_no: formData.bank_account_no || null,
+        bank_name: selectedBank?.name || null,
+        bank_account_no: selectedBank?.account_number || null,
         payment_method: formData.payment_method || null,
         cds_account: formData.cds_account || null,
         notes: formData.notes || null,
@@ -345,7 +369,7 @@ export function Dividends() {
                   <select
                     required
                     value={formData.entity_id}
-                    onChange={e => setFormData({ ...formData, entity_id: e.target.value })}
+                    onChange={e => setFormData({ ...formData, entity_id: e.target.value, selected_bank_id: '', cds_account: '' })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   >
                     <option value="">Select entity...</option>
@@ -498,55 +522,81 @@ export function Dividends() {
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Bank & Payment Details</p>
                 </div>
 
-                {/* Row 7: Bank Name + Bank Account No */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Bank Name</label>
-                    <input
-                      type="text"
-                      value={formData.bank_name}
-                      onChange={e => setFormData({ ...formData, bank_name: e.target.value })}
-                      className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
-                      placeholder="e.g. Commercial Bank"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bank Account No.</label>
-                    <input
-                      type="text"
-                      value={formData.bank_account_no}
-                      onChange={e => setFormData({ ...formData, bank_account_no: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      placeholder="Account number"
-                    />
-                  </div>
-                </div>
+                {/* Row 7: Bank Name dropdown + Bank Account No (auto) + CDS Account (auto) */}
+                {(() => {
+                  const entityBanks = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
+                  const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
+                  const entityCdsAccounts = formData.entity_id
+                    ? entityBrokers.filter(eb => eb.entity_id === formData.entity_id)
+                    : [];
+                  const firstCds = entityCdsAccounts[0];
+                  const cdsValue = firstCds
+                    ? (firstCds.relationship_type === 'Custodian'
+                        ? firstCds.custodian_account_number
+                        : firstCds.broker_account_number) || ''
+                    : formData.cds_account;
+                  return (
+                    <>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Bank Name</label>
+                          <select
+                            value={formData.selected_bank_id}
+                            onChange={e => setFormData({ ...formData, selected_bank_id: e.target.value })}
+                            className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
+                            disabled={!formData.entity_id}
+                          >
+                            <option value="">Select bank...</option>
+                            {entityBanks.map(b => (
+                              <option key={b.id} value={b.id}>{b.name}</option>
+                            ))}
+                          </select>
+                          {!formData.entity_id && (
+                            <p className="text-xs text-gray-400 mt-1">Select an entity first</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Bank Account No.</label>
+                          <input
+                            type="text"
+                            value={selectedBank?.account_number || ''}
+                            readOnly
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 text-sm"
+                            placeholder="Auto-filled on bank selection"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-emerald-600 mb-1.5">CDS Account</label>
+                          <input
+                            type="text"
+                            value={cdsValue || ''}
+                            readOnly={!!firstCds}
+                            onChange={e => !firstCds && setFormData({ ...formData, cds_account: e.target.value })}
+                            className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${firstCds ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-emerald-200'}`}
+                            placeholder="e.g. CMB / SBL"
+                          />
+                          {firstCds && <p className="text-xs text-gray-400 mt-1">Auto-filled from account</p>}
+                        </div>
+                      </div>
 
-                {/* Row 8: Payment Method + CDS Account */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Payment Method</label>
-                    <select
-                      value={formData.payment_method}
-                      onChange={e => setFormData({ ...formData, payment_method: e.target.value })}
-                      className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
-                    >
-                      <option value="">Select method...</option>
-                      <option value="Cheque">Cheque</option>
-                      <option value="Transfer (CEFT)">Transfer (CEFT)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-emerald-600 mb-1.5">CDS Account</label>
-                    <input
-                      type="text"
-                      value={formData.cds_account}
-                      onChange={e => setFormData({ ...formData, cds_account: e.target.value })}
-                      className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
-                      placeholder="e.g. CMB / SBL"
-                    />
-                  </div>
-                </div>
+                      {/* Row 8: Payment Method */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Payment Method</label>
+                          <select
+                            value={formData.payment_method}
+                            onChange={e => setFormData({ ...formData, payment_method: e.target.value })}
+                            className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
+                          >
+                            <option value="">Select method...</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="Transfer (CEFT)">Transfer (CEFT)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {/* Divider */}
                 <div className="border-t border-gray-100 pt-1">
