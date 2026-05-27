@@ -355,33 +355,22 @@ export function Dividends() {
                   </select>
                 </div>
 
-                {/* Row 2: Ticker + Date */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Ticker (Share) <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      required
-                      value={formData.share_id}
-                      onChange={e => setFormData({ ...formData, share_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    >
-                      <option value="">Select ticker...</option>
-                      {shares.map(s => (
-                        <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Date</label>
-                    <input
-                      type="date"
-                      value={formData.dividend_date}
-                      onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    />
-                  </div>
+                {/* Row 2: Ticker */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                    Ticker (Share) <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={formData.share_id}
+                    onChange={e => setFormData({ ...formData, share_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">Select ticker...</option>
+                    {shares.map(s => (
+                      <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Divider */}
