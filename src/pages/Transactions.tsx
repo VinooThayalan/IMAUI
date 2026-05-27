@@ -1719,40 +1719,50 @@ export function Transactions() {
                   </div>
                 )}
 
-                {/* Row 3: Bank account selector (compact) */}
-                {entityBankAccounts.length > 0 && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Bank Account</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {entityBankAccounts.map(bank => {
-                        const isSelected = formData.selected_bank_id === bank.id;
-                        return (
-                          <button
-                            type="button"
-                            key={bank.id}
-                            onClick={() => setFormData({ ...formData, selected_bank_id: isSelected ? '' : bank.id })}
-                            className={`text-left rounded-lg border-2 px-3 py-1.5 transition-all ${
-                              isSelected
-                                ? 'bg-blue-50 border-blue-500 ring-1 ring-blue-200'
-                                : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-blue-50'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-bold text-gray-900">{bank.name}</span>
-                              {bank.account_number && <span className="text-xs text-gray-400 font-mono">{bank.account_number}</span>}
-                              <span className="text-xs font-semibold text-green-700">LKR {Number(bank.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                              {bank.facility_limit != null && <span className="text-xs text-blue-600">Limit: {Number(bank.facility_limit).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>}
-                              {isSelected && <span className="w-3.5 h-3.5 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0"><svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></span>}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* Row 3: Bank Account dropdown + auto-populated account details */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Bank Name</label>
+                    <select
+                      value={formData.selected_bank_id}
+                      onChange={(e) => setFormData({ ...formData, selected_bank_id: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={!formData.entity_id}
+                    >
+                      <option value="">Select Bank</option>
+                      {entityBankAccounts.map(bank => (
+                        <option key={bank.id} value={bank.id}>{bank.name}</option>
+                      ))}
+                    </select>
                   </div>
-                )}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Bank Account No</label>
+                    <input
+                      type="text"
+                      value={formData.selected_bank_id ? (entityBankAccounts.find(b => b.id === formData.selected_bank_id)?.account_number || '') : ''}
+                      className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700"
+                      readOnly
+                      placeholder="Auto-filled on bank selection"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">CDS / Broker Account No</label>
+                    <input
+                      type="text"
+                      value={selectedEntityBroker
+                        ? (selectedEntityBroker.relationship_type === 'Custodian'
+                            ? selectedEntityBroker.custodian_account_number || ''
+                            : selectedEntityBroker.broker_account_number || '')
+                        : ''}
+                      className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700"
+                      readOnly
+                      placeholder="Auto-filled on account selection"
+                    />
+                  </div>
+                </div>
 
-                {/* Row 4: Transaction Type / Order Type / Date / Share */}
-                <div className="grid grid-cols-4 gap-3">
+                {/* Row 4: Transaction Type / Order Type / Share */}
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Type <span className="text-red-600">*</span></label>
                     <select
@@ -1788,16 +1798,6 @@ export function Transactions() {
                       <option value="4DAY">4 Day Order</option>
                       <option value="GTC">GTC (Good Till Cancelled)</option>
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Date <span className="text-red-600">*</span></label>
-                    <input
-                      type="date"
-                      value={formData.transaction_date}
-                      onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
-                      className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Share <span className="text-red-600">*</span></label>
