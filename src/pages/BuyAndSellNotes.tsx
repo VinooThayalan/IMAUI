@@ -255,6 +255,7 @@ export function BuyAndSellNotes() {
   >({});
   const [extractedRows, setExtractedRows] = useState<ExtractedRow[]>([]);
   const [debugRawText, setDebugRawText] = useState<string>("");
+  const [extractionError, setExtractionError] = useState<string>("");
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -294,6 +295,8 @@ export function BuyAndSellNotes() {
     remarks: "",
   });
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
+  const [parserFixturesLogged, setParserFixturesLogged] = useState(false);
+  const [parserTrace, setParserTrace] = useState<string>("");
 
   useEffect(() => {
     loadData();
@@ -389,6 +392,9 @@ export function BuyAndSellNotes() {
       alert("Please upload a PDF file");
       return;
     }
+    setExtractionError("");
+    setDebugRawText("");
+    setExtractedRows([]);
     setUploadedFile(file);
     void extractFromPdf(file);
   }
@@ -431,6 +437,24 @@ export function BuyAndSellNotes() {
     return { items, rawText: textParts.join(" ") };
   }
 
+  async function withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    message: string,
+  ): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(message)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   function groupIntoRows(
     items: { str: string; x: number; y: number; page: number }[],
     tolerance = 4,
@@ -463,20 +487,26 @@ export function BuyAndSellNotes() {
 
   function mergeAdjacentTokens(tokens: string[]): string[] {
     const merged: string[] = [];
-    for (let i = 0; i < tokens.length; i += 1) {
+
+    const canMerge = (prev: string, cur: string) => {
+      const joined = `${prev}${cur}`;
+      const decimalSplit = /\d\.$/.test(prev) && /^\d{1,4}$/.test(cur);
+      const leadingDecimal = /\d$/.test(prev) && /^\.\d+$/.test(cur);
+      const thousandSplit = /,$/.test(prev) && /^\d{3}(?:\.\d+)?$/.test(cur);
+      const leadingThousands = /\d$/.test(prev) && /^,\d{3}(?:\.\d+)?$/.test(cur);
+      return (decimalSplit || leadingDecimal || thousandSplit || leadingThousands) &&
+        NUMERIC_TOKEN.test(joined);
+    };
+
+    for (const cur of tokens) {
       const prev = merged[merged.length - 1];
-      const cur = tokens[i];
-      if (
-        prev &&
-        /[\d,.]$/.test(prev) &&
-        /^[\d,.]/.test(cur) &&
-        (prev + cur).match(/^[\d,]+(?:\.\d+)?$/)
-      ) {
-        merged[merged.length - 1] = prev + cur;
+      if (prev && canMerge(prev, cur)) {
+        merged[merged.length - 1] = `${prev}${cur}`;
       } else {
         merged.push(cur);
       }
     }
+
     return merged;
   }
 
@@ -488,6 +518,17 @@ export function BuyAndSellNotes() {
       if (row.length < 5) continue;
       const rawTokens = row.map((c) => c.str).filter(Boolean);
       const tokens = mergeAdjacentTokens(rawTokens);
+      
+      // Skip total/summary rows early
+      const joined = tokens.join(" ").toLowerCase();
+      if (
+        /^\s*(total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total|grand\s*total)/i.test(
+          joined,
+        )
+      ) {
+        continue;
+      }
+      
       const contractIdx = tokens.findIndex((t) => CONTRACT_TOKEN.test(t));
       if (contractIdx === -1) continue;
 
@@ -495,7 +536,6 @@ export function BuyAndSellNotes() {
         (t, i) => i > contractIdx && SECURITY_TOKEN.test(t),
       );
       if (securityIdx === -1) {
-        // Fallback: first non-numeric ALL-CAPS word after contractIdx that isn't a known header word
         const SKIP_WORDS = /^(BOUGHT|SOLD|TOTAL|PAGE|BUYER|SELLER|ACCOUNT|IMPORTANT|THIS|THE|AND|FOR|BY|OF|AS|IN|IS|NOT)$/i;
         securityIdx = tokens.findIndex(
           (t, i) =>
@@ -518,33 +558,114 @@ export function BuyAndSellNotes() {
         .slice(securityIdx + 1)
         .filter((t) => NUMERIC_TOKEN.test(t))
         .map(parseNumber);
-      if (numeric.length < 4) continue;
+      if (numeric.length < 3) continue;
 
-      const pad = (idx: number) => numeric[idx] ?? 0;
-      const amount = numeric[numeric.length - 1] ?? 0;
-      const head = numeric.slice(0, numeric.length - 1);
-      const [
+      // Smarter field extraction: use heuristics to identify which value goes where
+      // The pattern in buy/sell notes is typically: rate, gross, brokerage, sec, cse, cds, stl, clearing, foreign, net
+      // But formatting can vary. Use qty*rate=gross as a verification.
+      
+      let rate = numeric[0] ?? 0;
+      let gross_value = numeric[1] ?? 0;
+      
+      // Verify rate and gross make sense; if not, swap them or search
+      const impliedGross = qty * rate;
+      if (qty > 0 && impliedGross > 0) {
+        const grossRatio = gross_value / impliedGross;
+        if (grossRatio < 0.5 || grossRatio > 1.5) {
+          // Gross doesn't match, search for a value that does
+          for (let i = 1; i < numeric.length; i++) {
+            const candGross = numeric[i];
+            const candRatio = candGross / impliedGross;
+            if (candRatio >= 0.95 && candRatio <= 1.05) {
+              gross_value = candGross;
+              break;
+            }
+          }
+        }
+        // If rate looks too extreme (< 0.1 or > 100k), try to find a better one
+        if (rate < 0.1 || rate > 100000) {
+          for (let i = 1; i < Math.min(3, numeric.length); i++) {
+            const candRate = numeric[i];
+            const candGross = qty * candRate;
+            if (candGross > 0) {
+              for (let j = i + 1; j < numeric.length; j++) {
+                const potGross = numeric[j];
+                const r = potGross / qty;
+                if (r > 0.1 && r < 100000 && candGross > qty * 0.5) {
+                  rate = candRate;
+                  gross_value = potGross;
+                  break;
+                }
+              }
+            }
+            if (rate > 0.1 && rate < 100000) break;
+          }
+        }
+          // If still looks wrong (gross much smaller than implied), check for a very large numeric that might be the gross
+          if (gross_value / impliedGross < 0.5) {
+            const maxNumeric = Math.max(...numeric);
+            if (maxNumeric > gross_value * 10 && maxNumeric > qty) {
+              // Promote maxNumeric to gross and recompute rate conservatively
+              console.info("[buy-sell-note-parser] promote-max-gross", { qty, rate, gross_value, maxNumeric });
+              gross_value = maxNumeric;
+              rate = gross_value / qty;
+            }
+          }
+      }
+
+      // Extract fees: after gross, pick the remaining values as fees
+      let brokerage = numeric[2] ?? 0;
+      const cse_fees = numeric[3] ?? 0;
+      const cds_fees = numeric[4] ?? 0;
+      const sec = numeric[5] ?? 0;
+      const stl = numeric[6] ?? 0;
+      const clearing_fee = numeric[7] ?? 0;
+      const foreign_br = numeric[8] ?? 0;
+
+      // Find net: prefer a value close to (gross - fees)
+      const feeSum = brokerage + cse_fees + cds_fees + sec + stl + clearing_fee + foreign_br;
+      const expectedNet = gross_value - feeSum;
+      let amount = numeric[numeric.length - 1] ?? 0;
+      if (numeric.length > 9) {
+        for (let i = numeric.length - 1; i >= 0; i--) {
+          const v = numeric[i];
+          if (v >= expectedNet * 0.7 && v <= expectedNet * 1.3) {
+            amount = v;
+            break;
+          }
+        }
+      }
+
+      // Compute indices of rate/gross in numeric array for debug
+      let rateIdx = -1;
+      let grossIdx = -1;
+      for (let i = 0; i < numeric.length; i++) {
+        const v = numeric[i];
+        if (rateIdx === -1 && Math.abs(v - rate) <= Math.max(0.0001, Math.abs(rate) * 1e-6)) rateIdx = i;
+        if (grossIdx === -1 && Math.abs(v - gross_value) <= Math.max(0.0001, Math.abs(gross_value) * 1e-6)) grossIdx = i;
+      }
+      const feeNums = numeric.filter((_, i) => i !== rateIdx && i !== grossIdx);
+      // If brokerage parsed as zero, try to remap a plausible brokerage from feeNums
+      if ((brokerage === 0 || !brokerage) && gross_value > 0) {
+        const candidates = feeNums.filter((v) => v > 0 && v / gross_value >= 0.0005 && v / gross_value <= 0.05);
+        if (candidates.length > 0) {
+          const chosen = Math.max(...candidates);
+          const remIdx = feeNums.indexOf(chosen);
+          if (remIdx >= 0) feeNums.splice(remIdx, 1);
+          brokerage = chosen;
+          console.info("[buy-sell-note-parser] remapped-brokerage", { chosen, gross_value, feeNums });
+        }
+      }
+      console.info("[buy-sell-note-parser] bought-row", {
+        tokens,
+        numeric,
+        rateIdx,
+        grossIdx,
         rate,
         gross_value,
-        brokerage,
-        cds_fees,
-        cse_fees,
-        sec,
-        stl,
-        clearing_fee,
-        foreign_br,
-      ] = [
-        head[0] ?? pad(0),
-        head[1] ?? pad(1),
-        head[2] ?? pad(2),
-        head[3] ?? pad(3),
-        head[4] ?? pad(4),
-        head[5] ?? pad(5),
-        head[6] ?? pad(6),
-        head[7] ?? pad(7),
-        head[8] ?? 0,
-      ];
-
+        feeNums,
+        assigned_brokerage: brokerage,
+      });
       result.push({
         contract_no: tokens[contractIdx],
         qty,
@@ -626,6 +747,10 @@ export function BuyAndSellNotes() {
       "g",
     );
     while ((m = tickerFirstPattern.exec(rawText)) !== null) {
+      // Skip if row looks like a totals row
+      if (/total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total|grand\s*total/i.test(m[0])) {
+        continue;
+      }
       out.push({
         contract_no: m[1],
         security: m[2],
@@ -652,6 +777,10 @@ export function BuyAndSellNotes() {
       "g",
     );
     while ((m = qtyFirstPattern.exec(rawText)) !== null) {
+      // Skip if row looks like a totals row
+      if (/total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total|grand\s*total/i.test(m[0])) {
+        continue;
+      }
       out.push({
         contract_no: m[1],
         qty: parseNumber(m[2]),
@@ -671,30 +800,407 @@ export function BuyAndSellNotes() {
     if (out.length > 0) return out;
 
     // Loose fallback: contractNo  TICKER  qty  then any 8–12 numbers
+    // ENHANCED: verify rate/gross relationship instead of assuming column order
     const looser = new RegExp(
       `(\\d{7,})\\s+(${TICKER})\\s+(${NUM})((?:\\s+${NUM}){8,12})`,
       "g",
     );
     while ((m = looser.exec(rawText)) !== null) {
+      // Skip if row looks like a totals row
+      if (/total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total|grand\s*total/i.test(m[0])) {
+        continue;
+      }
       const nums = m[4].trim().split(/\s+/).map(parseNumber);
       if (nums.length < 8) continue;
+      
+      const qty = parseNumber(m[3]);
+      
+      // Smart field detection: find rate and gross by verifying qty * rate ≈ gross
+      // Look for a number between 0.1-100k that when multiplied by qty gives another number in the list
+      // DEFAULT is NOT set; we'll only accept a pair if it passes strict validation
+      let rate = 0;
+      let gross_value = 0;
+      let rateIdx = -1;
+      let grossIdx = -1;
+      
+      if (qty > 0) {
+        // Try to find valid rate/gross pair (strict: 0.1 ≤ rate ≤ 100k, 0.95 ≤ ratio ≤ 1.05)
+        for (let i = 0; i < nums.length; i++) {
+          const candRate = nums[i];
+          if (candRate >= 0.1 && candRate <= 100000) {
+            const expectedGross = qty * candRate;
+            // Look for this gross in the array (within 5% tolerance)
+            for (let j = 0; j < nums.length; j++) {
+              const candGross = nums[j];
+              if (j !== i && candGross > qty * 0.5 && candGross < qty * 10000) {
+                const ratio = candGross / expectedGross;
+                if (ratio >= 0.95 && ratio <= 1.05) {
+                  // Found a valid pair!
+                  rate = candRate;
+                  gross_value = candGross;
+                  rateIdx = i;
+                  grossIdx = j;
+                  break;
+                }
+              }
+            }
+            if (rateIdx === i && grossIdx > i) break;  // Found valid pair for this rate
+          }
+        }
+      }
+      
+      // Fallback: if no valid pair found and qty is reasonable, try the first two numbers
+      // but ONLY if the first could plausibly be a rate (0.1-100k)
+      if (rateIdx === -1 && qty > 0 && nums[0] >= 0.1 && nums[0] <= 100000) {
+        rate = nums[0];
+        gross_value = nums[1] ?? 0;
+        rateIdx = 0;
+        grossIdx = 1;
+      } else if (rateIdx === -1) {
+        // No valid rate/gross pair found; mark this row as unparseable
+        rate = 0;
+        gross_value = 0;
+        rateIdx = -1;
+        grossIdx = -1;
+      }
+      
+      // Collect remaining numbers as fees
+      // Exclude rate and gross indices from fee calculations
+      const feeNums: number[] = [];
+      for (let i = 0; i < nums.length; i++) {
+        if (i !== rateIdx && i !== grossIdx) {
+          feeNums.push(nums[i]);
+        }
+      }
+      
+      // If the first fee looks like zero/invalid, attempt to remap brokerage from feeNums
+      let assignedBrokerage = feeNums[0] ?? 0;
+      if ((assignedBrokerage === 0 || !assignedBrokerage) && gross_value > 0) {
+        const candidates = feeNums.filter((v) => v > 0 && v / gross_value >= 0.0005 && v / gross_value <= 0.05);
+        if (candidates.length > 0) {
+          const chosen = Math.max(...candidates);
+          const idx = feeNums.indexOf(chosen);
+          if (idx >= 0) feeNums.splice(idx, 1);
+          assignedBrokerage = chosen;
+          console.info("[buy-sell-note-parser] looser-remapped-brokerage", { chosen, gross_value, feeNums });
+        }
+      }
+      
+      // Skip rows where rate was not found (rateIdx === -1) or rate is still implausible
+      if (rateIdx === -1 || rate < 0.1 || rate > 100000) {
+        console.info("[buy-sell-note-parser] looser-skip-invalid-rate", { contract: m[1], rate, rateIdx });
+        continue;
+      }
+      
+      console.info("[buy-sell-note-parser] looser-match", {
+        nums,
+        rateIdx,
+        grossIdx,
+        rate,
+        gross_value,
+        feeNums,
+        assigned_brokerage: assignedBrokerage,
+      });
       out.push({
         contract_no: m[1],
         security: m[2],
-        qty: parseNumber(m[3]),
-        rate: nums[0] ?? 0,
-        gross_value: nums[1] ?? 0,
-        brokerage: nums[2] ?? 0,
-        cds_fees: nums[3] ?? 0,
-        cse_fees: nums[4] ?? 0,
-        sec: nums[5] ?? 0,
-        stl: nums[6] ?? 0,
-        clearing_fee: nums[7] ?? 0,
-        foreign_br: nums[8] ?? 0,
-        amount: nums[9] ?? 0,
+        qty: qty,
+        rate: rate,
+        gross_value: gross_value,
+        brokerage: assignedBrokerage,
+        cds_fees: feeNums[1] ?? 0,
+        cse_fees: feeNums[2] ?? 0,
+        sec: feeNums[3] ?? 0,
+        stl: feeNums[4] ?? 0,
+        clearing_fee: feeNums[5] ?? 0,
+        foreign_br: feeNums[6] ?? 0,
+        amount: feeNums[7] ?? 0,
       });
     }
     return out;
+  }
+
+  function isSaneRow(row: ExtractedRow): boolean {
+    let reason = null as string | null;
+    if (!Number.isFinite(row.qty) || !Number.isFinite(row.rate) || !Number.isFinite(row.gross_value)) {
+      reason = "non-finite-values";
+    } else if (row.qty <= 0 || row.rate <= 0 || row.gross_value <= 0) {
+      reason = "non-positive-values";
+    } else {
+      const impliedGross = row.qty * row.rate;
+      if (impliedGross > 0) {
+        const grossRatio = row.gross_value / impliedGross;
+        if (grossRatio < 0.7 || grossRatio > 1.3) reason = "gross-ratio-out-of-range";
+      }
+
+      const feeTotal = (row.brokerage || 0) + (row.sec || 0) + (row.cse_fees || 0) + (row.cds_fees || 0) + (row.stl || 0) + (row.clearing_fee || 0);
+      if (!reason && feeTotal > row.gross_value * 0.25) reason = "fees-too-large";
+    }
+
+    const sane = reason === null;
+    if (!sane && import.meta.env.DEV) {
+      console.info("[buy-sell-note-parser] sane-fail", { row, reason });
+    }
+    return sane;
+  }
+
+  function scoreParsedRows(rows: ExtractedRow[]): number {
+    if (rows.length === 0) return Number.NEGATIVE_INFINITY;
+
+    let score = rows.length * 3;
+    let saneCount = 0;
+
+    for (const row of rows) {
+      if (isSaneRow(row)) {
+        saneCount += 1;
+        score += 25;
+      } else {
+        score -= 4;
+      }
+
+      if (row.qty > 0 && row.rate > 0 && row.gross_value > 0) {
+        const impliedGross = row.qty * row.rate;
+        const grossRatio = row.gross_value / impliedGross;
+        const ratioDistance = Math.abs(Math.log(Math.max(grossRatio, 0.0001)));
+        score += Math.max(0, 10 - ratioDistance * 8);
+      }
+
+      const feeSum =
+        (row.brokerage || 0) +
+        (row.sec || 0) +
+        (row.cse_fees || 0) +
+        (row.cds_fees || 0) +
+        (row.stl || 0) +
+        (row.clearing_fee || 0) +
+        (row.foreign_br || 0);
+      if (row.gross_value > 0) {
+        const feeRatio = feeSum / row.gross_value;
+        if (feeRatio >= 0 && feeRatio <= 0.25) score += 4;
+        else score -= 3;
+      }
+    }
+
+    score += saneCount * 10;
+    return score;
+  }
+
+  function normalizeRowGrossAndNet(rows: ExtractedRow[]): ExtractedRow[] {
+    const valueFields: Array<keyof ExtractedRow> = [
+      "brokerage",
+      "cds_fees",
+      "cse_fees",
+      "sec",
+      "stl",
+      "clearing_fee",
+      "foreign_br",
+      "amount",
+    ];
+
+    return rows.map((row) => {
+      if (!(row.qty > 0 && row.rate > 0)) return row;
+
+      const impliedGross = row.qty * row.rate;
+      if (!Number.isFinite(impliedGross) || impliedGross <= 0) return row;
+
+      const grossRatio = row.gross_value / impliedGross;
+      let next = { ...row };
+
+      // If gross is clearly wrong, find the field closest to qty*rate and swap.
+      if (grossRatio < 0.7 || grossRatio > 1.3) {
+        let bestKey: keyof ExtractedRow | null = null;
+        let bestErr = Infinity;
+        for (const key of valueFields) {
+          const v = Number(next[key]) || 0;
+          if (v <= 0) continue;
+          const err = Math.abs(v - impliedGross) / Math.max(1, impliedGross);
+          if (err < bestErr) {
+            bestErr = err;
+            bestKey = key;
+          }
+        }
+        if (bestKey && bestErr <= 0.08) {
+          const originalGross = next.gross_value;
+          next.gross_value = Number(next[bestKey]) || 0;
+          (next as any)[bestKey] = originalGross;
+        }
+      }
+
+      // If net looks implausible, promote the best net-like candidate.
+      const net = next.amount || 0;
+      if (next.gross_value > 0 && (net < next.gross_value * 0.5 || net > next.gross_value * 1.5)) {
+        let bestNetKey: keyof ExtractedRow | null = null;
+        let bestNetDelta = Infinity;
+        for (const key of valueFields) {
+          const v = Number(next[key]) || 0;
+          if (v <= 0 || key === "amount") continue;
+          // Net in buy notes usually near gross (+fees). Use closeness to gross as conservative heuristic.
+          const delta = Math.abs(v - next.gross_value);
+          if (delta < bestNetDelta && v > next.gross_value * 0.8) {
+            bestNetDelta = delta;
+            bestNetKey = key;
+          }
+        }
+        if (bestNetKey) {
+          const originalNet = next.amount;
+          next.amount = Number(next[bestNetKey]) || 0;
+          (next as any)[bestNetKey] = originalNet;
+        }
+      }
+
+      return next;
+    });
+  }
+
+  function backfillBrokerageFromNet(
+    rows: ExtractedRow[],
+    noteType: "Buy" | "Sell" = "Buy",
+  ): ExtractedRow[] {
+    return rows.map((row) => {
+      if (row.brokerage > 0) return row;
+      if (!(row.gross_value > 0 && row.amount > 0)) return row;
+
+      const knownFees =
+        (row.sec || 0) +
+        (row.cse_fees || 0) +
+        (row.cds_fees || 0) +
+        (row.stl || 0) +
+        (row.clearing_fee || 0) +
+        (row.foreign_br || 0);
+
+      const grossToNetDelta =
+        noteType === "Sell"
+          ? row.gross_value - row.amount
+          : row.amount - row.gross_value;
+
+      const residualBrokerage = grossToNetDelta - knownFees;
+      if (!Number.isFinite(residualBrokerage) || residualBrokerage <= 0.01) {
+        return row;
+      }
+
+      return {
+        ...row,
+        brokerage: residualBrokerage,
+      };
+    });
+  }
+
+  function chooseBestRows(
+    candidates: Array<{ name: string; rows: ExtractedRow[] }>,
+    parserLog: string[],
+    txn: Transaction | null = null,
+  ): ExtractedRow[] {
+    // Strict candidate filter: reject candidates with implausible rates OR any row
+    // failing tight gross≈qty*rate consistency check.
+    const TIGHT_LO = 0.95;
+    const TIGHT_HI = 1.05;
+    const RATE_MIN = 0.1; // stock prices almost never below this; 0.02 is impossibly low
+    const RATE_MAX = 100000; // stock prices almost never above this
+
+    const acceptCandidates = candidates.filter((candidate) => {
+      const rows = candidate.rows || [];
+      if (rows.length === 0) return false;
+      
+      // Reject if ANY row has an implausible rate
+      for (const r of rows) {
+        if (r.rate < RATE_MIN || r.rate > RATE_MAX) {
+          parserLog.push(`${candidate.name}:rejected-implausible-rate(${r.rate})`);
+          return false;
+        }
+      }
+      
+      // Reject if ANY row fails tight gross≈qty*rate check (not just 25%)
+      for (const r of rows) {
+        if (!(r.qty > 0 && r.rate > 0 && r.gross_value > 0)) {
+          parserLog.push(`${candidate.name}:rejected-invalid-values`);
+          return false;
+        }
+        const implied = r.qty * r.rate;
+        if (implied <= 0) {
+          parserLog.push(`${candidate.name}:rejected-implied-zero`);
+          return false;
+        }
+        const ratio = r.gross_value / implied;
+        if (ratio < TIGHT_LO || ratio > TIGHT_HI) {
+          parserLog.push(`${candidate.name}:rejected-ratio-out-of-range(${ratio.toFixed(3)})`);
+          return false;
+        }
+      }
+      
+      return true;
+    });
+
+    const pool = acceptCandidates.length > 0 ? acceptCandidates : candidates;
+
+    const ranked = pool
+      .map((candidate) => ({
+        ...candidate,
+        score:
+          scoreParsedRows(candidate.rows) +
+          (txn ? scoreRowsAgainstTransaction(candidate.rows, txn) * 2 : 0),
+      }))
+      .sort((a, b) => b.score - a.score || b.rows.length - a.rows.length);
+
+    for (const candidate of ranked) {
+      // compute tight ratio stats for logging
+      const ratios: number[] = [];
+      let bad = 0;
+      for (const r of candidate.rows) {
+        if (r.qty > 0 && r.rate > 0 && r.gross_value > 0) {
+          const implied = r.qty * r.rate;
+          if (implied > 0) ratios.push(r.gross_value / implied);
+          else bad += 1;
+        } else bad += 1;
+      }
+      const n = candidate.rows.length;
+      const avg = ratios.length ? ratios.reduce((a,b)=>a+b,0)/ratios.length : NaN;
+      const sd = ratios.length ? Math.sqrt(ratios.map(x=>Math.pow(x-avg,2)).reduce((a,b)=>a+b,0)/ratios.length) : NaN;
+      const sample = candidate.rows[0]
+        ? `(${candidate.rows[0].qty}@${candidate.rows[0].rate}->${candidate.rows[0].gross_value})`
+        : "()";
+      parserLog.push(`${candidate.name}:rows=${n},bad=${bad},avgR=${Number.isFinite(avg)?avg.toFixed(3):"n/a"},sd=${Number.isFinite(sd)?sd.toFixed(3):"n/a"},sample=${sample},score=${candidate.score.toFixed(1)}`);
+    }
+
+    return ranked[0]?.rows ?? [];
+  }
+
+  function runParserRegressionFixtures() {
+    const fixtures = [
+      {
+        name: "normal-contract-note",
+        rawText:
+          "2026163340 100,000 DFCC.N0000 144.00 14,400,000.00 92,160.00 10,368.00 12,096.00 1,728.00 43,200.00 1,728.00 0.00 14,561,280.00",
+      },
+      {
+        name: "shifted-fees-contract-note",
+        rawText:
+          "2026163248 50,000 HNBF.N0000 8.50 425,000.00 1,275.00 2,720.00 357.00 306.00 2,550.00 51.00 0.00 429,760.00",
+      },
+      {
+        name: "huge-value-contract-note",
+        rawText:
+          "2026169999 100,000 DFCC.N0000 1,017,326.94 101,732,693,776.00 0.00 10,368.00 12,096.00 1,728.00 46,110,427,205,240.00 1,728.00 0.00 14,561,280.00",
+      },
+    ];
+
+    const summary = fixtures.map((fixture) => {
+      const parsed = parseRowsFromRawText(fixture.rawText);
+      const saneCount = parsed.filter(isSaneRow).length;
+      return {
+        name: fixture.name,
+        parsedRows: parsed.length,
+        saneRows: saneCount,
+        firstRow: parsed[0]
+          ? {
+              qty: parsed[0].qty,
+              rate: parsed[0].rate,
+              gross_value: parsed[0].gross_value,
+              amount: parsed[0].amount,
+            }
+          : null,
+      };
+    });
+
+    console.info("[buy-sell-note-parser] regression fixtures", summary);
   }
 
   function parseRowsByXColumns(
@@ -771,7 +1277,9 @@ export function BuyAndSellNotes() {
     for (let i = 0; i < combinedHeaderItems.length; i += 1) {
       const item = combinedHeaderItems[i];
       const s = item.str.toLowerCase().trim();
+      const prevStr = combinedHeaderItems[i - 1]?.str.toLowerCase().trim() || "";
       const nextStr = combinedHeaderItems[i + 1]?.str.toLowerCase().trim();
+      const next2Str = combinedHeaderItems[i + 2]?.str.toLowerCase().trim() || "";
       
       // Store the RIGHT EDGE of each header token (item.x + item.width).
       // For right-aligned columns, all data values end at the same X as the header's right edge,
@@ -801,6 +1309,11 @@ export function BuyAndSellNotes() {
         colX.rate = rx;
       }
       else if (s.startsWith("gross")) colX.gross = rx;
+      // "Gross Amount" appears as two separate tokens in many PDFs.
+      // Do not treat this Amount token as Net Amount.
+      else if (s === "amount" && prevStr === "gross") {
+        colX.gross = colX.gross ?? rx;
+      }
       else if (s.startsWith("brokerage")) colX.brokerage = rx;
       else if (s.startsWith("cds")) colX.cds = rx;
       else if (s.startsWith("cse") || s === "exchange") colX.cse = rx;
@@ -811,9 +1324,25 @@ export function BuyAndSellNotes() {
         colX.clearing = rx;
       }
       else if (s.startsWith("foreign")) colX.foreign = rx;
-      else if (s === "amount" || s === "net amount" || s === "netamount") colX.amount = rx;
+      else if (s === "netamount" || s === "net amount") colX.amount = rx;
+      else if (s === "net" && (nextStr === "amount" || nextStr === "amount.")) {
+        colX.amount = rx;
+      }
+      else if (
+        s === "amount" &&
+        (prevStr === "net" || prevStr === "netamount" || prevStr === "net amount")
+      ) {
+        colX.amount = rx;
+      }
+      else if (
+        s === "amount" &&
+        // Trade confirmation sometimes has only one amount column named Amount (net)
+        !colX.gross &&
+        (nextStr === "settlement" || next2Str === "settlement")
+      ) {
+        colX.amount = rx;
+      }
       else if (s === "settlement") colX.settlement = rx;
-      else if (s === "net") colX.amount = rx;
     }
 
     // Build Voronoi column boundaries sorted by X position.
@@ -1131,8 +1660,18 @@ export function BuyAndSellNotes() {
 
   async function extractFromPdf(file: File) {
     setIsExtracting(true);
+    setExtractionError("");
     try {
-      const { items, rawText } = await extractPdfText(file);
+      if (import.meta.env.DEV && !parserFixturesLogged) {
+        runParserRegressionFixtures();
+        setParserFixturesLogged(true);
+      }
+
+      const { items, rawText } = await withTimeout(
+        extractPdfText(file),
+        30000,
+        "PDF extraction timed out after 30 seconds",
+      );
       const grouped = groupIntoRows(items);
 
       // Extract security hint early for Trade Confirmation (security is in doc header, not per-row)
@@ -1144,25 +1683,128 @@ export function BuyAndSellNotes() {
       })();
 
       let rows: ExtractedRow[] = [];
+      const parserLog: string[] = [];
+      const selectedTxn =
+        transactions.find((t) => t.id === formData.transaction_id) || null;
+
       if (isTradeConfirmation(rawText)) {
-        // For Trade Confirmation, the X-position parser is most reliable since raw text is jumbled.
-        // Try it first, fall back to the regex parser, then the raw-text regex patterns.
-        rows = parseRowsByXColumns(items, securityHint);
-        if (rows.length === 0) rows = parseTradeConfirmationRows(rawText);
+        const xColRows = parseRowsByXColumns(items, securityHint);
+        const tcRows = parseTradeConfirmationRows(rawText);
+        rows = chooseBestRows(
+          [
+            { name: "TC:XCol", rows: xColRows },
+            { name: "TC:Raw", rows: tcRows },
+          ],
+          parserLog,
+            selectedTxn,
+        );
+      } else {
+        const xColRows = parseRowsByXColumns(items, securityHint);
+        const rawRows = parseRowsFromRawText(rawText);
+        const groupedRows = parseBoughtNoteRows(grouped);
+        rows = chooseBestRows(
+          [
+            { name: "BN:XCol", rows: xColRows },
+            { name: "BN:RawText", rows: rawRows },
+            { name: "BN:Bought", rows: groupedRows },
+          ],
+          parserLog,
+          selectedTxn,
+        );
       }
-      if (rows.length === 0) rows = parseBoughtNoteRows(grouped);
-      if (rows.length === 0) rows = parseRowsByXColumns(items);
-      if (rows.length === 0) rows = parseRowsFromRawText(rawText);
+
+      const inferredNoteType: "Buy" | "Sell" =
+        /\bSOLD\s*Note\b|\bSale\s+of\b|\bSold\b/i.test(rawText)
+          ? "Sell"
+          : "Buy";
+      rows = normalizeRowGrossAndNet(rows);
+      rows = backfillBrokerageFromNet(
+        rows,
+        inferredNoteType,
+      );
+      rows = remapShiftedFeeColumns(rows, selectedTxn);
+
+      if (rows.length > 0) {
+        const r = rows[0];
+        parserLog.push(`First: q=${r.qty} r=${r.rate} g=${r.gross_value} a=${r.amount}`);
+      }
+
+      // Remove totals rows: detect by signature (qty >> 10,000 AND rate < 1)
+      // This catches totals rows with impossibly low rates (e.g., 0.02)
+      // even when data rows are small (e.g., 204 @ 34.50)
+      if (rows.length > 1) {
+        const originalLen = rows.length;
+        rows = rows.filter((row) => {
+          // Totals rows have: very high qty + impossibly low rate
+          // Data rows have: plausible qty + plausible rate
+          const isLikelyTotalsRow = row.qty > 10000 && row.rate < 1;
+          if (isLikelyTotalsRow) {
+            parserLog.push(`Removed totals-row(qty=${row.qty} rate=${row.rate})`);
+          }
+          return !isLikelyTotalsRow;
+        });
+        if (rows.length < originalLen) {
+          parserLog.push(`After totals-filter: ${rows.length}/${originalLen} rows remain`);
+        }
+      }
+
+      const saneRows = rows.filter(isSaneRow);
+      parserLog.push(`Sane: ${saneRows.length}/${rows.length}`);
+      if (saneRows.length > 0) rows = saneRows;
+
+      const parserTraceText = parserLog.join(" | ");
+      setParserTrace(parserTraceText);
+      console.info("[buy-sell-note-parser]", parserTraceText);
 
       if (rows.length === 0) {
         console.warn("PDF raw text (no rows parsed):", rawText);
+        setExtractionError(
+          "Could not detect valid transaction rows from this PDF. Please try another note format or map manually.",
+        );
         setDebugRawText(rawText);
+        setParserTrace("");
         setExtractedRows([]);
         return;
       }
       setDebugRawText("");
 
       const header = extractHeader(rawText, grouped, rows);
+
+      const noteType = (header.note_type || "").toLowerCase();
+      const typeOk = (t: Transaction) =>
+        !noteType || t.transaction_type?.toLowerCase() === noteType;
+
+      // Group rows by security ticker and sum their quantities
+      const securityTotals: Record<string, number> = {};
+      for (const row of rows) {
+        const ticker = row.security.split(".")[0].toUpperCase();
+        securityTotals[ticker] = (securityTotals[ticker] || 0) + row.qty;
+      }
+
+      // Try to auto-map to a single transaction using total qty per security
+      let bestCandidate: Transaction | undefined;
+      let bestCandidateScore = Number.NEGATIVE_INFINITY;
+      for (const [ticker, totalQty] of Object.entries(securityTotals)) {
+        const share = shares.find((s) => s.ticker?.toUpperCase() === ticker);
+        // Only auto-map when we can confirm the share exists in the system
+        if (!share) continue;
+        const shareOk = (t: Transaction) => t.share_id === share.id;
+        const candidates = transactions.filter((t) => shareOk(t) && typeOk(t));
+
+        for (const candidate of candidates) {
+          const txnShares = Number(candidate.no_of_shares) || 0;
+          const qtyBonus = Math.abs(txnShares - totalQty) < 0.01 ? 40 : 0;
+          const totalScore = scoreRowsAgainstTransaction(rows, candidate) + qtyBonus;
+          if (totalScore > bestCandidateScore) {
+            bestCandidateScore = totalScore;
+            bestCandidate = candidate;
+          }
+        }
+      }
+
+      // Second-pass correction: once we know the best mapped transaction,
+      // remap shifted fee columns and recompute totals.
+      rows = remapShiftedFeeColumns(rows, bestCandidate || null);
 
       // Backfill security ticker into Trade Confirmation rows (it's in the doc header, not per-row)
       if (header.security || securityHint) {
@@ -1213,35 +1855,6 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
-      const noteType = (extracted.note_type || "").toLowerCase();
-      const typeOk = (t: Transaction) =>
-        !noteType || t.transaction_type?.toLowerCase() === noteType;
-
-      // Group rows by security ticker and sum their quantities
-      const securityTotals: Record<string, number> = {};
-      for (const row of rows) {
-        const ticker = row.security.split(".")[0].toUpperCase();
-        securityTotals[ticker] = (securityTotals[ticker] || 0) + row.qty;
-      }
-
-      // Try to auto-map to a single transaction using total qty per security
-      let bestCandidate: Transaction | undefined;
-      for (const [ticker, totalQty] of Object.entries(securityTotals)) {
-        const share = shares.find((s) => s.ticker?.toUpperCase() === ticker);
-        // Only auto-map when we can confirm the share exists in the system
-        if (!share) continue;
-        const shareOk = (t: Transaction) => t.share_id === share.id;
-        // Prefer exact total qty match, then any matching share+type
-        bestCandidate =
-          transactions.find(
-            (t) =>
-              shareOk(t) &&
-              typeOk(t) &&
-              Math.abs(Number(t.no_of_shares) - totalQty) < 0.01,
-          ) || transactions.find((t) => shareOk(t) && typeOk(t));
-        if (bestCandidate) break;
-      }
-
       setFormData((prev) => ({
         ...prev,
         transaction_id: bestCandidate?.id || "",
@@ -1249,7 +1862,14 @@ export function BuyAndSellNotes() {
       }));
     } catch (err) {
       console.error("PDF extraction failed", err);
-      alert("Failed to read the PDF. Please try another file.");
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Failed to read the PDF. Please try another file.";
+      setExtractionError(msg);
+      setExtractedRows([]);
+      setDebugRawText("");
+      alert(`PDF extraction failed: ${msg}`);
     } finally {
       setIsExtracting(false);
     }
@@ -1306,6 +1926,175 @@ export function BuyAndSellNotes() {
     };
   }
 
+  function scoreRowsAgainstTransaction(rows: ExtractedRow[], txn: Transaction) {
+    if (rows.length === 0) return Number.NEGATIVE_INFINITY;
+
+    const expectedShares = Number(txn.no_of_shares) || 0;
+    const expectedGross =
+      Number(txn.total_amount_gross) > 0
+        ? Number(txn.total_amount_gross)
+        : expectedShares * (Number(txn.price_per_share) || 0);
+    const expectedAvgPrice = Number(txn.price_per_share) || 0;
+    const expectedNet = Number(txn.total_amount) || 0;
+    const expectedFees = getExpectedFees(txn);
+
+    const pdfShares = rows.reduce((sum, row) => sum + row.qty, 0);
+    const pdfGross = rows.reduce((sum, row) => sum + row.gross_value, 0);
+    const pdfBrokerage = rows.reduce((sum, row) => sum + row.brokerage, 0);
+    const pdfSec = rows.reduce((sum, row) => sum + row.sec, 0);
+    const pdfExchange = rows.reduce((sum, row) => sum + row.cse_fees, 0);
+    const pdfCds = rows.reduce((sum, row) => sum + row.cds_fees, 0);
+    const pdfStl = rows.reduce((sum, row) => sum + row.stl, 0);
+    const pdfClearing = rows.reduce((sum, row) => sum + row.clearing_fee, 0);
+    const pdfNet = rows.reduce((sum, row) => sum + row.amount, 0);
+    const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
+
+    const relError = (actual: number, expected: number) => {
+      if (!Number.isFinite(actual) || !Number.isFinite(expected)) return 1;
+      if (expected === 0) return actual === 0 ? 0 : 1;
+      return Math.abs(actual - expected) / Math.max(1, Math.abs(expected));
+    };
+
+    let score = 0;
+    score += Math.max(0, 120 - relError(pdfShares, expectedShares) * 120);
+    score += Math.max(0, 120 - relError(pdfGross, expectedGross) * 120);
+    score += Math.max(0, 80 - relError(pdfAvgPrice, expectedAvgPrice) * 80);
+    score += Math.max(0, 100 - relError(pdfNet, expectedNet) * 100);
+    score += Math.max(0, 70 - relError(pdfBrokerage, expectedFees.brokerage) * 70);
+    score += Math.max(0, 50 - relError(pdfSec, expectedFees.sec) * 50);
+    score += Math.max(0, 50 - relError(pdfExchange, expectedFees.exchange) * 50);
+    score += Math.max(0, 50 - relError(pdfCds, expectedFees.cds) * 50);
+    score += Math.max(0, 50 - relError(pdfStl, expectedFees.gov_cess) * 50);
+    score += Math.max(0, 50 - relError(pdfClearing, expectedFees.clearing_fees) * 50);
+
+    if (pdfShares > 0 && expectedShares > 0 && Math.abs(pdfShares - expectedShares) < 0.01) {
+      score += 50;
+    }
+
+    return score;
+  }
+
+  function isParserCorruptRows(rows: ExtractedRow[]) {
+    if (rows.length === 0) return true;
+
+    const pdfShares = rows.reduce((s, r) => s + r.qty, 0);
+    const pdfGross = rows.reduce((s, r) => s + r.gross_value, 0);
+
+    return pdfShares <= 0 || pdfGross <= 0;
+  }
+
+  function remapShiftedFeeColumns(
+    rows: ExtractedRow[],
+    txn: Transaction | null,
+  ): ExtractedRow[] {
+    if (!txn || rows.length === 0) return rows;
+
+    const expectedShares = Number(txn.no_of_shares) || 0;
+    const expectedGross = expectedShares * (Number(txn.price_per_share) || 0);
+    if (expectedGross <= 0) return rows;
+
+    const expectedFees = getExpectedFees(txn);
+    const feeKeys: Array<
+      "brokerage" | "sec" | "cse_fees" | "cds_fees" | "stl" | "clearing_fee"
+    > = ["brokerage", "sec", "cse_fees", "cds_fees", "stl", "clearing_fee"];
+
+    const expectedByKey: Record<(typeof feeKeys)[number], number> = {
+      brokerage: expectedFees.brokerage,
+      sec: expectedFees.sec,
+      cse_fees: expectedFees.exchange,
+      cds_fees: expectedFees.cds,
+      stl: expectedFees.gov_cess,
+      clearing_fee: expectedFees.clearing_fees,
+    };
+    const actualByKey: Record<(typeof feeKeys)[number], number> = {
+      brokerage: rows.reduce((s, r) => s + (r.brokerage || 0), 0),
+      sec: rows.reduce((s, r) => s + (r.sec || 0), 0),
+      cse_fees: rows.reduce((s, r) => s + (r.cse_fees || 0), 0),
+      cds_fees: rows.reduce((s, r) => s + (r.cds_fees || 0), 0),
+      stl: rows.reduce((s, r) => s + (r.stl || 0), 0),
+      clearing_fee: rows.reduce((s, r) => s + (r.clearing_fee || 0), 0),
+    };
+
+    const relErr = (a: number, e: number) => {
+      if (e === 0) return Math.abs(a);
+      return Math.abs(a - e) / Math.max(1, Math.abs(e));
+    };
+
+    const identityCost = feeKeys.reduce(
+      (sum, k) => sum + relErr(actualByKey[k], expectedByKey[k]),
+      0,
+    );
+    if (!Number.isFinite(identityCost) || identityCost <= 0) return rows;
+
+    const permutations: (typeof feeKeys)[] = [];
+    const build = (
+      prefix: (typeof feeKeys)[number][],
+      rest: (typeof feeKeys)[number][],
+    ) => {
+      if (rest.length === 0) {
+        permutations.push(prefix as typeof feeKeys);
+        return;
+      }
+      for (let i = 0; i < rest.length; i += 1) {
+        build(
+          [...prefix, rest[i]],
+          [...rest.slice(0, i), ...rest.slice(i + 1)],
+        );
+      }
+    };
+    build([], [...feeKeys]);
+
+    let bestPerm: (typeof feeKeys) | null = null;
+    let bestCost = identityCost;
+    for (const perm of permutations) {
+      let cost = 0;
+      for (let i = 0; i < feeKeys.length; i += 1) {
+        const target = feeKeys[i];
+        const source = perm[i];
+        cost += relErr(actualByKey[source], expectedByKey[target]);
+      }
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestPerm = perm;
+      }
+    }
+
+    if (!bestPerm) return rows;
+    const improvement = (identityCost - bestCost) / identityCost;
+    if (!Number.isFinite(improvement) || improvement < 0.35) return rows;
+
+    return rows.map((row) => {
+      const source: Record<(typeof feeKeys)[number], number> = {
+        brokerage: row.brokerage || 0,
+        sec: row.sec || 0,
+        cse_fees: row.cse_fees || 0,
+        cds_fees: row.cds_fees || 0,
+        stl: row.stl || 0,
+        clearing_fee: row.clearing_fee || 0,
+      };
+      const mapped: Record<(typeof feeKeys)[number], number> = {
+        brokerage: 0,
+        sec: 0,
+        cse_fees: 0,
+        cds_fees: 0,
+        stl: 0,
+        clearing_fee: 0,
+      };
+      for (let i = 0; i < feeKeys.length; i += 1) {
+        mapped[feeKeys[i]] = source[bestPerm[i]];
+      }
+      return {
+        ...row,
+        brokerage: mapped.brokerage,
+        sec: mapped.sec,
+        cse_fees: mapped.cse_fees,
+        cds_fees: mapped.cds_fees,
+        stl: mapped.stl,
+        clearing_fee: mapped.clearing_fee,
+      };
+    });
+  }
+
   function validateExtractedData() {
     const issues: string[] = [];
     const compare: Record<string, FieldCompare> = {};
@@ -1318,24 +2107,44 @@ export function BuyAndSellNotes() {
     }
 
     const txn = transactions.find((t) => t.id === formData.transaction_id);
+    const rowsForValidation = txn
+      ? remapShiftedFeeColumns(
+          backfillBrokerageFromNet(
+            normalizeRowGrossAndNet(extractedRows),
+            (extractedData.note_type || "Buy") as "Buy" | "Sell",
+          ),
+          txn,
+        )
+      : extractedRows;
 
     if (txn) {
       const expectedShares = Number(txn.no_of_shares) || 0;
-      const expectedGross = expectedShares * (Number(txn.price_per_share) || 0);
+      const expectedGross =
+        Number(txn.total_amount_gross) > 0
+          ? Number(txn.total_amount_gross)
+          : expectedShares * (Number(txn.price_per_share) || 0);
       const expectedFees = getExpectedFees(txn);
       const expectedAvgPrice = Number(txn.price_per_share) || 0;
       const expectedNet = Number(txn.total_amount) || 0;
 
-      const pdfShares = extractedRows.reduce((s, r) => s + r.qty, 0);
-      const pdfGross = extractedRows.reduce((s, r) => s + r.gross_value, 0);
-      const pdfBrokerage = extractedRows.reduce((s, r) => s + r.brokerage, 0);
-      const pdfSec = extractedRows.reduce((s, r) => s + r.sec, 0);
-      const pdfExchange = extractedRows.reduce((s, r) => s + r.cse_fees, 0);
-      const pdfCds = extractedRows.reduce((s, r) => s + r.cds_fees, 0);
-      const pdfStl = extractedRows.reduce((s, r) => s + r.stl, 0);
-      const pdfClearing = extractedRows.reduce((s, r) => s + r.clearing_fee, 0);
+      const pdfShares = rowsForValidation.reduce((s, r) => s + r.qty, 0);
+      const pdfGross = rowsForValidation.reduce((s, r) => s + r.gross_value, 0);
+      const pdfBrokerage = rowsForValidation.reduce((s, r) => s + r.brokerage, 0);
+      const pdfSec = rowsForValidation.reduce((s, r) => s + r.sec, 0);
+      const pdfExchange = rowsForValidation.reduce((s, r) => s + r.cse_fees, 0);
+      const pdfCds = rowsForValidation.reduce((s, r) => s + r.cds_fees, 0);
+      const pdfStl = rowsForValidation.reduce((s, r) => s + r.stl, 0);
+      const pdfClearing = rowsForValidation.reduce((s, r) => s + r.clearing_fee, 0);
       const pdfAvgPrice = pdfShares > 0 ? pdfGross / pdfShares : 0;
-      const pdfNet = extractedRows.reduce((s, r) => s + r.amount, 0);
+      const pdfNet = rowsForValidation.reduce((s, r) => s + r.amount, 0);
+
+      const parserLooksCorrupt = isParserCorruptRows(rowsForValidation);
+
+      if (parserLooksCorrupt) {
+        issues.push(
+          "PDF values look mis-parsed (column shift/token merge). Please re-upload or map manually.",
+        );
+      }
 
       const check = (
         key: string,
@@ -1348,16 +2157,18 @@ export function BuyAndSellNotes() {
           matches: Math.abs(actual - expected) <= tolerance,
         };
       };
+      // When price/share is rounded in transactions, gross/net can differ slightly from PDF line-level sums.
+      const roundingTolerance = Math.max(1, expectedShares * 0.005);
       check("no_of_shares", pdfShares, expectedShares, 0.01);
-      check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.01);
-      check("gross_amount", pdfGross, expectedGross, 0.5);
+      check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.05);
+      check("gross_amount", pdfGross, expectedGross, roundingTolerance);
       check("brokerage", pdfBrokerage, expectedFees.brokerage, 1);
       check("sec", pdfSec, expectedFees.sec, 1);
       check("exchange", pdfExchange, expectedFees.exchange, 1);
       check("cds", pdfCds, expectedFees.cds, 1);
       check("gov_cess", pdfStl, expectedFees.gov_cess, 1);
       check("clearing_fees", pdfClearing, expectedFees.clearing_fees, 1);
-      check("net_amount", pdfNet, expectedNet, 1);
+      check("net_amount", pdfNet, expectedNet, roundingTolerance);
     }
 
     setFieldCompare(compare);
@@ -1365,14 +2176,64 @@ export function BuyAndSellNotes() {
     return issues.length === 0;
   }
 
+  function hasParserMismatchIssue() {
+    return validationIssues.some((issue) =>
+      issue.includes("mis-parsed (column shift/token merge)"),
+    );
+  }
+
   function handleProcessClick() {
     if (!uploadedFile) {
       alert("Please upload a PDF first");
       return;
     }
-    if (extractedRows.length === 0) {
-      alert("Please wait for PDF extraction to complete");
+    if (isExtracting) {
+      alert("PDF extraction is still running. Please wait until it finishes.");
       return;
+    }
+    if (extractedRows.length === 0) {
+      alert(
+        extractionError ||
+          "No extracted data found for this PDF. Please re-upload and try again.",
+      );
+      return;
+    }
+    const txn = transactions.find((t) => t.id === formData.transaction_id);
+    if (txn) {
+      const repairedRows = remapShiftedFeeColumns(
+        backfillBrokerageFromNet(
+          normalizeRowGrossAndNet(extractedRows),
+          (extractedData.note_type || "Buy") as "Buy" | "Sell",
+        ),
+        txn,
+      );
+      const totalShares = repairedRows.reduce((s, r) => s + r.qty, 0);
+      const totalGross = repairedRows.reduce((s, r) => s + r.gross_value, 0);
+      const totalBrokerage = repairedRows.reduce((s, r) => s + r.brokerage, 0);
+      const totalSec = repairedRows.reduce((s, r) => s + r.sec, 0);
+      const totalExchange = repairedRows.reduce((s, r) => s + r.cse_fees, 0);
+      const totalCds = repairedRows.reduce((s, r) => s + r.cds_fees, 0);
+      const totalStl = repairedRows.reduce((s, r) => s + r.stl, 0);
+      const totalClearing = repairedRows.reduce((s, r) => s + r.clearing_fee, 0);
+      const totalForeign = repairedRows.reduce((s, r) => s + r.foreign_br, 0);
+      const totalNet = repairedRows.reduce((s, r) => s + r.amount, 0);
+      const avgRate = totalShares > 0 ? totalGross / totalShares : 0;
+
+      setExtractedRows(repairedRows);
+      setExtractedData((prev) => ({
+        ...prev,
+        no_of_shares: String(totalShares),
+        price_avg: avgRate.toFixed(2),
+        gross_amount: totalGross.toFixed(2),
+        brokerage: totalBrokerage.toFixed(2),
+        sec: totalSec.toFixed(2),
+        exchange: totalExchange.toFixed(2),
+        cds: totalCds.toFixed(2),
+        gov_cess: totalStl.toFixed(2),
+        clearing_fees: totalClearing.toFixed(2),
+        net_amount: totalNet.toFixed(2),
+        foreign_brokerage: totalForeign.toFixed(2),
+      }));
     }
     validateExtractedData();
     setShowProcessModal(true);
@@ -1414,7 +2275,6 @@ export function BuyAndSellNotes() {
   }
 
   function buildNotePayload(
-    selectedTransaction: Transaction,
     noteType: "Buy" | "Sell",
     status: string,
     hasMismatch: boolean,
@@ -1496,7 +2356,6 @@ export function BuyAndSellNotes() {
         ? await uploadNoteFile(uploadedFile)
         : null;
       const { payload, totalNet, contractNo } = buildNotePayload(
-        selectedTransaction,
         noteType,
         "PROCESSED",
         !allMatch,
@@ -1581,7 +2440,6 @@ export function BuyAndSellNotes() {
         ? await uploadNoteFile(uploadedFile)
         : null;
       const { payload } = buildNotePayload(
-        selectedTransaction,
         noteType,
         "PENDING_APPROVAL",
         true,
@@ -1965,23 +2823,6 @@ export function BuyAndSellNotes() {
     return matchesSearch && matchesDateFrom && matchesDateTo && matchesType;
   });
 
-  const availableEntityAccounts =
-    formData.broker_id && formData.transaction_id
-      ? (() => {
-          const transaction = transactions.find(
-            (t) => t.id === formData.transaction_id,
-          );
-          if (!transaction) return [];
-          const entity = entities.find((e) => e.id === transaction.entity_id);
-          if (!entity) return [];
-          return entityBrokers.filter(
-            (eb) =>
-              eb.entity_id === entity.entity_id &&
-              eb.broker_id === formData.broker_id,
-          );
-        })()
-      : [];
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -2124,9 +2965,6 @@ export function BuyAndSellNotes() {
                 const noteShare = matchedTxn
                   ? shares.find((s) => s.id === matchedTxn.share_id)
                   : undefined;
-                const noteBroker = note.broker_id
-                  ? brokers.find((b) => b.id === note.broker_id)
-                  : null;
                 const noteStatus = note.status || "PROCESSED";
                 const isExpanded = expandedNoteId === note.id;
 
@@ -2599,7 +3437,6 @@ export function BuyAndSellNotes() {
                 const selEntity = entities.find(
                   (e) => e.id === selTxn.entity_id,
                 );
-                const selShare = shares.find((s) => s.id === selTxn.share_id);
                 const selBroker = formData.broker_id
                   ? brokers.find((b) => b.id === formData.broker_id)
                   : null;
@@ -2755,6 +3592,12 @@ export function BuyAndSellNotes() {
                       {uploadedFile.name} — {extractedRows.length} line item
                       {extractedRows.length === 1 ? "" : "s"} extracted
                     </span>
+                  </div>
+                )}
+                {uploadedFile && !isExtracting && extractionError && (
+                  <div className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>{extractionError}</span>
                   </div>
                 )}
                 {uploadedFile &&
@@ -3148,7 +3991,7 @@ export function BuyAndSellNotes() {
                             </thead>
                             <tbody className="divide-y divide-gray-100">
                               {extractedRows.map((row, idx) => (
-                                <tr key={idx} className="hover:bg-gray-50">
+                                <tr key={(row as any).contract_no ?? `row-${idx}`} className="hover:bg-gray-50">
                                   <td className="px-3 py-2 text-gray-700 font-mono">
                                     {row.contract_no}
                                   </td>
@@ -3376,8 +4219,33 @@ export function BuyAndSellNotes() {
                     const anyMismatch = Object.values(fieldCompare).some(
                       (c) => !c.matches,
                     );
+                    const parserMismatchIssue = hasParserMismatchIssue();
+                    const hasParserTrace = parserTrace.trim().length > 0;
                     return (
                       <div className="pt-4 border-t border-gray-200 space-y-3">
+                        {hasParserTrace && (
+                          <details className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-xs text-slate-700">
+                            <summary className="cursor-pointer font-semibold text-slate-800">
+                              Parser trace
+                            </summary>
+                            <p className="mt-2 font-mono whitespace-pre-wrap leading-5">
+                              {parserTrace}
+                            </p>
+                          </details>
+                        )}
+                        {parserMismatchIssue && (
+                          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
+                            <div>
+                              <p className="font-semibold">
+                                PDF parser mismatch detected
+                              </p>
+                              <p className="mt-0.5">
+                                This upload looks corrupted by column shift or token merge. Re-upload the PDF or use manual entry.
+                              </p>
+                            </div>
+                          </div>
+                        )}
                         {anyMismatch && (
                           <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
                             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
@@ -3420,7 +4288,7 @@ export function BuyAndSellNotes() {
                             <button
                               type="button"
                               onClick={handleSendForApproval}
-                              disabled={isProcessing}
+                              disabled={isProcessing || parserMismatchIssue}
                               className="px-5 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors flex items-center space-x-2 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               <AlertTriangle className="w-4 h-4" />
@@ -3434,7 +4302,7 @@ export function BuyAndSellNotes() {
                             <button
                               type="button"
                               onClick={handleApproval}
-                              disabled={isProcessing}
+                              disabled={isProcessing || parserMismatchIssue}
                               className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2 text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                               <CheckCircle className="w-4 h-4" />
@@ -3706,7 +4574,7 @@ export function BuyAndSellNotes() {
                         row.settlement_date;
                       return (
                         <tr
-                          key={idx}
+                          key={(row as any).contract_no ?? `manual-${idx}`}
                           className={`border-b border-gray-200 ${rowReady ? "bg-white" : "bg-gray-50"}`}
                         >
                           <td className="px-2 py-1.5 text-gray-400 text-center">

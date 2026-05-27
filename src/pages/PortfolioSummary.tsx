@@ -1,4 +1,4 @@
-import { ArrowUpDown, Download, FileText, Filter, Calendar } from 'lucide-react';
+import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -82,7 +82,7 @@ export function PortfolioSummary() {
         shareMap.set(s.id, {
           ticker: s.ticker,
           name: s.share_name,
-          sector: s.sector_types?.name || 'N/A'
+          sector: s.sector_types?.[0]?.name || 'N/A'
         });
       });
 

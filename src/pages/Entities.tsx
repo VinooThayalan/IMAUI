@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, MoreVertical, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
+import { Plus, Search, Filter, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -117,6 +117,7 @@ export function Entities() {
     bank_branch_id: '',
     currency: 'LKR',
     bank_account_number: '',
+    facility_limit: '',
     broker_name_id: '',
     broker_text: ''
   });

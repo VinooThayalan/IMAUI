@@ -1,4 +1,4 @@
-import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, TrendingUp } from 'lucide-react';
+import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -519,8 +519,6 @@ export function Reports() {
         const shares = Number(tx.no_of_shares);
         const price = Number(tx.price_per_share);
         const totalAmount = Number(tx.total_amount);
-        const fees = Number(tx.fees) || 0;
-
         const newBalance = isBuy ? currentBalance + shares : currentBalance - shares;
         const newCost = isBuy ? currentCost + totalAmount : currentCost - (currentBalance > 0 ? (currentCost / currentBalance) * shares : 0);
 

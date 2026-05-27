@@ -1,4 +1,4 @@
-import { Plus, Search, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark } from 'lucide-react';
+import { Plus, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -174,8 +174,6 @@ export function CashBalance() {
   }
 
   const totalBalance = entities.reduce((sum, entity) => sum + entity.current_balance, 0);
-  const totalODLimit = entities.reduce((sum, entity) => sum + entity.od_limit, 0);
-
   const filteredTransactions = (() => {
     let filtered = transactions;
 
@@ -423,9 +421,9 @@ export function CashBalance() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredTransactions.map((transaction, index) => {
+              {filteredTransactions.map((transaction) => {
                 const entity = entities.find(e => e.id === transaction.entity_id);
-                const bank = getBankById(transaction.bank_id);
+                const bank = getBankById(transaction.bank_id || null);
 
                 const sortedTransactions = [...filteredTransactions].sort((a, b) =>
                   new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()

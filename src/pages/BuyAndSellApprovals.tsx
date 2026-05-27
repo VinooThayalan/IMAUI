@@ -122,13 +122,13 @@ export function BuyAndSellApprovals() {
 
   function getDetails(note: BuyAndSellNote) {
     const txn = transactions.find(t => t.id === note.transaction_id);
-    const entity = txn ? entities.find(e => e.id === txn.entity_id) : null;
-    const share = txn ? shares.find(s => s.id === txn.share_id) : null;
-    const broker = note.broker_id ? brokers.find(b => b.id === note.broker_id) : null;
+    const entity = txn ? (entities.find(e => e.id === txn.entity_id) ?? null) : null;
+    const share = txn ? (shares.find(s => s.id === txn.share_id) ?? null) : null;
+    const broker = note.broker_id ? (brokers.find(b => b.id === note.broker_id) ?? null) : null;
     const eb = entity && note.broker_id
-      ? entityBrokers.find(e => e.entity_id === entity.id && e.broker_id === note.broker_id)
+      ? (entityBrokers.find(e => e.entity_id === entity.id && e.broker_id === note.broker_id) ?? null)
       : null;
-    return { txn, entity, share, broker, eb };
+    return { entity, share, broker, eb };
   }
 
   function openModal(note: BuyAndSellNote, action: ModalAction) {
@@ -200,7 +200,7 @@ export function BuyAndSellApprovals() {
     if (!selectedNote) return;
     setIsSubmitting(true);
     try {
-      const { txn, entity, share, broker } = getDetails(selectedNote);
+      const { entity, share, broker } = getDetails(selectedNote);
       if (!entity) throw new Error('Entity not found for this note');
 
       const reviewedAt = new Date().toISOString();

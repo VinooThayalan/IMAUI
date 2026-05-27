@@ -16,7 +16,7 @@ interface EntityRow {
   entity_id: string | null;
   name: string;
   type: string;
-  entity_types: { name: string } | null;
+  entity_types: { name: string }[] | null;
 }
 
 interface UserEntityAccess {
@@ -420,7 +420,7 @@ export function EntityAccess() {
                           <div>
                             <p className="text-sm font-medium text-gray-900">{entity.name}</p>
                             <p className="text-xs text-gray-500">
-                              {entity.entity_id} - {entity.entity_types?.name || entity.type}
+                              {entity.entity_id} - {entity.entity_types?.[0]?.name || entity.type}
                             </p>
                           </div>
                         </div>

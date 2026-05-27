@@ -15,16 +15,8 @@ interface SectorType {
   };
 }
 
-interface IndustryType {
-  id: string;
-  industry_id: string;
-  industry_name: string;
-  is_active: boolean;
-}
-
 export function SectorTypes() {
   const [sectors, setSectors] = useState<SectorType[]>([]);
-  const [industries, setIndustries] = useState<IndustryType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingSector, setEditingSector] = useState<SectorType | null>(null);
   const [formData, setFormData] = useState({
@@ -37,7 +29,6 @@ export function SectorTypes() {
 
   useEffect(() => {
     fetchSectors();
-    fetchIndustries();
   }, []);
 
   async function fetchSectors() {
@@ -54,21 +45,6 @@ export function SectorTypes() {
       console.error('Error fetching sectors:', error);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function fetchIndustries() {
-    try {
-      const { data, error } = await supabase
-        .from('industry_types')
-        .select('*')
-        .eq('is_active', true)
-        .order('industry_name');
-
-      if (error) throw error;
-      setIndustries(data || []);
-    } catch (error) {
-      console.error('Error fetching industries:', error);
     }
   }
 
