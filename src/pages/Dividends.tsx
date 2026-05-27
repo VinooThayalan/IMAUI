@@ -548,7 +548,7 @@ export function Dividends() {
                           >
                             <option value="">Select bank...</option>
                             {entityBanks.map(b => (
-                              <option key={b.id} value={b.id}>{b.name}</option>
+                              <option key={b.id} value={b.id}>{b.name}{b.account_number ? ` — ${b.account_number}` : ''}</option>
                             ))}
                           </select>
                           {!formData.entity_id && (
