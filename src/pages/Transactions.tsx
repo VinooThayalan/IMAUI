@@ -781,12 +781,17 @@ export function Transactions() {
         ))
       )
     );
+    const fallbackEntityBroker = !transaction.broker_id && !entityBroker?.broker_id
+      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
+      : null;
     const cdsAccount = transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A';
     const brokerName = transaction.broker_id
       ? getBrokerName(transaction.broker_id)
       : entityBroker?.broker_id
         ? getBrokerName(entityBroker.broker_id)
-        : (entityBroker as any)?.broker_text || 'N/A';
+        : fallbackEntityBroker?.broker_id
+          ? getBrokerName(fallbackEntityBroker.broker_id)
+          : (entityBroker as any)?.broker_text || 'N/A';
     const currentDate = new Date().toLocaleDateString();
 
     const html = `
@@ -990,12 +995,17 @@ export function Transactions() {
           ))
         )
       );
+      const fallbackEntityBroker = !selectedTransaction.broker_id && !entityBroker?.broker_id
+        ? entityBrokers.find(eb => eb.entity_id === selectedTransaction.entity_id && eb.broker_id)
+        : null;
 
       const brokerName = selectedTransaction.broker_id
         ? getBrokerName(selectedTransaction.broker_id)
         : entityBroker?.broker_id
           ? getBrokerName(entityBroker.broker_id)
-          : (entityBroker as any)?.broker_text || 'N/A';
+          : fallbackEntityBroker?.broker_id
+            ? getBrokerName(fallbackEntityBroker.broker_id)
+            : (entityBroker as any)?.broker_text || 'N/A';
 
       const transactionData = {
         entity: entityName,
@@ -1067,13 +1077,18 @@ export function Transactions() {
         ))
       )
     );
+    const fallbackEntityBroker = !transaction.broker_id && !entityBroker?.broker_id
+      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
+      : null;
 
-    // Resolve broker name: direct FK → entity_broker FK → broker_text fallback
+    // Resolve broker name: direct FK → entity_broker FK → any entity broker → broker_text fallback
     const brokerName = transaction.broker_id
       ? getBrokerName(transaction.broker_id)
       : entityBroker?.broker_id
         ? getBrokerName(entityBroker.broker_id)
-        : (entityBroker as any)?.broker_text || 'N/A';
+        : fallbackEntityBroker?.broker_id
+          ? getBrokerName(fallbackEntityBroker.broker_id)
+          : (entityBroker as any)?.broker_text || 'N/A';
 
     return {
       entity: entityName,
