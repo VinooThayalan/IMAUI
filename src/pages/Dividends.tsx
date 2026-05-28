@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, Wallet, TrendingUp, Calendar } from 'lucide-react';
+import { Plus, Search, Filter, Wallet, TrendingUp, Calendar, Pencil, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -74,6 +74,8 @@ const EMPTY_FORM = {
 
 export function Dividends() {
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dividends, setDividends] = useState<Dividend[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -85,7 +87,6 @@ export function Dividends() {
 
   useEffect(() => { loadData(); }, []);
 
-  // Auto-calculate net_dividend_per_share when gross or WHT rate changes
   useEffect(() => {
     const gross = parseFloat(formData.gross_dividend_per_share) || 0;
     const rate = parseFloat(formData.withholding_tax_rate) || 0;
@@ -134,6 +135,45 @@ export function Dividends() {
     return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
+  function openNew() {
+    setEditingId(null);
+    setFormData({ ...EMPTY_FORM });
+    setShowModal(true);
+  }
+
+  function openEdit(d: Dividend) {
+    setEditingId(d.id);
+    const matchingBank = banks.find(
+      b => b.entity_id === d.entity_id && b.name === d.bank_name,
+    );
+    setFormData({
+      entity_id: d.entity_id,
+      share_id: d.share_id,
+      dividend_date: d.dividend_date || '',
+      quantity: String(d.quantity ?? ''),
+      gross_dividend_per_share: String(d.gross_dividend_per_share ?? ''),
+      withholding_tax_rate: String(d.withholding_tax_rate ?? '10'),
+      net_dividend_per_share: String(d.net_dividend_per_share ?? ''),
+      announcement_date: d.announcement_date || '',
+      payment_date: d.payment_date || '',
+      effective_date: d.effective_date || '',
+      selected_bank_id: matchingBank?.id || '',
+      bank_name: d.bank_name || '',
+      bank_account_no: d.bank_account_no || '',
+      payment_method: d.payment_method || '',
+      cds_account: d.cds_account || '',
+      notes: d.notes || '',
+      status: d.status,
+    });
+    setShowModal(true);
+  }
+
+  function closeModal() {
+    setShowModal(false);
+    setEditingId(null);
+    setFormData({ ...EMPTY_FORM });
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -141,10 +181,9 @@ export function Dividends() {
       const rate = parseFloat(formData.withholding_tax_rate) || 0;
       const net = gross * (1 - rate / 100);
       const qty = parseFloat(formData.quantity) || 0;
-
       const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
 
-      const { error } = await supabase.from('dividends').insert({
+      const payload = {
         entity_id: formData.entity_id,
         share_id: formData.share_id,
         dividend_date: formData.dividend_date || null,
@@ -164,14 +203,35 @@ export function Dividends() {
         cds_account: formData.cds_account || null,
         notes: formData.notes || null,
         status: formData.status,
-      });
-      if (error) throw error;
-      setShowModal(false);
-      setFormData({ ...EMPTY_FORM });
+      };
+
+      if (editingId) {
+        const { error } = await supabase.from('dividends').update(payload).eq('id', editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('dividends').insert(payload);
+        if (error) throw error;
+      }
+      closeModal();
       loadData();
     } catch (error) {
-      console.error('Error adding dividend:', error);
-      alert('Failed to add dividend');
+      console.error('Error saving dividend:', error);
+      alert('Failed to save dividend');
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('Are you sure you want to delete this dividend record?')) return;
+    setDeletingId(id);
+    try {
+      const { error } = await supabase.from('dividends').delete().eq('id', id);
+      if (error) throw error;
+      loadData();
+    } catch (error) {
+      console.error('Error deleting dividend:', error);
+      alert('Failed to delete dividend');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -196,6 +256,9 @@ export function Dividends() {
     return 'bg-gray-100 text-gray-600';
   };
 
+  const fmtRs = (v: number) =>
+    `Rs. ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -205,7 +268,7 @@ export function Dividends() {
           <p className="text-gray-500 mt-1">Track and manage dividend receipts</p>
         </div>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={openNew}
           className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-5 h-5" />
@@ -219,9 +282,7 @@ export function Dividends() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Finalized (Net)</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">
-                Rs. {totalNet.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{fmtRs(totalNet)}</p>
               <div className="flex items-center mt-2">
                 <TrendingUp className="w-4 h-4 text-green-600" />
                 <span className="text-sm text-gray-500 ml-1">{finalized.length} finalized dividend(s)</span>
@@ -279,17 +340,19 @@ export function Dividends() {
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross/Share</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">WHT %</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net/Share</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Gross</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Net</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center">
+                  <td colSpan={14} className="px-4 py-12 text-center">
                     <div className="flex items-center justify-center">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
                     </div>
@@ -297,21 +360,24 @@ export function Dividends() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-gray-500">
+                  <td colSpan={14} className="px-4 py-12 text-center text-gray-500">
                     {search ? 'No dividends match your search.' : 'No dividends found. Add your first dividend to get started.'}
                   </td>
                 </tr>
               ) : filtered.map(d => (
                 <tr key={d.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-4 text-sm font-semibold text-gray-900">{getEntityName(d.entity_id)}</td>
+                  <td className="px-4 py-4 text-sm font-semibold text-gray-900 whitespace-nowrap">{getEntityName(d.entity_id)}</td>
                   <td className="px-4 py-4 text-sm font-bold text-blue-600 whitespace-nowrap">{getShareTicker(d.share_id)}</td>
                   <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap">{formatDate(d.dividend_date)}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.quantity || 0).toLocaleString()}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.gross_dividend_per_share || 0).toFixed(4)}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.withholding_tax_rate || 0).toFixed(1)}%</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.net_dividend_per_share || 0).toFixed(4)}</td>
+                  <td className="px-4 py-4 text-sm text-gray-700 text-right whitespace-nowrap">
+                    {fmtRs(d.amount_gross || 0)}
+                  </td>
                   <td className="px-4 py-4 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                    Rs. {(d.amount_net || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {fmtRs(d.amount_net || 0)}
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="text-xs space-y-0.5 text-gray-500">
@@ -339,6 +405,25 @@ export function Dividends() {
                       {d.status}
                     </span>
                   </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => openEdit(d)}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(d.id)}
+                        disabled={deletingId === d.id}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -346,14 +431,15 @@ export function Dividends() {
         </div>
       </div>
 
-      {/* Add Dividend Modal */}
+      {/* Add / Edit Dividend Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
             <form onSubmit={handleSubmit}>
-              {/* Modal Header */}
               <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
-                <h2 className="text-2xl font-bold text-gray-900">Add Dividend</h2>
+                <h2 className="text-xl font-bold text-gray-900">
+                  {editingId ? 'Edit Dividend' : 'Add Dividend'}
+                </h2>
                 <p className="text-sm text-gray-500 mt-1">
                   Fields in <span className="text-red-500 font-medium">red</span> are required.
                   Fields in <span className="text-emerald-600 font-medium">green</span> affect reports and cashflow.
@@ -361,7 +447,7 @@ export function Dividends() {
               </div>
 
               <div className="p-6 space-y-5">
-                {/* Row 1: Entity */}
+                {/* Entity */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">
                     Entity <span className="text-red-500">*</span>
@@ -379,7 +465,7 @@ export function Dividends() {
                   </select>
                 </div>
 
-                {/* Row 2: Ticker */}
+                {/* Ticker */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1.5">
                     Ticker (Share) <span className="text-red-500">*</span>
@@ -397,12 +483,11 @@ export function Dividends() {
                   </select>
                 </div>
 
-                {/* Divider */}
                 <div className="border-t border-gray-100 pt-1">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dividend Calculation</p>
                 </div>
 
-                {/* Row 3: Quantity + Gross */}
+                {/* Quantity + Gross */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-red-600 mb-1.5">
@@ -436,7 +521,7 @@ export function Dividends() {
                   </div>
                 </div>
 
-                {/* Row 4: WHT Rate + Net per Share (calculated) */}
+                {/* WHT + Net + Totals preview */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-red-600 mb-1.5">
@@ -456,12 +541,9 @@ export function Dividends() {
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">Automatically applies the rate</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">
-                      Net Dividend per Share
-                    </label>
+                    <label className="block text-sm font-semibold text-red-600 mb-1.5">Net Dividend per Share</label>
                     <input
                       type="number"
                       readOnly
@@ -469,16 +551,31 @@ export function Dividends() {
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 cursor-not-allowed"
                       placeholder="Auto-calculated"
                     />
-                    <p className="text-xs text-gray-400 mt-1">Calculates based on the quantity and rate</p>
                   </div>
                 </div>
 
-                {/* Divider */}
+                {/* Live totals preview */}
+                {formData.quantity && formData.gross_dividend_per_share && (
+                  <div className="grid grid-cols-2 gap-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Total Gross</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">
+                        {fmtRs((parseFloat(formData.quantity) || 0) * (parseFloat(formData.gross_dividend_per_share) || 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Total Net</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">
+                        {fmtRs((parseFloat(formData.quantity) || 0) * (parseFloat(formData.net_dividend_per_share) || 0))}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="border-t border-gray-100 pt-1">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dates</p>
                 </div>
 
-                {/* Row 5: Announcement + Payment */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-red-600 mb-1.5">
@@ -503,7 +600,6 @@ export function Dividends() {
                   </div>
                 </div>
 
-                {/* Row 6: Effective Date */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Effective Date</label>
@@ -515,14 +611,21 @@ export function Dividends() {
                     />
                     <p className="text-xs text-gray-400 mt-1">Used in reports and cashflow</p>
                   </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Dividend Date</label>
+                    <input
+                      type="date"
+                      value={formData.dividend_date}
+                      onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    />
+                  </div>
                 </div>
 
-                {/* Divider */}
                 <div className="border-t border-gray-100 pt-1">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Bank & Payment Details</p>
                 </div>
 
-                {/* Row 7: Bank Name dropdown + Bank Account No (auto) + CDS Account (auto) */}
                 {(() => {
                   const entityBanks = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
                   const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
@@ -579,7 +682,6 @@ export function Dividends() {
                         </div>
                       </div>
 
-                      {/* Row 8: Payment Method */}
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Payment Method</label>
@@ -598,12 +700,10 @@ export function Dividends() {
                   );
                 })()}
 
-                {/* Divider */}
                 <div className="border-t border-gray-100 pt-1">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Additional</p>
                 </div>
 
-                {/* Row 9: Notes + Status */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Notes</label>
@@ -633,11 +733,10 @@ export function Dividends() {
                 </div>
               </div>
 
-              {/* Modal Footer */}
               <div className="p-6 border-t border-gray-200 flex justify-end space-x-3 sticky bottom-0 bg-white">
                 <button
                   type="button"
-                  onClick={() => { setShowModal(false); setFormData({ ...EMPTY_FORM }); }}
+                  onClick={closeModal}
                   className="px-5 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors text-sm"
                 >
                   Cancel
@@ -646,7 +745,7 @@ export function Dividends() {
                   type="submit"
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-sm"
                 >
-                  Submit
+                  {editingId ? 'Save Changes' : 'Submit'}
                 </button>
               </div>
             </form>
