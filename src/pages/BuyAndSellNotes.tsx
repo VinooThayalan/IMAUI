@@ -2404,7 +2404,7 @@ export function BuyAndSellNotes() {
       if (ledgerError) throw ledgerError;
 
       await loadData();
-      handleCloseModals();
+      handleCloseProcessModal();
       alert(
         "Buy/sell note approved and processed. Cash balance has been updated.",
       );
@@ -2450,7 +2450,7 @@ export function BuyAndSellNotes() {
       if (error) throw error;
 
       await loadData();
-      handleCloseModals();
+      handleCloseProcessModal();
       alert(
         "Note saved with mismatches. Sent for approval — no cash balance changes made yet.",
       );
@@ -2762,8 +2762,7 @@ export function BuyAndSellNotes() {
     }
   }
 
-  function handleCloseModals() {
-    setShowModal(false);
+  function handleCloseProcessModal() {
     setShowProcessModal(false);
     setUploadedFile(null);
     setExtractedData({
@@ -2782,6 +2781,16 @@ export function BuyAndSellNotes() {
       settlement: "",
       foreign_brokerage: "",
     });
+    setValidationIssues([]);
+    setFieldCompare({});
+    setExtractedRows([]);
+    setDebugRawText("");
+    setIsProcessing(false);
+  }
+
+  function handleCloseModals() {
+    setShowModal(false);
+    handleCloseProcessModal();
     setFormData({
       transaction_id: "",
       broker_id: "",
@@ -2790,11 +2799,6 @@ export function BuyAndSellNotes() {
       settlement_date: new Date().toISOString().split("T")[0],
       remarks: "",
     });
-    setValidationIssues([]);
-    setFieldCompare({});
-    setExtractedRows([]);
-    setDebugRawText("");
-    setIsProcessing(false);
   }
 
   const filteredNotes = notes.filter((note) => {
