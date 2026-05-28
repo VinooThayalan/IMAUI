@@ -95,6 +95,7 @@ interface Transaction {
   fees?: number;
   brokerage_fee_type_id?: string;
   brokerage_fee_rate?: number;
+  broker_id?: string;
 }
 
 interface BrokerageFeeType {
@@ -1855,32 +1856,10 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
-      // Derive broker from the matched transaction's entity
-      let resolvedBrokerId = "";
-      if (bestCandidate?.id) {
-        const txnEntityBrokers = entityBrokers.filter(
-          (eb) => eb.entity_id === bestCandidate!.entity_id && eb.broker_id,
-        );
-
-        if (txnEntityBrokers.length === 1) {
-          // Only one broker assigned — use it directly
-          resolvedBrokerId = txnEntityBrokers[0].broker_id;
-        } else if (txnEntityBrokers.length > 1 && extracted.broker_name) {
-          // Multiple brokers — try to match by PDF broker_name
-          const pdfBrokerName = extracted.broker_name.toLowerCase();
-          const matched = txnEntityBrokers.find((eb) => {
-            const broker = brokers.find((b) => b.id === eb.broker_id);
-            return broker?.broker_name?.toLowerCase().includes(pdfBrokerName) ||
-              pdfBrokerName.includes(broker?.broker_name?.toLowerCase() ?? "___");
-          });
-          resolvedBrokerId = matched?.broker_id || "";
-        }
-      }
-
       setFormData((prev) => ({
         ...prev,
         ...(bestCandidate?.id ? { transaction_id: bestCandidate.id } : {}),
-        ...(resolvedBrokerId ? { broker_id: resolvedBrokerId } : {}),
+        ...(bestCandidate?.broker_id ? { broker_id: bestCandidate.broker_id } : {}),
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
@@ -3403,7 +3382,7 @@ export function BuyAndSellNotes() {
                                       setFormData({
                                         ...formData,
                                         transaction_id: t.id,
-                                        broker_id: "",
+                                        broker_id: t.broker_id || "",
                                       });
                                       setTxnDropdownOpen(false);
                                       setTxnSearchTerm("");
