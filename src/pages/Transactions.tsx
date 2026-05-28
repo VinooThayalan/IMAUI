@@ -771,7 +771,6 @@ export function Transactions() {
   function handlePrintTransaction(transaction: Transaction) {
     const entityName = getEntityName(transaction.entity_id);
     const shareInfo = getShareInfo(transaction.share_id);
-    const cdsAccount = transaction.cds_account_id || '...';
 
     const entityBroker = entityBrokers.find(eb =>
       eb.entity_id === transaction.entity_id && (
@@ -782,6 +781,7 @@ export function Transactions() {
         ))
       )
     );
+    const cdsAccount = transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A';
     const brokerName = transaction.broker_id
       ? getBrokerName(transaction.broker_id)
       : entityBroker?.broker_id
