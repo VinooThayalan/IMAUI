@@ -1857,7 +1857,7 @@ export function BuyAndSellNotes() {
 
       setFormData((prev) => ({
         ...prev,
-        transaction_id: bestCandidate?.id || "",
+        ...(bestCandidate?.id ? { transaction_id: bestCandidate.id } : {}),
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
