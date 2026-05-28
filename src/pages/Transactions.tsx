@@ -607,7 +607,7 @@ export function Transactions() {
         }
       }
 
-      alert('Transaction cancelled successfully' + (transaction.broker_id && brokers.find(b => b.id === transaction.broker_id)?.contact_person_email ? ' and broker notified by email.' : '.'));
+      alert('Transaction cancelled successfully. Please notify the broker.');
       loadData();
     } catch (error) {
       console.error('Error cancelling transaction:', error);
