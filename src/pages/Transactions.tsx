@@ -771,8 +771,22 @@ export function Transactions() {
   function handlePrintTransaction(transaction: Transaction) {
     const entityName = getEntityName(transaction.entity_id);
     const shareInfo = getShareInfo(transaction.share_id);
-    const brokerName = transaction.broker_id ? getBrokerName(transaction.broker_id) : 'N/A';
     const cdsAccount = transaction.cds_account_id || '...';
+
+    const entityBroker = entityBrokers.find(eb =>
+      eb.entity_id === transaction.entity_id && (
+        (transaction.broker_id && eb.broker_id === transaction.broker_id) ||
+        (transaction.cds_account_id && (
+          eb.broker_account_number === transaction.cds_account_id ||
+          eb.custodian_account_number === transaction.cds_account_id
+        ))
+      )
+    );
+    const brokerName = transaction.broker_id
+      ? getBrokerName(transaction.broker_id)
+      : entityBroker?.broker_id
+        ? getBrokerName(entityBroker.broker_id)
+        : (entityBroker as any)?.broker_text || 'N/A';
     const currentDate = new Date().toLocaleDateString();
 
     const html = `
