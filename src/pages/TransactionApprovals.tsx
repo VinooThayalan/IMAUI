@@ -46,6 +46,7 @@ interface Entity {
   id: string;
   name: string;
   contact_email_company_individual: string | null;
+  cc_email: string | null;
 }
 
 interface Share {
@@ -159,7 +160,7 @@ export function TransactionApprovals() {
           .select('*')
           .in('approval_status', ALL_STATUSES)
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
-        supabase.from('entities').select('id, name, contact_email_company_individual').order('name'),
+        supabase.from('entities').select('id, name, contact_email_company_individual, cc_email').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email, contact_person_name').order('broker_name'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
@@ -552,10 +553,10 @@ export function TransactionApprovals() {
     // Pre-fill To with broker's contact email
     const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
     setEmailAddress(broker?.contact_person_email || '');
-    // Auto-CC from entity contact email
+    // Auto-CC from entity cc_email
     const entity = entities.find(e => e.id === transaction.entity_id);
     const autoCc: string[] = [];
-    if (entity?.contact_email_company_individual) autoCc.push(entity.contact_email_company_individual);
+    if (entity?.cc_email) autoCc.push(entity.cc_email);
     setCcAddresses(autoCc);
     setShowEmailModal(true);
   }

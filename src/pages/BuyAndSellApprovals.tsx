@@ -49,6 +49,7 @@ interface Entity {
   id: string;
   entity_id: string;
   name: string;
+  cc_email: string | null;
 }
 
 interface Share {
@@ -101,7 +102,7 @@ export function BuyAndSellApprovals() {
       const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date'),
-        supabase.from('entities').select('id, entity_id, name').order('name'),
+        supabase.from('entities').select('id, entity_id, name, cc_email').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation').eq('is_active', true),
         supabase.from('entity_brokers').select('id, entity_id, broker_id, broker_account_number, custodian_account_number'),

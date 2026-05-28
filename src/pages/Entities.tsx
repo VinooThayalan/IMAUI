@@ -13,6 +13,7 @@ interface Entity {
   key_contact_name: string | null;
   company_individual_address: string | null;
   contact_email_company_individual: string | null;
+  cc_email: string | null;
   contact_phone: string | null;
   contact_mobile: string | null;
   contact_mobile_number_2: string | null;
@@ -99,6 +100,7 @@ export function Entities() {
     key_contact_name: '',
     company_individual_address: '',
     contact_email_company_individual: '',
+    cc_email: '',
     contact_phone: '',
     contact_mobile: '',
     contact_mobile_number_2: ''
@@ -274,6 +276,7 @@ export function Entities() {
       key_contact_name: entity.key_contact_name || '',
       company_individual_address: entity.company_individual_address || '',
       contact_email_company_individual: entity.contact_email_company_individual || '',
+      cc_email: entity.cc_email || '',
       contact_phone: entity.contact_phone || '',
       contact_mobile: entity.contact_mobile || '',
       contact_mobile_number_2: entity.contact_mobile_number_2 || ''
@@ -488,6 +491,7 @@ export function Entities() {
         key_contact_name: entityFormData.key_contact_name || null,
         company_individual_address: entityFormData.company_individual_address || null,
         contact_email_company_individual: entityFormData.contact_email_company_individual || null,
+        cc_email: entityFormData.cc_email || null,
         contact_phone: entityFormData.contact_phone || null,
         contact_mobile: entityFormData.contact_mobile || null,
         contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
@@ -514,6 +518,7 @@ export function Entities() {
         key_contact_name: '',
         company_individual_address: '',
         contact_email_company_individual: '',
+        cc_email: '',
         contact_phone: '',
         contact_mobile: '',
         contact_mobile_number_2: ''
@@ -544,6 +549,7 @@ export function Entities() {
           key_contact_name: entityFormData.key_contact_name || null,
           company_individual_address: entityFormData.company_individual_address || null,
           contact_email_company_individual: entityFormData.contact_email_company_individual || null,
+          cc_email: entityFormData.cc_email || null,
           contact_phone: entityFormData.contact_phone || null,
           contact_mobile: entityFormData.contact_mobile || null,
           contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null
@@ -563,6 +569,7 @@ export function Entities() {
         key_contact_name: '',
         company_individual_address: '',
         contact_email_company_individual: '',
+        cc_email: '',
         contact_phone: '',
         contact_mobile: '',
         contact_mobile_number_2: ''
@@ -768,6 +775,16 @@ export function Entities() {
                       onChange={(e) => setEntityFormData({...entityFormData, contact_email_company_individual: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">CC Email <span className="text-xs font-normal text-gray-500">(auto-loaded when sending emails)</span></label>
+                    <input
+                      type="email"
+                      value={entityFormData.cc_email}
+                      onChange={(e) => setEntityFormData({...entityFormData, cc_email: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="cc@example.com"
                     />
                   </div>
                   <div>
@@ -1163,6 +1180,10 @@ export function Entities() {
                   <p className="text-gray-900">{selectedEntity.contact_email_company_individual || 'N/A'}</p>
                 </div>
                 <div>
+                  <label className="block text-sm font-semibold text-gray-500 mb-1">CC Email</label>
+                  <p className="text-gray-900">{selectedEntity.cc_email || 'N/A'}</p>
+                </div>
+                <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Phone</label>
                   <p className="text-gray-900">{selectedEntity.contact_phone || 'N/A'}</p>
                 </div>
@@ -1231,6 +1252,7 @@ export function Entities() {
                     key_contact_name: '',
                     company_individual_address: '',
                     contact_email_company_individual: '',
+                    cc_email: '',
                     contact_phone: '',
                     contact_mobile: '',
                     contact_mobile_number_2: ''
@@ -1319,6 +1341,16 @@ export function Entities() {
                       onChange={(e) => setEntityFormData({...entityFormData, contact_email_company_individual: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">CC Email <span className="text-xs font-normal text-gray-500">(auto-loaded when sending emails)</span></label>
+                    <input
+                      type="email"
+                      value={entityFormData.cc_email}
+                      onChange={(e) => setEntityFormData({...entityFormData, cc_email: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="cc@example.com"
                     />
                   </div>
                   <div>

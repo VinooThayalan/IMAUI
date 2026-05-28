@@ -52,6 +52,7 @@ interface Entity {
   id: string;
   name: string;
   current_balance: number;
+  cc_email: string | null;
 }
 
 interface Share {
@@ -236,7 +237,7 @@ export function Transactions() {
 
       const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
-        supabase.from('entities').select('id, name, current_balance').order('name'),
+        supabase.from('entities').select('id, name, current_balance, cc_email').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
@@ -938,7 +939,8 @@ export function Transactions() {
     setSelectedTransaction(transaction);
     const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
     setEmailAddress(broker?.contact_person_email || '');
-    setCcAddresses([]);
+    const entity = entities.find(e => e.id === transaction.entity_id);
+    setCcAddresses(entity?.cc_email ? [entity.cc_email] : []);
     setCcInput('');
     setEmailNote('');
     setShowEmailModal(true);
