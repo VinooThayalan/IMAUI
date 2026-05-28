@@ -3535,18 +3535,35 @@ export function BuyAndSellNotes() {
                     const selEntityForBroker = selTxnForBroker
                       ? entities.find((e) => e.id === selTxnForBroker.entity_id)
                       : null;
-                    const assignedBrokers = selEntityForBroker
+
+                    // Start from entity_brokers, then ensure the transaction's
+                    // own broker_id is always present in the list.
+                    const fromEntityBrokers = selEntityForBroker
                       ? entityBrokers
                           .filter(
                             (eb) =>
                               eb.entity_id === selEntityForBroker.id &&
                               eb.broker_id,
                           )
-                          .map((eb) =>
-                            brokers.find((b) => b.id === eb.broker_id),
-                          )
+                          .map((eb) => brokers.find((b) => b.id === eb.broker_id))
                           .filter(Boolean)
-                      : brokers;
+                      : [];
+
+                    const txnBroker = selTxnForBroker?.broker_id
+                      ? brokers.find((b) => b.id === selTxnForBroker.broker_id)
+                      : null;
+
+                    const brokerList = txnBroker
+                      ? [
+                          txnBroker,
+                          ...fromEntityBrokers.filter(
+                            (b) => b!.id !== txnBroker.id,
+                          ),
+                        ]
+                      : fromEntityBrokers.length > 0
+                        ? fromEntityBrokers
+                        : brokers;
+
                     return (
                       <select
                         value={formData.broker_id}
@@ -3560,7 +3577,7 @@ export function BuyAndSellNotes() {
                         required
                       >
                         <option value="">Select broker</option>
-                        {assignedBrokers.map((broker) => (
+                        {brokerList.map((broker) => (
                           <option key={broker!.id} value={broker!.id}>
                             {broker!.broker_name}
                           </option>
