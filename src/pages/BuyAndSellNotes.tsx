@@ -3377,22 +3377,10 @@ export function BuyAndSellNotes() {
                                     key={t.id}
                                     type="button"
                                     onClick={() => {
-                                      const entity = entities.find(
-                                        (e) => e.id === t.entity_id,
-                                      );
-                                      const matchingEb = entity
-                                        ? entityBrokers.find(
-                                            (eb) =>
-                                              eb.entity_id === entity.id &&
-                                              eb.broker_id,
-                                          )
-                                        : null;
                                       setFormData({
                                         ...formData,
                                         transaction_id: t.id,
-                                        broker_id:
-                                          matchingEb?.broker_id ||
-                                          formData.broker_id,
+                                        broker_id: "",
                                       });
                                       setTxnDropdownOpen(false);
                                       setTxnSearchTerm("");
@@ -3538,21 +3526,46 @@ export function BuyAndSellNotes() {
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
                     Broker <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    value={formData.broker_id}
-                    onChange={(e) =>
-                      setFormData({ ...formData, broker_id: e.target.value })
-                    }
-                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    <option value="">Select broker</option>
-                    {brokers.map((broker) => (
-                      <option key={broker.id} value={broker.id}>
-                        {broker.broker_name}
-                      </option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const selTxnForBroker = transactions.find(
+                      (t) => t.id === formData.transaction_id,
+                    );
+                    const selEntityForBroker = selTxnForBroker
+                      ? entities.find((e) => e.id === selTxnForBroker.entity_id)
+                      : null;
+                    const assignedBrokers = selEntityForBroker
+                      ? entityBrokers
+                          .filter(
+                            (eb) =>
+                              eb.entity_id === selEntityForBroker.id &&
+                              eb.broker_id,
+                          )
+                          .map((eb) =>
+                            brokers.find((b) => b.id === eb.broker_id),
+                          )
+                          .filter(Boolean)
+                      : brokers;
+                    return (
+                      <select
+                        value={formData.broker_id}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            broker_id: e.target.value,
+                          })
+                        }
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="">Select broker</option>
+                        {assignedBrokers.map((broker) => (
+                          <option key={broker!.id} value={broker!.id}>
+                            {broker!.broker_name}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
