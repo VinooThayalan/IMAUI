@@ -2299,7 +2299,8 @@ export function BuyAndSellNotes() {
         broker: brokerName,
         broker_id: formData.broker_id || null,
         dealer_name: formData.dealer_name || null,
-        transaction_date: extractedData.trade_date || null,
+        transaction_date:
+          extractedData.settlement || formData.settlement_date || null,
         settlement_date:
           extractedData.settlement || formData.settlement_date || null,
         file_url: storagePath ?? uploadedFile?.name ?? null,
@@ -2394,7 +2395,7 @@ export function BuyAndSellNotes() {
           description: `${selectedTransaction.transaction_type} - ${contractNo}`,
           code: contractNo,
           amount: totalNet,
-          date: extractedData.trade_date || null,
+          date: extractedData.settlement || formData.settlement_date || null,
           running_balance: newBalance,
           on_hold_amount: 0,
           entity_id: entity.id,
