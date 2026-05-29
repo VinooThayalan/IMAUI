@@ -739,7 +739,7 @@ type Tab = '52week' | 'earnings' | 'share-values' | 'dps';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: '52week',       label: '52-Week Values',      icon: <Activity className="w-4 h-4" /> },
   { id: 'earnings',     label: 'Share Earnings',      icon: <TrendingUp className="w-4 h-4" /> },
-  { id: 'share-values', label: 'Share Values',         icon: <BookOpen className="w-4 h-4" /> },
+  { id: 'share-values', label: 'Net Book Value',        icon: <BookOpen className="w-4 h-4" /> },
   { id: 'dps',          label: 'Dividends Per Share',  icon: <DollarSign className="w-4 h-4" /> },
 ];
 

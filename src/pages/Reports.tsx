@@ -1,4 +1,4 @@
-import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X } from 'lucide-react';
+import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, Download, TrendingUp, BookOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -85,7 +85,50 @@ interface CashbookReport {
   closing_balance: number;
 }
 
-type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | null;
+interface DividendReportRow {
+  entity_name: string;
+  ticker: string;
+  share_name: string;
+  dividend_date: string;
+  quantity: number;
+  gross_per_share: number;
+  wht_rate: number;
+  net_per_share: number;
+  total_gross: number;
+  total_net: number;
+  status: string;
+  payment_method: string | null;
+  bank_name: string | null;
+}
+
+interface ScripEntryReportRow {
+  entity_name: string;
+  ticker: string;
+  share_name: string;
+  entry_date: string;
+  effective_date: string | null;
+  no_of_shares: number;
+  script_dividend_ratio: string | null;
+  status: string;
+  notes: string | null;
+}
+
+interface ShareAnalyticsReportRow {
+  entity_name: string;
+  ticker: string;
+  share_name: string;
+  share_cum_bal: number;
+  purchase_cost: number;
+  sale_value: number;
+  av_cost: number;
+  dividend: number;
+  cum_surplus: number;
+  market_value: number;
+  cash_flow: number;
+  total_surplus: number;
+}
+
+type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | 'dividends' | 'scrip' | 'analytics' | null;
 
 export function Reports() {
   const [activeReport, setActiveReport] = useState<ReportType>(null);
@@ -93,6 +136,9 @@ export function Reports() {
   const [portfolioData, setPortfolioData] = useState<PortfolioHolding[]>([]);
   const [detailedData, setDetailedData] = useState<DetailedShareTransaction[]>([]);
   const [cashbookData, setCashbookData] = useState<CashbookReport | null>(null);
+  const [dividendData, setDividendData] = useState<DividendReportRow[]>([]);
+  const [scripData, setScripData] = useState<ScripEntryReportRow[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<ShareAnalyticsReportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
@@ -659,6 +705,224 @@ export function Reports() {
     }
   }
 
+  async function generateDividendsReport() {
+    try {
+      setLoading(true);
+      let query = supabase
+        .from('dividends')
+        .select(`
+          entity_id, share_id, dividend_date, quantity,
+          gross_dividend_per_share, withholding_tax_rate, net_dividend_per_share,
+          amount_gross, amount_net, status, payment_method, bank_name,
+          entities ( name ),
+          shares ( ticker, share_name )
+        `)
+        .order('dividend_date', { ascending: false });
+
+      if (selectedEntity !== 'all') query = query.eq('entity_id', selectedEntity);
+      if (fromDate) query = query.gte('dividend_date', fromDate);
+      if (toDate) query = query.lte('dividend_date', toDate);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const rows: DividendReportRow[] = (data || []).map((d: any) => ({
+        entity_name: d.entities?.name || '',
+        ticker: d.shares?.ticker || '',
+        share_name: d.shares?.share_name || '',
+        dividend_date: d.dividend_date,
+        quantity: Number(d.quantity),
+        gross_per_share: Number(d.gross_dividend_per_share),
+        wht_rate: Number(d.withholding_tax_rate),
+        net_per_share: Number(d.net_dividend_per_share),
+        total_gross: Number(d.amount_gross),
+        total_net: Number(d.amount_net),
+        status: d.status || '',
+        payment_method: d.payment_method,
+        bank_name: d.bank_name,
+      }));
+
+      setDividendData(rows);
+      setActiveReport('dividends');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate dividends report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateScripReport() {
+    try {
+      setLoading(true);
+      let query = supabase
+        .from('scrip_entries')
+        .select(`
+          entity_id, share_id, entry_date, effective_date,
+          no_of_shares, script_dividend_ratio, status, notes,
+          entities ( name ),
+          shares ( ticker, share_name )
+        `)
+        .order('entry_date', { ascending: false });
+
+      if (selectedEntity !== 'all') query = query.eq('entity_id', selectedEntity);
+      if (fromDate) query = query.gte('entry_date', fromDate);
+      if (toDate) query = query.lte('entry_date', toDate);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const rows: ScripEntryReportRow[] = (data || []).map((s: any) => ({
+        entity_name: s.entities?.name || '',
+        ticker: s.shares?.ticker || '',
+        share_name: s.shares?.share_name || '',
+        entry_date: s.entry_date,
+        effective_date: s.effective_date,
+        no_of_shares: Number(s.no_of_shares),
+        script_dividend_ratio: s.script_dividend_ratio,
+        status: s.status || '',
+        notes: s.notes,
+      }));
+
+      setScripData(rows);
+      setActiveReport('scrip');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate scrip entries report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateAnalyticsReport() {
+    try {
+      setLoading(true);
+
+      const [txRes, divRes, priceRes, obRes] = await Promise.all([
+        supabase.from('transactions').select(`
+          entity_id, share_id, transaction_type, no_of_shares, total_amount,
+          entities ( name ), shares ( ticker, share_name )
+        `).order('transaction_date', { ascending: true }),
+        supabase.from('dividends').select('entity_id, share_id, amount_net'),
+        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_balance, opening_cost'),
+      ]);
+
+      if (txRes.error) throw txRes.error;
+
+      const latestPrices = new Map<string, number>();
+      priceRes.data?.forEach((p: any) => { if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, p.share_price); });
+
+      const divMap = new Map<string, number>();
+      divRes.data?.forEach((d: any) => {
+        const k = `${d.entity_id}||${d.share_id}`;
+        divMap.set(k, (divMap.get(k) || 0) + Number(d.amount_net));
+      });
+
+      type Acc = { entity_name: string; ticker: string; share_name: string; share_id: string; bal: number; cost: number; purchase_cost: number; sale_value: number; };
+      const map = new Map<string, Acc>();
+
+      obRes.data?.forEach((ob: any) => {
+        const k = `${ob.entity_id}||${ob.share_id}`;
+        if (!map.has(k)) map.set(k, { entity_name: '', ticker: '', share_name: '', share_id: ob.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
+        const r = map.get(k)!;
+        r.bal += Number(ob.opening_balance || 0);
+        r.cost += Number(ob.opening_cost || 0);
+        r.purchase_cost += Number(ob.opening_cost || 0);
+      });
+
+      txRes.data?.forEach((tx: any) => {
+        if (!tx.entities || !tx.shares) return;
+        const k = `${tx.entity_id}||${tx.share_id}`;
+        if (!map.has(k)) map.set(k, { entity_name: tx.entities.name, ticker: tx.shares.ticker, share_name: tx.shares.share_name, share_id: tx.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
+        const r = map.get(k)!;
+        if (!r.entity_name) { r.entity_name = tx.entities.name; r.ticker = tx.shares.ticker; r.share_name = tx.shares.share_name; }
+        const shares = Number(tx.no_of_shares);
+        const amt = Number(tx.total_amount);
+        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        if (isBuy) { r.bal += shares; r.cost += amt; r.purchase_cost += amt; }
+        else {
+          const prevBal = r.bal;
+          r.bal -= shares;
+          r.cost -= prevBal > 0 ? (r.cost / prevBal) * shares : 0;
+          r.sale_value += amt;
+        }
+      });
+
+      const rows: ShareAnalyticsReportRow[] = [];
+      map.forEach((r, k) => {
+        const dividend = divMap.get(k) || 0;
+        const marketPrice = latestPrices.get(r.share_id) || 0;
+        const market_value = r.bal * marketPrice;
+        const cum_surplus = r.sale_value + dividend - r.purchase_cost;
+        const cash_flow = r.sale_value - r.purchase_cost;
+        rows.push({
+          entity_name: r.entity_name,
+          ticker: r.ticker,
+          share_name: r.share_name,
+          share_cum_bal: r.bal,
+          purchase_cost: r.purchase_cost,
+          sale_value: r.sale_value,
+          av_cost: r.bal > 0 ? r.cost / r.bal : 0,
+          dividend,
+          cum_surplus,
+          market_value,
+          cash_flow,
+          total_surplus: cum_surplus + market_value,
+        });
+      });
+
+      setAnalyticsData(rows.filter(r => r.entity_name));
+      setActiveReport('analytics');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate analytics report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function exportToExcel(reportType: ReportType) {
+    let headers: string[] = [];
+    let rows: (string | number)[][] = [];
+    let filename = 'report.csv';
+
+    if (reportType === 'dividends') {
+      filename = 'dividends_report.csv';
+      headers = ['Entity', 'Ticker', 'Share Name', 'Dividend Date', 'Quantity', 'Gross/Share', 'WHT%', 'Net/Share', 'Total Gross', 'Total Net', 'Status', 'Payment Method', 'Bank'];
+      rows = dividendData.map(d => [d.entity_name, d.ticker, d.share_name, d.dividend_date, d.quantity, d.gross_per_share, d.wht_rate, d.net_per_share, d.total_gross, d.total_net, d.status, d.payment_method || '', d.bank_name || '']);
+    } else if (reportType === 'scrip') {
+      filename = 'scrip_entries_report.csv';
+      headers = ['Entity', 'Ticker', 'Share Name', 'Entry Date', 'Effective Date', 'No. of Shares', 'Script Ratio', 'Status', 'Notes'];
+      rows = scripData.map(s => [s.entity_name, s.ticker, s.share_name, s.entry_date, s.effective_date || '', s.no_of_shares, s.script_dividend_ratio || '', s.status, s.notes || '']);
+    } else if (reportType === 'analytics') {
+      filename = 'share_analytics_report.csv';
+      headers = ['Entity', 'Ticker', 'Share Name', 'Share Balance', 'Purchase Cost', 'Sale Value', 'Avg Cost', 'Dividend', 'Cum Surplus', 'Market Value', 'Cash Flow', 'Total Surplus'];
+      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_cost.toFixed(4), a.dividend.toFixed(2), a.cum_surplus.toFixed(2), a.market_value.toFixed(2), a.cash_flow.toFixed(2), a.total_surplus.toFixed(2)]);
+    } else if (reportType === 'share') {
+      filename = 'share_holdings_report.csv';
+      headers = ['Symbol', 'Company', 'Shares', 'Avg Cost', 'Total Cost', 'Current Price', 'Current Value', 'Gain/Loss', '%'];
+      rows = shareData.map(s => [s.ticker, s.name, s.total_shares, s.avg_cost.toFixed(2), s.total_cost.toFixed(2), s.current_price.toFixed(2), s.current_value.toFixed(2), s.gain_loss.toFixed(2), s.gain_loss_percent.toFixed(2)]);
+    } else if (reportType === 'portfolio') {
+      filename = 'portfolio_holdings_report.csv';
+      headers = ['Entity', 'Sector', 'Share', 'Balance', 'Cost', 'Cost/Share', 'Mkt Price', 'Mkt Value', 'Dividends', 'Total Returns', 'AER%'];
+      portfolioData.forEach(entity => {
+        entity.holdings.forEach(h => {
+          rows.push([entity.entity_name, h.sector, h.ticker, h.balance, h.cost.toFixed(2), h.cost_per_share.toFixed(4), h.market_price_per_share.toFixed(2), h.market_value_net.toFixed(2), h.dividends.toFixed(2), h.total_returns.toFixed(2), h.aer.toFixed(2)]);
+        });
+      });
+    }
+
+    const csvContent = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function handlePrint() {
     window.print();
   }
@@ -711,6 +975,13 @@ export function Reports() {
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
             >
               Apply
+            </button>
+            <button
+              onClick={() => exportToExcel('share')}
+              className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export Excel</span>
             </button>
             <button
               onClick={handlePrint}
@@ -1108,6 +1379,243 @@ export function Reports() {
     );
   }
 
+  if (activeReport === 'dividends') {
+    const totalGross = dividendData.reduce((s, d) => s + d.total_gross, 0);
+    const totalNet = dividendData.reduce((s, d) => s + d.total_net, 0);
+    return (
+      <div className="p-8">
+        <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button onClick={closeReport} className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+            <X className="w-5 h-5" /><span>Close</span>
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => exportToExcel('dividends')} className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+              <Download className="w-4 h-4" /><span>Export Excel</span>
+            </button>
+            <button onClick={handlePrint} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Printer className="w-5 h-5" /><span>Print</span>
+            </button>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Dividends Report</h1>
+            <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
+          </div>
+          <table className="w-full mb-6 text-sm">
+            <thead className="bg-gray-50 border-b-2 border-gray-700">
+              <tr>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Entity</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Ticker</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Share</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Date</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Quantity</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Gross/Share</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">WHT%</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Net/Share</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Total Gross</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Total Net</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Status</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Payment</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {dividendData.map((d, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-xs text-gray-900">{d.entity_name}</td>
+                  <td className="px-3 py-2 text-xs font-bold text-gray-900">{d.ticker}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{d.share_name}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{new Date(d.dividend_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{d.quantity.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{d.gross_per_share.toFixed(4)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-700">{d.wht_rate}%</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{d.net_per_share.toFixed(4)}</td>
+                  <td className="px-3 py-2 text-xs text-right font-medium text-gray-900">{d.total_gross.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="px-3 py-2 text-xs text-right font-semibold text-blue-700">{d.total_net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{d.status}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{d.payment_method || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-700 bg-gray-50">
+              <tr>
+                <td colSpan={8} className="px-3 py-3 text-sm font-bold text-gray-900 text-right">Totals:</td>
+                <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{totalGross.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td className="px-3 py-3 text-sm font-bold text-blue-700 text-right">{totalNet.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeReport === 'scrip') {
+    const totalShares = scripData.reduce((s, r) => s + r.no_of_shares, 0);
+    return (
+      <div className="p-8">
+        <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button onClick={closeReport} className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+            <X className="w-5 h-5" /><span>Close</span>
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => exportToExcel('scrip')} className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+              <Download className="w-4 h-4" /><span>Export Excel</span>
+            </button>
+            <button onClick={handlePrint} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Printer className="w-5 h-5" /><span>Print</span>
+            </button>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Scrip Entries Report</h1>
+            <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+            {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
+          </div>
+          <table className="w-full mb-6 text-sm">
+            <thead className="bg-gray-50 border-b-2 border-gray-700">
+              <tr>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Entity</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Ticker</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Share</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Entry Date</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Effective Date</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">No. of Shares</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Script Ratio</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Status</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {scripData.map((s, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-xs text-gray-900">{s.entity_name}</td>
+                  <td className="px-3 py-2 text-xs font-bold text-gray-900">{s.ticker}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{s.share_name}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{new Date(s.entry_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{s.effective_date ? new Date(s.effective_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+                  <td className="px-3 py-2 text-xs text-right font-semibold text-gray-900">{s.no_of_shares.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{s.script_dividend_ratio || '-'}</td>
+                  <td className="px-3 py-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${s.status === 'RECEIVED' ? 'bg-green-100 text-green-700' : s.status === 'CANCELLED' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{s.status}</span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-500">{s.notes || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-700 bg-gray-50">
+              <tr>
+                <td colSpan={5} className="px-3 py-3 text-sm font-bold text-gray-900 text-right">Total Shares:</td>
+                <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{totalShares.toLocaleString()}</td>
+                <td colSpan={3} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeReport === 'analytics') {
+    const totPurchase = analyticsData.reduce((s, r) => s + r.purchase_cost, 0);
+    const totSale = analyticsData.reduce((s, r) => s + r.sale_value, 0);
+    const totDiv = analyticsData.reduce((s, r) => s + r.dividend, 0);
+    const totMV = analyticsData.reduce((s, r) => s + r.market_value, 0);
+    const totSurplus = analyticsData.reduce((s, r) => s + r.total_surplus, 0);
+    const fmt2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (
+      <div className="p-8">
+        <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button onClick={closeReport} className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+            <X className="w-5 h-5" /><span>Close</span>
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={() => exportToExcel('analytics')} className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+              <Download className="w-4 h-4" /><span>Export Excel</span>
+            </button>
+            <button onClick={handlePrint} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Printer className="w-5 h-5" /><span>Print</span>
+            </button>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Share Analytics Report</h1>
+            <p className="text-gray-600">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {[
+              { label: 'Total Purchase Cost', value: `Rs. ${fmt2(totPurchase)}`, color: 'text-gray-900' },
+              { label: 'Total Sale Value', value: `Rs. ${fmt2(totSale)}`, color: 'text-gray-900' },
+              { label: 'Total Dividends', value: `Rs. ${fmt2(totDiv)}`, color: 'text-yellow-700' },
+              { label: 'Total Market Value', value: `Rs. ${fmt2(totMV)}`, color: 'text-blue-700' },
+            ].map(card => (
+              <div key={card.label} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <p className="text-xs text-gray-500 mb-1">{card.label}</p>
+                <p className={`text-lg font-bold ${card.color}`}>{card.value}</p>
+              </div>
+            ))}
+          </div>
+          <table className="w-full mb-6 text-sm">
+            <thead className="bg-gray-50 border-b-2 border-gray-700">
+              <tr>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Entity</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Ticker</th>
+                <th className="px-3 py-2 text-left font-bold text-gray-900">Share</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Balance</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Purchase Cost</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Sale Value</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Avg Cost</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Dividend</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Cum Surplus</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Mkt Value</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Cash Flow</th>
+                <th className="px-3 py-2 text-right font-bold text-gray-900">Total Surplus</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {analyticsData.map((a, i) => (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 text-xs text-gray-900">{a.entity_name}</td>
+                  <td className="px-3 py-2 text-xs font-bold text-gray-900">{a.ticker}</td>
+                  <td className="px-3 py-2 text-xs text-gray-700">{a.share_name}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{a.share_cum_bal.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.purchase_cost)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.sale_value)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-700">{a.av_cost.toFixed(4)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-yellow-700">{fmt2(a.dividend)}</td>
+                  <td className={`px-3 py-2 text-xs text-right font-medium ${a.cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cum_surplus)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-blue-700">{fmt2(a.market_value)}</td>
+                  <td className={`px-3 py-2 text-xs text-right ${a.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cash_flow)}</td>
+                  <td className={`px-3 py-2 text-xs text-right font-semibold ${a.total_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.total_surplus)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-700 bg-gray-50">
+              <tr>
+                <td colSpan={4} className="px-3 py-3 text-sm font-bold text-gray-900 text-right">Totals:</td>
+                <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{fmt2(totPurchase)}</td>
+                <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{fmt2(totSale)}</td>
+                <td />
+                <td className="px-3 py-3 text-sm font-bold text-yellow-700 text-right">{fmt2(totDiv)}</td>
+                <td className={`px-3 py-3 text-sm font-bold text-right ${totSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(analyticsData.reduce((s, r) => s + r.cum_surplus, 0))}</td>
+                <td className="px-3 py-3 text-sm font-bold text-blue-700 text-right">{fmt2(totMV)}</td>
+                <td />
+                <td className={`px-3 py-3 text-sm font-bold text-right ${totSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(totSurplus)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   if (activeReport === 'portfolio') {
     return (
       <div className="p-8">
@@ -1152,6 +1660,13 @@ export function Reports() {
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
             >
               Apply
+            </button>
+            <button
+              onClick={() => exportToExcel('portfolio')}
+              className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+            >
+              <Download className="w-4 h-4" />
+              <span>Export Excel</span>
             </button>
             <button
               onClick={handlePrint}
@@ -1437,6 +1952,121 @@ export function Reports() {
               </div>
               <button
                 onClick={generateCashbookReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-yellow-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Share Analytics Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Full portfolio analytics: purchase cost, sale value, dividends, market value, and surplus per entity and share
+            </p>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">Updated: Today</div>
+              <button
+                onClick={generateAnalyticsReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-teal-100 rounded-lg flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-teal-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Dividends Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              All dividend records with gross/net amounts, WHT rates, payment status and bank details
+            </p>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-700 mb-2">Select Entity</label>
+              <select
+                value={selectedEntity}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedEntity(value);
+                  setSelectedEntityName(value === 'all' ? 'All Entities' : entities.find(ent => ent.id === value)?.name || 'Unknown');
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Entities</option>
+                {entities.map((entity) => (
+                  <option key={entity.id} value={entity.id}>{entity.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">Updated: Today</div>
+              <button
+                onClick={generateDividendsReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                <FileText className="w-6 h-6 text-orange-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Scrip Entries Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              All scrip dividend entries with ratios, effective dates, and status tracking
+            </p>
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-700 mb-2">Select Entity</label>
+              <select
+                value={selectedEntity}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSelectedEntity(value);
+                  setSelectedEntityName(value === 'all' ? 'All Entities' : entities.find(ent => ent.id === value)?.name || 'Unknown');
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Entities</option>
+                {entities.map((entity) => (
+                  <option key={entity.id} value={entity.id}>{entity.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">Updated: Today</div>
+              <button
+                onClick={generateScripReport}
                 disabled={loading}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
