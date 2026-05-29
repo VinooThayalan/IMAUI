@@ -3527,63 +3527,19 @@ export function BuyAndSellNotes() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
-                    Broker <span className="text-red-500">*</span>
+                    Broker
                   </label>
                   {(() => {
                     const selTxnForBroker = transactions.find(
                       (t) => t.id === formData.transaction_id,
                     );
-                    const selEntityForBroker = selTxnForBroker
-                      ? entities.find((e) => e.id === selTxnForBroker.entity_id)
-                      : null;
-
-                    // Start from entity_brokers, then ensure the transaction's
-                    // own broker_id is always present in the list.
-                    const fromEntityBrokers = selEntityForBroker
-                      ? entityBrokers
-                          .filter(
-                            (eb) =>
-                              eb.entity_id === selEntityForBroker.id &&
-                              eb.broker_id,
-                          )
-                          .map((eb) => brokers.find((b) => b.id === eb.broker_id))
-                          .filter(Boolean)
-                      : [];
-
                     const txnBroker = selTxnForBroker?.broker_id
                       ? brokers.find((b) => b.id === selTxnForBroker.broker_id)
                       : null;
-
-                    const brokerList = txnBroker
-                      ? [
-                          txnBroker,
-                          ...fromEntityBrokers.filter(
-                            (b) => b!.id !== txnBroker.id,
-                          ),
-                        ]
-                      : fromEntityBrokers.length > 0
-                        ? fromEntityBrokers
-                        : brokers;
-
                     return (
-                      <select
-                        value={formData.broker_id}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            broker_id: e.target.value,
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        required
-                      >
-                        <option value="">Select broker</option>
-                        {brokerList.map((broker) => (
-                          <option key={broker!.id} value={broker!.id}>
-                            {broker!.broker_name}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 min-h-[34px]">
+                        {txnBroker?.broker_name || <span className="text-gray-400 italic">From selected transaction</span>}
+                      </div>
                     );
                   })()}
                 </div>
