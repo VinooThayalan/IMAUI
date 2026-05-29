@@ -1,10 +1,16 @@
-import { Bell, HelpCircle, LogOut, User } from 'lucide-react';
-import { useState } from 'react';
+import { Bell, HelpCircle, LogOut, User, Calendar } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export function Header() {
   const { appUser, signOut, isAdmin } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [currentDate, setCurrentDate] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentDate(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   async function handleLogout() {
     try {
@@ -20,6 +26,12 @@ export function Header() {
         <div className="flex-1" />
 
         <div className="flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
+            <Calendar className="w-4 h-4 text-gray-400" />
+            <span className="text-sm font-medium text-gray-700">
+              {currentDate.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+          </div>
           <button className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors relative">
             <Bell className="w-5 h-5" />
             <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
