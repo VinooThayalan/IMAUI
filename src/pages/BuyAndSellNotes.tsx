@@ -2695,18 +2695,27 @@ export function BuyAndSellNotes() {
   async function handleDeleteNote(id: string) {
     if (
       !confirm(
-        "Delete this buy/sell note? The corresponding cash balance entry will also be reversed.",
+        "Delete this buy/sell note? The corresponding transaction and cash balance entry will also be removed.",
       )
     )
       return;
     setDeletingId(id);
     try {
-      // Find ledger entry linked to this note
-      const { data: ledgerEntry } = await supabase
-        .from("cash_balance_ledger")
-        .select("id, entity_id, amount, timestamp, type")
-        .eq("reference_id", id)
-        .maybeSingle();
+      // Find ledger entry and transaction_id linked to this note
+      const [ledgerRes, noteRes] = await Promise.all([
+        supabase
+          .from("cash_balance_ledger")
+          .select("id, entity_id, amount, timestamp, type")
+          .eq("reference_id", id)
+          .maybeSingle(),
+        supabase
+          .from("buy_sell_notes")
+          .select("transaction_id")
+          .eq("id", id)
+          .maybeSingle(),
+      ]);
+      const ledgerEntry = ledgerRes.data;
+      const linkedTransactionId = noteRes.data?.transaction_id ?? null;
 
       // Delete the buy/sell note
       const { error: deleteError } = await supabase
@@ -2714,6 +2723,14 @@ export function BuyAndSellNotes() {
         .delete()
         .eq("id", id);
       if (deleteError) throw deleteError;
+
+      // Delete the linked transaction so it disappears from analytics
+      if (linkedTransactionId) {
+        await supabase
+          .from("transactions")
+          .delete()
+          .eq("id", linkedTransactionId);
+      }
 
       // Reverse the cash ledger entry and recompute running balances
       if (ledgerEntry) {
