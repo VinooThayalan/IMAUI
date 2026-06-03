@@ -1,4 +1,17 @@
-import { PieChart, TrendingUp, Wallet, Percent } from 'lucide-react';
+import { PieChart, TrendingUp, Wallet, Percent, Download } from 'lucide-react';
+
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 const portfolioData = {
   totalValue: 24567890,
@@ -38,11 +51,36 @@ const bottomPerformers = [
 ];
 
 export function Portfolio() {
+  function handleExport() {
+    const date = new Date().toISOString().split('T')[0];
+
+    exportCsv(`portfolio_sector_allocation_${date}.csv`,
+      ['Sector', 'Value (Rs.)', 'Percentage (%)'],
+      sectorAllocation.map(s => [s.sector, s.value, s.percentage])
+    );
+
+    setTimeout(() => {
+      exportCsv(`portfolio_entity_breakdown_${date}.csv`,
+        ['Entity', 'Value (Rs.)', 'Percentage (%)', 'No. of Shares'],
+        entityBreakdown.map(e => [e.name, e.value, e.percentage, e.shares])
+      );
+    }, 300);
+  }
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Portfolio Overview</h1>
-        <p className="text-gray-500 mt-1">Comprehensive view of your investment portfolio</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Portfolio Overview</h1>
+          <p className="text-gray-500 mt-1">Comprehensive view of your investment portfolio</p>
+        </div>
+        <button
+          onClick={handleExport}
+          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          <Download className="w-4 h-4" />
+          Export
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">

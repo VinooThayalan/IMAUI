@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -215,6 +228,28 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
+  function exportDetail() {
+    const headers = ['Date','Type','Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus'];
+    const rows = group.rows.map(r => [
+      r.trade_date ?? '',
+      r.note_type,
+      r.price_avg ?? '',
+      r.no_of_shares > 0 ? r.no_of_shares : '',
+      r.share_cum_bal,
+      r.purchase_cost > 0 ? r.purchase_cost.toFixed(2) : '',
+      r.sale_value > 0 ? r.sale_value.toFixed(2) : '',
+      r.av_cost.toFixed(2),
+      r.av_price.toFixed(2),
+      r.dividend > 0 ? r.dividend.toFixed(2) : '',
+      r.cum_surplus.toFixed(2),
+      group.market_price > 0 ? r.market_value.toFixed(2) : '',
+      r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
+      group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
+    ]);
+    const date = new Date().toISOString().split('T')[0];
+    exportCsv(`${group.share_ticker}_${group.entity_name}_analytics_${date}.csv`, headers, rows);
+  }
+
   async function toggleNote(noteId: string, e: React.MouseEvent) {
     e.stopPropagation();
     if (expandedNoteId === noteId) {
@@ -351,6 +386,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             </div>
           </div>
 
+          <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
+            <Download className="w-5 h-5" />
+          </button>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
@@ -731,6 +769,32 @@ export function ShareAnalytics() {
 
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
+  function exportSummary() {
+    const headers = ['Share','Share Name','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus'];
+    const rows = filtered.map(g => {
+      const last = g.rows[g.rows.length - 1];
+      return [
+        g.share_ticker,
+        g.share_name,
+        g.entity_name,
+        g.cds_account,
+        last.share_cum_bal,
+        g.rows.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
+        g.rows.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
+        last.av_cost.toFixed(2),
+        last.av_price.toFixed(2),
+        g.rows.reduce((s, r) => s + r.dividend, 0).toFixed(2),
+        last.cum_surplus.toFixed(2),
+        g.market_price > 0 ? last.market_value.toFixed(2) : '',
+        g.rows.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
+        g.market_price > 0 ? last.total_surplus.toFixed(2) : '',
+      ];
+    });
+    const date = new Date().toISOString().split('T')[0];
+    const label = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? 'all') : 'all';
+    exportCsv(`share_analytics_${label}_${date}.csv`, headers, rows);
+  }
+
   return (
     <div className="p-6 space-y-5">
       <div>
@@ -767,8 +831,17 @@ export function ShareAnalytics() {
               />
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-2 text-sm text-gray-500 self-end pb-2">
-            {filtered.length} share{filtered.length !== 1 ? 's' : ''}
+          <div className="ml-auto flex items-center gap-3 self-end pb-2">
+            <span className="text-sm text-gray-500">{filtered.length} share{filtered.length !== 1 ? 's' : ''}</span>
+            {filtered.length > 0 && (
+              <button
+                onClick={exportSummary}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+            )}
           </div>
         </div>
       </div>
