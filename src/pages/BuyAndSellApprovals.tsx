@@ -132,6 +132,29 @@ export function BuyAndSellApprovals() {
     return { entity, share, broker, eb };
   }
 
+  const [viewingFileId, setViewingFileId] = useState<string | null>(null);
+
+  async function handleViewFile(note: BuyAndSellNote) {
+    if (!note.file_url) return;
+    setViewingFileId(note.id);
+    try {
+      if (!note.file_url.startsWith('http')) {
+        const { data, error } = await supabase.storage
+          .from('transaction-documents')
+          .createSignedUrl(note.file_url, 3600);
+        if (error || !data?.signedUrl) {
+          alert('Could not retrieve file. It may have been deleted.');
+          return;
+        }
+        window.open(data.signedUrl, '_blank');
+      } else {
+        window.open(note.file_url, '_blank');
+      }
+    } finally {
+      setViewingFileId(null);
+    }
+  }
+
   function openModal(note: BuyAndSellNote, action: ModalAction) {
     setSelectedNote(note);
     setModalAction(action);
@@ -445,17 +468,31 @@ const displayNotes = notes.filter(n => {
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
 {note.file_url && (
-                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
-                              <Eye className="w-3.5 h-3.5" />
-                            </a>
+                            <button
+                              onClick={() => handleViewFile(note)}
+                              disabled={viewingFileId === note.id}
+                              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                              title="View document"
+                            >
+                              {viewingFileId === note.id
+                                ? <span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                : <Eye className="w-3.5 h-3.5" />}
+                            </button>
                           )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
                           {note.file_url && (
-                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors">
-                              <Eye className="w-3.5 h-3.5" />
-                            </a>
+                            <button
+                              onClick={() => handleViewFile(note)}
+                              disabled={viewingFileId === note.id}
+                              className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                              title="View document"
+                            >
+                              {viewingFileId === note.id
+                                ? <span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                : <Eye className="w-3.5 h-3.5" />}
+                            </button>
                           )}
                           {note.approval_notes && (
                             <span className="text-xs text-gray-500 max-w-[160px] truncate" title={note.approval_notes}>{note.approval_notes}</span>
