@@ -3150,15 +3150,7 @@ export function BuyAndSellNotes() {
                         className="bg-blue-50 border-b border-blue-100"
                       >
                         <td colSpan={11} className="px-6 py-4">
-                          <div className="grid grid-cols-3 gap-4 mb-4">
-                            <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">
-                                Contract No.
-                              </p>
-                              <p className="text-sm font-bold text-gray-900 font-mono">
-                                {note.contract_no || note.note_number || "-"}
-                              </p>
-                            </div>
+                          <div className="grid grid-cols-2 gap-4 mb-4">
                             <div className="bg-white rounded-lg border border-sky-200 px-4 py-3">
                               <p className="text-xs font-semibold text-sky-500 uppercase tracking-wide mb-0.5">
                                 Share
