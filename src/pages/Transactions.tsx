@@ -1,4 +1,4 @@
-import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle } from 'lucide-react';
+import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -141,6 +141,7 @@ export function Transactions() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([emptyBulkRow()]);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
@@ -478,6 +479,34 @@ export function Transactions() {
       day_trade: false
     });
     setFeeBreakdownItems([]);
+    setEditingDraftId(null);
+  }
+
+  function handleEditDraft(transaction: Transaction) {
+    const eb = entityBrokers.find(eb =>
+      eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
+    );
+    setFormData({
+      entity_id: transaction.entity_id,
+      relationship_type: eb?.relationship_type || 'Broker',
+      entity_broker_id: eb?.id || '',
+      selected_broker_name_id: transaction.broker_id || '',
+      selected_bank_id: transaction.bank_id || '',
+      share_id: transaction.share_id,
+      transaction_type: transaction.transaction_type,
+      order_type: transaction.order_type || 'DAY',
+      transaction_date: transaction.transaction_date?.split('T')[0] || new Date().toISOString().split('T')[0],
+      no_of_shares: String(transaction.no_of_shares),
+      price_per_share: String(transaction.price_per_share),
+      brokerage_fee_type_id: transaction.brokerage_fee_type_id || '',
+      brokerage_fee_rate: transaction.brokerage_fee_rate != null ? String(transaction.brokerage_fee_rate) : '',
+      fees: String(transaction.fees),
+      use_negotiated_fee: false,
+      day_trade: transaction.day_trade || false,
+    });
+    setFeeBreakdownItems([]);
+    setEditingDraftId(transaction.id);
+    setShowModal(true);
   }
 
   async function handleCreateTransaction(e: React.FormEvent) {
@@ -517,7 +546,7 @@ export function Transactions() {
 
       const selectedEntityBroker = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
 
-      const { error } = await supabase.from('transactions').insert({
+      const txnPayload = {
         entity_id: formData.entity_id,
         broker_id: selectedEntityBroker?.broker_id || null,
         bank_id: formData.selected_bank_id || null,
@@ -538,11 +567,18 @@ export function Transactions() {
         total_amount: totalAmountNet,
         approval_status: 'DRAFT',
         day_trade: formData.day_trade
-      });
+      };
+
+      let error;
+      if (editingDraftId) {
+        ({ error } = await supabase.from('transactions').update(txnPayload).eq('id', editingDraftId));
+      } else {
+        ({ error } = await supabase.from('transactions').insert(txnPayload));
+      }
 
       if (error) throw error;
 
-      alert('Transaction created successfully');
+      alert(editingDraftId ? 'Draft updated successfully' : 'Transaction created successfully');
       setShowModal(false);
       resetForm();
       loadData();
@@ -1575,6 +1611,15 @@ export function Transactions() {
                       >
                         <Eye className="w-5 h-5" />
                       </button>
+                      {transaction.approval_status === 'DRAFT' && (
+                        <button
+                          onClick={() => handleEditDraft(transaction)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Edit Draft"
+                        >
+                          <Pencil className="w-5 h-5" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handlePrintTransaction(transaction)}
                         className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition-colors"
@@ -1651,7 +1696,7 @@ export function Transactions() {
               formData.transaction_type === 'BUY' ? 'border-green-200 bg-green-100' : 'border-red-200 bg-red-100'
             }`}>
               <h2 className="text-lg font-bold text-gray-900">
-                New {formData.transaction_type === 'BUY' ? 'Buy' : 'Sell'} Transaction
+                {editingDraftId ? `Edit Draft ${formData.transaction_type === 'BUY' ? 'Buy' : 'Sell'} Transaction` : `New ${formData.transaction_type === 'BUY' ? 'Buy' : 'Sell'} Transaction`}
               </h2>
             </div>
             <form onSubmit={handleCreateTransaction} className="flex flex-col flex-1 min-h-0">

@@ -185,7 +185,7 @@ export function BrokerageFeeTypes() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Brokerage Fee Types</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Total Fee Types</h1>
           <p className="text-gray-500 mt-1">Manage brokerage fee tiers and component breakdowns</p>
         </div>
         <button
