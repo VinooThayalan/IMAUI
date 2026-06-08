@@ -395,7 +395,7 @@ const displayNotes = notes.filter(n => {
                 <th className="w-8 px-4 py-3"></th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Contract No</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Entity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Security</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ticker</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Broker</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Trade Date</th>
@@ -432,8 +432,7 @@ const displayNotes = notes.filter(n => {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{entity?.name || '-'}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="text-sm font-semibold text-gray-900">{share?.share_name || '-'}</div>
-                      <div className="text-xs text-gray-500 font-mono">{share?.ticker || ''}</div>
+                      <div className="text-sm font-semibold text-gray-900 font-mono">{share?.ticker || '-'}</div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold ${note.note_type === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>

@@ -3533,26 +3533,7 @@ export function BuyAndSellNotes() {
                 );
               })()}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">
-                    Broker
-                  </label>
-                  {(() => {
-                    const selTxnForBroker = transactions.find(
-                      (t) => t.id === formData.transaction_id,
-                    );
-                    const txnBroker = selTxnForBroker?.broker_id
-                      ? brokers.find((b) => b.id === selTxnForBroker.broker_id)
-                      : null;
-                    return (
-                      <div className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-700 min-h-[34px]">
-                        {txnBroker?.broker_name || <span className="text-gray-400 italic">From selected transaction</span>}
-                      </div>
-                    );
-                  })()}
-                </div>
-                <div>
+              <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
                     Contact Person
                   </label>
@@ -3566,7 +3547,6 @@ export function BuyAndSellNotes() {
                     placeholder="Enter contact person name"
                   />
                 </div>
-              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -3790,74 +3770,6 @@ export function BuyAndSellNotes() {
                 </div>
 
                 <div className="p-6 space-y-6">
-                  {/* Broker / Client A/C / Settlement summary */}
-                  {(() => {
-                    const selectedBroker = formData.broker_id
-                      ? brokers.find((b) => b.id === formData.broker_id)
-                      : null;
-                    const settlementDate =
-                      extractedData.settlement || formData.settlement_date;
-                    const txnForAc =
-                      transactions.find(
-                        (t) => t.id === formData.transaction_id,
-                      ) ||
-                      allTransactions.find(
-                        (t) => t.id === formData.transaction_id,
-                      );
-                    const entityForAc = txnForAc
-                      ? entities.find((e) => e.id === txnForAc.entity_id)
-                      : null;
-                    const matchedEb = entityForAc
-                      ? entityBrokers.find(
-                          (eb) =>
-                            eb.entity_id === entityForAc.id &&
-                            eb.broker_id === formData.broker_id,
-                        )
-                      : null;
-                    const clientAc =
-                      matchedEb?.broker_account_number ||
-                      matchedEb?.custodian_account_number ||
-                      extractedData.account_no ||
-                      null;
-                    return (
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">
-                            Broker
-                          </p>
-                          <p className="text-sm font-bold text-blue-900">
-                            {selectedBroker?.broker_name || "-"}
-                          </p>
-                        </div>
-                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-0.5">
-                            Client A/C Number
-                          </p>
-                          <p className="text-sm font-bold text-emerald-900 font-mono">
-                            {clientAc || "-"}
-                          </p>
-                        </div>
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-                          <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">
-                            Settlement Date
-                          </p>
-                          <p className="text-sm font-bold text-amber-900">
-                            {settlementDate
-                              ? new Date(settlementDate).toLocaleDateString(
-                                  "en-GB",
-                                  {
-                                    day: "2-digit",
-                                    month: "short",
-                                    year: "numeric",
-                                  },
-                                )
-                              : "-"}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {validationIssues.length > 0 && (
                     <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
                       <div className="flex items-start space-x-2">
