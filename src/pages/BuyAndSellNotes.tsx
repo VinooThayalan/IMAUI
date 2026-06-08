@@ -2159,8 +2159,8 @@ export function BuyAndSellNotes() {
           matches: Math.abs(actual - expected) <= tolerance,
         };
       };
-      // When price/share is rounded in transactions, gross/net can differ slightly from PDF line-level sums.
-      const roundingTolerance = Math.max(1, expectedShares * 0.005);
+      // Allow up to Rs. 2 rounding difference for gross/net (floating point / display rounding only).
+      const roundingTolerance = 2;
       check("no_of_shares", pdfShares, expectedShares, 0.01);
       check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.05);
       check("gross_amount", pdfGross, expectedGross, roundingTolerance);
