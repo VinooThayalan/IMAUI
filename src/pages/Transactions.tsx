@@ -173,6 +173,7 @@ export function Transactions() {
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
   const [feeBreakdownItems, setFeeBreakdownItems] = useState<FeeBreakdownItem[]>([]);
   const [sharesInputFocused, setSharesInputFocused] = useState(false);
+  const [latestSharePrice, setLatestSharePrice] = useState<{ price: number; date: string } | null>(null);
 
   const [formData, setFormData] = useState({
     entity_id: '',
@@ -202,6 +203,20 @@ export function Transactions() {
       calculateShareBalance(formData.entity_id, formData.share_id);
     }
   }, [formData.entity_id, formData.share_id]);
+
+  useEffect(() => {
+    if (!formData.share_id) { setLatestSharePrice(null); return; }
+    supabase
+      .from('daily_share_prices')
+      .select('share_price, effective_date')
+      .eq('share_id', formData.share_id)
+      .order('effective_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        setLatestSharePrice(data ? { price: Number(data.share_price), date: data.effective_date } : null);
+      });
+  }, [formData.share_id]);
 
   useEffect(() => {
     if (formData.no_of_shares && formData.price_per_share) {
@@ -480,6 +495,7 @@ export function Transactions() {
     });
     setFeeBreakdownItems([]);
     setEditingDraftId(null);
+    setLatestSharePrice(null);
   }
 
   function handleEditDraft(transaction: Transaction) {
@@ -1888,6 +1904,12 @@ export function Transactions() {
                         <option key={share.id} value={share.id}>{share.ticker} - {share.share_name}</option>
                       ))}
                     </select>
+                    {latestSharePrice && (
+                      <p className="text-xs mt-1 text-gray-500">
+                        Latest price: <span className="font-semibold text-gray-800">Rs. {latestSharePrice.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="ml-1 text-gray-400">({new Date(latestSharePrice.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })})</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 
