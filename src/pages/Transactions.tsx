@@ -1955,7 +1955,7 @@ export function Transactions() {
                       className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="e.g., 150.50" required
                     />
-                    {currentBalance && (
+                    {currentBalance && formData.transaction_type === 'BUY' && (
                       <p className="text-xs text-gray-500 mt-0.5">Avg cost: <span className="font-semibold">LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></p>
                     )}
                   </div>
@@ -1971,6 +1971,13 @@ export function Transactions() {
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Avg Cost After Purchase</label>
                         <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
                           LKR {calculateAverageCostWithPurchase().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                      </>
+                    ) : formData.transaction_type === 'SELL' && currentBalance ? (
+                      <>
+                        <label className="block text-xs font-semibold text-gray-600 mb-1">Current Avg Cost</label>
+                        <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
+                          LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </div>
                       </>
                     ) : entityBalance > 0 && requiredAmount > 0 && formData.transaction_type === 'BUY' ? (
@@ -2005,7 +2012,6 @@ export function Transactions() {
                 {formData.transaction_type === 'SELL' && sellPnL && (
                   <div className={`px-3 py-2 rounded-lg border flex gap-6 text-xs ${sellPnL.pnlPerShare >= 0 ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
                     <span className="font-semibold text-gray-600">Estimated P&L</span>
-                    <span className="text-gray-500">Avg Cost/Share: <span className="font-semibold text-gray-800">LKR {sellPnL.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></span>
                     <span className="text-gray-500">P&L/Share: <span className={`font-bold ${sellPnL.pnlPerShare >= 0 ? 'text-green-700' : 'text-red-700'}`}>{sellPnL.pnlPerShare >= 0 ? '+' : ''}LKR {sellPnL.pnlPerShare.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></span>
                     <span className="text-gray-500">Total P&L: <span className={`font-bold ${sellPnL.totalPnl >= 0 ? 'text-green-700' : 'text-red-700'}`}>{sellPnL.totalPnl >= 0 ? '+' : ''}LKR {sellPnL.totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></span>
                   </div>
