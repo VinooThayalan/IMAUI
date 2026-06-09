@@ -310,7 +310,7 @@ export function Transactions() {
       const [txnRes, openingRes] = await Promise.all([
         supabase
           .from('transactions')
-          .select('transaction_type, no_of_shares, price_per_share')
+          .select('transaction_type, no_of_shares, price_per_share, net_price_per_share')
           .eq('entity_id', entityId)
           .eq('share_id', shareId),
         supabase
@@ -335,7 +335,8 @@ export function Transactions() {
 
       (txnRes.data || []).forEach(txn => {
         const shares = Number(txn.no_of_shares) || 0;
-        const price = Number(txn.price_per_share) || 0;
+        // Use net_price_per_share (includes fees) for true cost basis; fall back to gross if missing
+        const price = Number(txn.net_price_per_share) || Number(txn.price_per_share) || 0;
 
         if (txn.transaction_type === 'BUY') {
           totalShares += shares;
@@ -426,7 +427,8 @@ export function Transactions() {
 
     if (formData.transaction_type === 'BUY') {
       const totalShares = balance.total_shares + newShares;
-      const totalCost = (balance.total_shares * balance.avg_cost) + (newShares * newPrice);
+      const newNetPrice = calculateNetPricePerShare();
+      const totalCost = (balance.total_shares * balance.avg_cost) + (newShares * newNetPrice);
       return totalShares > 0 ? totalCost / totalShares : 0;
     } else {
       return balance.avg_cost;
@@ -437,9 +439,10 @@ export function Transactions() {
     const key = `${formData.entity_id}-${formData.share_id}`;
     const balance = shareBalances.get(key);
     if (!balance || balance.avg_cost === 0) return null;
-    const salePrice = parseFloat(formData.price_per_share) || 0;
+    // Net proceeds per share (sale price minus fees) vs avg cost basis
+    const netSalePrice = calculateNetPricePerShare();
     const numShares = parseFloat(formData.no_of_shares) || 0;
-    const pnlPerShare = salePrice - balance.avg_cost;
+    const pnlPerShare = netSalePrice - balance.avg_cost;
     const totalPnl = pnlPerShare * numShares;
     return { avgCost: balance.avg_cost, pnlPerShare, totalPnl };
   }
