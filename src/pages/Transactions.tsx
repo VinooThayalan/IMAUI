@@ -1856,8 +1856,18 @@ export function Transactions() {
                   </div>
                 </div>
 
-                {/* Row 4: Transaction Type / Order Type / Share */}
-                <div className="grid grid-cols-3 gap-3">
+                {/* Row 4: Transaction Date / Transaction Type / Order Type / Share */}
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Date <span className="text-red-600">*</span></label>
+                    <input
+                      type="date"
+                      value={formData.transaction_date}
+                      onChange={(e) => setFormData({ ...formData, transaction_date: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Type <span className="text-red-600">*</span></label>
                     <select
