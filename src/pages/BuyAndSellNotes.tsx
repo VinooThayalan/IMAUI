@@ -2159,17 +2159,17 @@ export function BuyAndSellNotes() {
           matches: Math.abs(actual - expected) <= tolerance,
         };
       };
-      // Allow up to Rs. 2 rounding difference for gross/net (floating point / display rounding only).
-      const roundingTolerance = 2;
+      // Allow up to Rs. 0.01 (1 cent) rounding difference for amounts.
+      const roundingTolerance = 0.01;
       check("no_of_shares", pdfShares, expectedShares, 0.01);
-      check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.05);
+      check("price_avg", pdfAvgPrice, expectedAvgPrice, 0.005);
       check("gross_amount", pdfGross, expectedGross, roundingTolerance);
-      check("brokerage", pdfBrokerage, expectedFees.brokerage, 1);
-      check("sec", pdfSec, expectedFees.sec, 1);
-      check("exchange", pdfExchange, expectedFees.exchange, 1);
-      check("cds", pdfCds, expectedFees.cds, 1);
-      check("gov_cess", pdfStl, expectedFees.gov_cess, 1);
-      check("clearing_fees", pdfClearing, expectedFees.clearing_fees, 1);
+      check("brokerage", pdfBrokerage, expectedFees.brokerage, 0.01);
+      check("sec", pdfSec, expectedFees.sec, 0.01);
+      check("exchange", pdfExchange, expectedFees.exchange, 0.01);
+      check("cds", pdfCds, expectedFees.cds, 0.01);
+      check("gov_cess", pdfStl, expectedFees.gov_cess, 0.01);
+      check("clearing_fees", pdfClearing, expectedFees.clearing_fees, 0.01);
       check("net_amount", pdfNet, expectedNet, roundingTolerance);
     }
 
