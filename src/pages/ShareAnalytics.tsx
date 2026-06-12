@@ -196,6 +196,7 @@ function SummaryCard({ label, value, sub, color = 'text-gray-900' }: SummaryCard
 
 interface NoteDetail {
   id: string;
+  transaction_id: string | null;
   note_number: string;
   contract_no: string | null;
   note_type: string;
@@ -250,6 +251,48 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     exportCsv(`${group.share_ticker}_${group.entity_name}_analytics_${date}.csv`, headers, rows);
   }
 
+  async function resolveFileUrl(fileUrl: string) {
+    if (fileUrl.startsWith('http')) return fileUrl;
+
+    const { data, error } = await supabase.storage
+      .from('transaction-documents')
+      .createSignedUrl(fileUrl, 3600);
+
+    if (error || !data?.signedUrl) {
+      throw new Error('Could not create a file link.');
+    }
+
+    return data.signedUrl;
+  }
+
+  function pickDownloadName(source: string, fallback: string) {
+    const fileName = source.split('/').pop();
+    return fileName || fallback;
+  }
+
+  async function openFile(fileUrl: string) {
+    const resolvedUrl = await resolveFileUrl(fileUrl);
+    window.open(resolvedUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function downloadFile(fileUrl: string, fileName: string) {
+    const resolvedUrl = await resolveFileUrl(fileUrl);
+    const response = await fetch(resolvedUrl);
+    if (!response.ok) {
+      throw new Error('Could not download the file.');
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   async function toggleNote(noteId: string, e: React.MouseEvent) {
     e.stopPropagation();
     if (expandedNoteId === noteId) {
@@ -289,6 +332,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
 
         setNoteDetails(prev => new Map(prev).set(noteId, {
           id: data.id,
+          transaction_id: data.transaction_id ?? null,
           note_number: data.note_number,
           contract_no: data.contract_no,
           note_type: data.note_type,
@@ -389,7 +433,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
           <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
             <Download className="w-5 h-5" />
           </button>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0">
+          <button onClick={onClose} title="Close" aria-label="Close" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -508,26 +552,40 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                                 {(detail.file_url || detail.approval_document_url) && (
                                   <div className="pt-1 flex flex-col gap-1.5">
                                     {detail.file_url && (
-                                      <a
-                                        href={detail.file_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-                                      >
-                                        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                        View Contract Note
-                                      </a>
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          onClick={() => void openFile(detail.file_url!)}
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+                                        >
+                                          <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                          View Contract Note
+                                        </button>
+                                        <button
+                                          onClick={() => void downloadFile(detail.file_url!, pickDownloadName(detail.file_url!, `${detail.contract_no || detail.note_number || 'contract-note'}.pdf`))}
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors"
+                                        >
+                                          <Download className="w-3.5 h-3.5 flex-shrink-0" />
+                                          Download Contract Note
+                                        </button>
+                                      </div>
                                     )}
                                     {detail.approval_document_url && (
-                                      <a
-                                        href={detail.approval_document_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
-                                      >
-                                        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                        {detail.approval_document_name || 'View Approval Document'}
-                                      </a>
+                                      <div className="flex flex-wrap gap-2">
+                                        <button
+                                          onClick={() => void openFile(detail.approval_document_url!)}
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 transition-colors"
+                                        >
+                                          <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                          {detail.approval_document_name || 'View Approval Document'}
+                                        </button>
+                                        <button
+                                          onClick={() => void downloadFile(detail.approval_document_url!, pickDownloadName(detail.approval_document_url!, detail.approval_document_name || 'approval-document.pdf'))}
+                                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors"
+                                        >
+                                          <Download className="w-3.5 h-3.5 flex-shrink-0" />
+                                          Download Approval Document
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 )}
@@ -812,6 +870,7 @@ export function ShareAnalytics() {
             <select
               value={selectedEntityId}
               onChange={e => setSelectedEntityId(e.target.value)}
+              aria-label="Select entity"
               className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[240px]"
             >
               <option value="">All Entities</option>

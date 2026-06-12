@@ -41,11 +41,24 @@ export function PortfolioSummary() {
     try {
       setLoading(true);
 
-      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes] = await Promise.all([
+      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes] = await Promise.all([
         supabase
           .from('transactions')
-          .select('entity_id, share_id, transaction_type, no_of_shares, total_amount, transaction_date, price_per_share')
-          .lte('transaction_date', asOfDate),
+          .select(`
+            id,
+            entity_id,
+            share_id,
+            transaction_type,
+            no_of_shares,
+            total_amount,
+            transaction_date,
+            approval_status,
+            entities ( name, entity_id ),
+            shares ( ticker, share_name, sector, sector_types ( sector_name ) )
+          `)
+          .lte('transaction_date', asOfDate)
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('transaction_date', { ascending: true }),
         supabase
           .from('daily_share_prices')
           .select('share_id, share_price, effective_date')
@@ -53,86 +66,171 @@ export function PortfolioSummary() {
           .order('effective_date', { ascending: false }),
         supabase
           .from('dividends')
-          .select('share_id, entity_id, dividend_per_share, total_dividend_amount, ex_dividend_date')
-          .lte('ex_dividend_date', asOfDate),
+          .select('share_id, entity_id, amount_net, net_dividend_per_share, payment_date')
+          .lte('payment_date', asOfDate),
         supabase.from('entities').select('id, name, entity_id'),
-        supabase.from('shares').select('id, ticker, share_name, sector_types(name)')
+        supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)'),
+        supabase
+          .from('entity_share_opening_balances')
+          .select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date')
+          .lte('effective_date', asOfDate),
+        supabase
+          .from('buy_sell_notes')
+          .select('transaction_id, note_type, trade_date, no_of_shares, gross_amount')
+          .lte('trade_date', asOfDate)
+          .order('trade_date', { ascending: true }),
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
-      if (pricesRes.error) throw pricesRes.error;
-      if (dividendsRes.error) throw dividendsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
-      if (sharesRes.error) throw sharesRes.error;
 
       const latestPrices = new Map<string, number>();
-      pricesRes.data?.forEach(p => {
+      (pricesRes.data || []).forEach((p: { share_id: string; share_price: number }) => {
         if (!latestPrices.has(p.share_id)) {
-          latestPrices.set(p.share_id, p.share_price);
+          latestPrices.set(p.share_id, Number(p.share_price) || 0);
         }
       });
 
-      const entityMap = new Map<string, any>();
-      entitiesRes.data?.forEach(e => {
+      const entityMap = new Map<string, { name: string; entity_id: string }>();
+      (entitiesRes.data || []).forEach((e: { id: string; name: string; entity_id: string }) => {
         entityMap.set(e.id, { name: e.name, entity_id: e.entity_id });
       });
 
-      const shareMap = new Map<string, any>();
-      sharesRes.data?.forEach(s => {
+      const shareMap = new Map<string, { ticker: string; name: string; sector: string }>();
+      (sharesRes.data || []).forEach((s: {
+        id: string;
+        ticker: string;
+        share_name: string;
+        sector?: string;
+        sector_types?: { sector_name: string } | null;
+      }) => {
         shareMap.set(s.id, {
           ticker: s.ticker,
           name: s.share_name,
-          sector: s.sector_types?.[0]?.name || 'N/A'
+          sector: s.sector_types?.sector_name || s.sector || 'N/A',
         });
       });
 
-      const holdingsMap = new Map<string, {
+      type Holding = {
         entity_id: string;
         entity_name: string;
         cds_account: string;
         share_id: string;
         shares: number;
         cost: number;
-      }>();
+      };
 
-      transactionsRes.data?.forEach((tx: any) => {
-        const key = `${tx.entity_id}_${tx.share_id}`;
+      const holdingsMap = new Map<string, Holding>();
+
+      function ensureHolding(entityId: string, shareId: string, entityName?: string, cdsAccount?: string): Holding {
+        const key = `${entityId}_${shareId}`;
         if (!holdingsMap.has(key)) {
-          const entity = entityMap.get(tx.entity_id);
+          const entity = entityMap.get(entityId);
           holdingsMap.set(key, {
-            entity_id: tx.entity_id,
-            entity_name: entity?.name || 'Unknown',
-            cds_account: entity?.entity_id || '',
-            share_id: tx.share_id,
+            entity_id: entityId,
+            entity_name: entityName || entity?.name || 'Unknown',
+            cds_account: cdsAccount || entity?.entity_id || '',
+            share_id: shareId,
             shares: 0,
-            cost: 0
+            cost: 0,
+          });
+        }
+        return holdingsMap.get(key)!;
+      }
+
+      function applyBuy(holding: Holding, shares: number, amount: number) {
+        holding.shares += shares;
+        holding.cost += amount;
+      }
+
+      function applySell(holding: Holding, shares: number) {
+        const avgCost = holding.shares > 0 ? holding.cost / holding.shares : 0;
+        holding.shares = Math.max(0, holding.shares - shares);
+        holding.cost = Math.max(0, holding.cost - avgCost * shares);
+      }
+
+      (openingRes.data || []).forEach((ob: {
+        entity_id: string;
+        share_id: string;
+        opening_shares: number;
+        average_purchase_cost: number;
+      }) => {
+        const holding = ensureHolding(ob.entity_id, ob.share_id);
+        const shares = Number(ob.opening_shares) || 0;
+        const cost = shares * (Number(ob.average_purchase_cost) || 0);
+        applyBuy(holding, shares, cost);
+      });
+
+      const noteByTxn = new Map<string, { shares: number; gross: number; note_type: string }>();
+      (notesRes.data || []).forEach((n: {
+        transaction_id: string;
+        note_type: string;
+        no_of_shares: number;
+        gross_amount: number;
+      }) => {
+        noteByTxn.set(n.transaction_id, {
+          shares: Number(n.no_of_shares) || 0,
+          gross: Number(n.gross_amount) || 0,
+          note_type: n.note_type,
+        });
+      });
+
+      (transactionsRes.data || []).forEach((tx: {
+        id: string;
+        entity_id: string;
+        share_id: string;
+        transaction_type: string;
+        no_of_shares: number;
+        total_amount: number;
+        entities?: { name: string; entity_id: string } | null;
+        shares?: {
+          ticker: string;
+          share_name: string;
+          sector?: string;
+          sector_types?: { sector_name: string } | null;
+        } | null;
+      }) => {
+        if (!shareMap.has(tx.share_id) && tx.shares) {
+          shareMap.set(tx.share_id, {
+            ticker: tx.shares.ticker,
+            name: tx.shares.share_name,
+            sector: tx.shares.sector_types?.sector_name || tx.shares.sector || 'N/A',
           });
         }
 
-        const holding = holdingsMap.get(key)!;
-        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
-        const shares = Number(tx.no_of_shares);
-        const amount = Number(tx.total_amount);
+        const holding = ensureHolding(
+          tx.entity_id,
+          tx.share_id,
+          tx.entities?.name,
+          tx.entities?.entity_id,
+        );
 
-        if (isBuy) {
-          holding.shares += shares;
-          holding.cost += amount;
-        } else {
-          holding.shares -= shares;
-          const avgCost = holding.shares > 0 ? holding.cost / (holding.shares + shares) : 0;
-          holding.cost -= avgCost * shares;
-        }
+        const note = noteByTxn.get(tx.id);
+        const shares = note ? note.shares : Number(tx.no_of_shares) || 0;
+        const amount = note ? note.gross : Number(tx.total_amount) || 0;
+        const txType = note?.note_type || tx.transaction_type;
+        const isBuy = (txType || '').toUpperCase() === 'BUY';
+
+        if (isBuy) applyBuy(holding, shares, amount);
+        else applySell(holding, shares);
       });
 
       const dividendMap = new Map<string, { total: number; dps_last_fy: number }>();
-      dividendsRes.data?.forEach((div: any) => {
+      (dividendsRes.data || []).forEach((div: {
+        entity_id: string;
+        share_id: string;
+        amount_net: number;
+        net_dividend_per_share?: number;
+      }) => {
         const key = `${div.entity_id}_${div.share_id}`;
         if (!dividendMap.has(key)) {
           dividendMap.set(key, { total: 0, dps_last_fy: 0 });
         }
         const divData = dividendMap.get(key)!;
-        divData.total += Number(div.total_dividend_amount);
-        divData.dps_last_fy = Number(div.dividend_per_share);
+        divData.total += Number(div.amount_net) || 0;
+        if (div.net_dividend_per_share != null) {
+          divData.dps_last_fy = Number(div.net_dividend_per_share);
+        }
       });
 
       const portfolioData: PortfolioRow[] = Array.from(holdingsMap.entries())

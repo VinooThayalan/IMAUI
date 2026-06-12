@@ -1719,10 +1719,14 @@ export function Transactions() {
               </h2>
             </div>
             <form onSubmit={handleCreateTransaction} className="flex flex-col flex-1 min-h-0">
-              <div className="px-5 py-3 space-y-2.5 overflow-y-auto bg-white">
+              <div className={`px-5 py-3 space-y-2.5 overflow-y-auto ${
+                formData.transaction_type === 'BUY' ? 'bg-green-50/70' : 'bg-red-50/70'
+              }`}>
 
                 {/* Row 1: Entity + Type/Account/Broker */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className={`grid grid-cols-4 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Entity <span className="text-red-600">*</span></label>
                     <select
@@ -1797,7 +1801,9 @@ export function Transactions() {
 
                 {/* Row 2: Broker details info strip (compact) */}
                 {selectedEntityBroker && (
-                  <div className="bg-blue-50 px-3 py-2 rounded-lg border border-blue-200 flex flex-wrap gap-x-6 gap-y-1">
+                  <div className={`px-3 py-2 rounded-lg border flex flex-wrap gap-x-6 gap-y-1 ${
+                    formData.transaction_type === 'BUY' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+                  }`}>
                     {formData.relationship_type === 'Custodian' ? (
                       <>
                         <span className="text-xs text-gray-500">Custodian Acct: <span className="font-semibold text-gray-800">{selectedEntityBroker.custodian_account_number || 'N/A'}</span></span>
@@ -1815,7 +1821,9 @@ export function Transactions() {
                 )}
 
                 {/* Row 3: Bank Account dropdown + auto-populated account details */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className={`grid grid-cols-3 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Bank Name</label>
                     <select
@@ -1857,7 +1865,9 @@ export function Transactions() {
                 </div>
 
                 {/* Row 4: Transaction Date / Transaction Type / Order Type / Share */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className={`grid grid-cols-4 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Transaction Date <span className="text-red-600">*</span></label>
                     <input
@@ -1927,7 +1937,9 @@ export function Transactions() {
                 </div>
 
                 {/* Row 5: Shares / Price / Gross / Avg Cost — and balance warning inline */}
-                <div className="grid grid-cols-4 gap-3">
+                <div className={`grid grid-cols-4 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">No. of Shares <span className="text-red-600">*</span></label>
                     <input
@@ -2028,7 +2040,9 @@ export function Transactions() {
                 )}
 
                 {/* Row 6: Brokerage fee type */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className={`grid grid-cols-2 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs font-semibold text-gray-600">Brokerage Fee Type</label>
@@ -2155,7 +2169,9 @@ export function Transactions() {
                 )}
 
                 {/* Row 7: Fee totals + net */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className={`grid grid-cols-3 gap-3 rounded-xl border p-3 ${
+                  formData.transaction_type === 'BUY' ? 'border-green-200 bg-white/80' : 'border-red-200 bg-white/80'
+                }`}>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Total Brokerage Fee (LKR)</label>
                     <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
@@ -2177,18 +2193,26 @@ export function Transactions() {
                 </div>
 
               </div>
-              <div className="px-5 py-3 border-t border-gray-200 flex justify-end space-x-3 bg-white">
+              <div className={`px-5 py-3 border-t flex justify-end space-x-3 ${
+                formData.transaction_type === 'BUY' ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'
+              }`}>
                 <button
                   type="button"
                   onClick={() => { setShowModal(false); resetForm(); }}
-                  className="px-4 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                  className={`px-4 py-1.5 border rounded-lg text-sm font-medium transition-colors ${
+                    formData.transaction_type === 'BUY'
+                      ? 'border-green-200 text-green-700 hover:bg-green-100'
+                      : 'border-red-200 text-red-700 hover:bg-red-100'
+                  }`}
                   disabled={submitting}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:bg-gray-400"
+                  className={`px-4 py-1.5 text-white rounded-lg text-sm font-medium transition-colors disabled:bg-gray-400 ${
+                    formData.transaction_type === 'BUY' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
                   disabled={submitting}
                 >
                   {submitting ? 'Creating...' : 'Create Transaction'}
