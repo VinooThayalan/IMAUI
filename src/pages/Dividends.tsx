@@ -1,6 +1,8 @@
 import { Plus, Search, Filter, Wallet, TrendingUp, Calendar, Pencil, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Dividend {
   id: string;
@@ -73,6 +75,7 @@ const EMPTY_FORM = {
 };
 
 export function Dividends() {
+  const { user } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -206,11 +209,14 @@ export function Dividends() {
       };
 
       if (editingId) {
+        const oldRecord = await fetchRecordForAudit('dividends', editingId);
         const { error } = await supabase.from('dividends').update(payload).eq('id', editingId);
         if (error) throw error;
+        logAudit({ tableName: 'dividends', recordId: editingId, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload }, entityId: payload.entity_id });
       } else {
-        const { error } = await supabase.from('dividends').insert(payload);
+        const { data: inserted, error } = await supabase.from('dividends').insert(payload).select('id').maybeSingle();
         if (error) throw error;
+        logAudit({ tableName: 'dividends', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload, entityId: payload.entity_id });
       }
       closeModal();
       loadData();
@@ -224,8 +230,10 @@ export function Dividends() {
     if (!confirm('Are you sure you want to delete this dividend record?')) return;
     setDeletingId(id);
     try {
+      const oldRecord = await fetchRecordForAudit('dividends', id);
       const { error } = await supabase.from('dividends').delete().eq('id', id);
       if (error) throw error;
+      logAudit({ tableName: 'dividends', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord, entityId: oldRecord?.entity_id });
       loadData();
     } catch (error) {
       console.error('Error deleting dividend:', error);

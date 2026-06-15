@@ -1,6 +1,8 @@
 import { Plus, Search, CreditCard as Edit, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Broker {
   id: string;
@@ -34,6 +36,7 @@ interface BrokerEntity {
 }
 
 export function Brokers() {
+  const { user } = useAuth();
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showEntityModal, setShowEntityModal] = useState(false);
@@ -172,39 +175,16 @@ export function Brokers() {
 
     try {
       if (editingBroker) {
-        const { error } = await supabase
-          .from('brokers')
-          .update({
-            broker_name: formData.broker_name,
-            contact_person_name: formData.contact_person_name || null,
-            contact_person_email: formData.contact_person_email || null,
-            contact_person_phone: formData.contact_person_phone || null,
-            contact_person_mobile: formData.contact_person_mobile || null,
-            contact_person_designation: formData.contact_person_designation || null,
-            settlement_bank_account: formData.settlement_bank_account || null,
-            broker_cds_account: formData.broker_cds_account || null,
-            is_active: formData.is_active,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editingBroker.id);
-
+        const payload = { broker_name: formData.broker_name, contact_person_name: formData.contact_person_name || null, contact_person_email: formData.contact_person_email || null, contact_person_phone: formData.contact_person_phone || null, contact_person_mobile: formData.contact_person_mobile || null, contact_person_designation: formData.contact_person_designation || null, settlement_bank_account: formData.settlement_bank_account || null, broker_cds_account: formData.broker_cds_account || null, is_active: formData.is_active, updated_at: new Date().toISOString() };
+        const oldRecord = await fetchRecordForAudit('brokers', editingBroker.id);
+        const { error } = await supabase.from('brokers').update(payload).eq('id', editingBroker.id);
         if (error) throw error;
+        logAudit({ tableName: 'brokers', recordId: editingBroker.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload } });
       } else {
-        const { error } = await supabase
-          .from('brokers')
-          .insert([{
-            broker_name: formData.broker_name,
-            contact_person_name: formData.contact_person_name || null,
-            contact_person_email: formData.contact_person_email || null,
-            contact_person_phone: formData.contact_person_phone || null,
-            contact_person_mobile: formData.contact_person_mobile || null,
-            contact_person_designation: formData.contact_person_designation || null,
-            settlement_bank_account: formData.settlement_bank_account || null,
-            broker_cds_account: formData.broker_cds_account || null,
-            is_active: formData.is_active
-          }]);
-
+        const payload = { broker_name: formData.broker_name, contact_person_name: formData.contact_person_name || null, contact_person_email: formData.contact_person_email || null, contact_person_phone: formData.contact_person_phone || null, contact_person_mobile: formData.contact_person_mobile || null, contact_person_designation: formData.contact_person_designation || null, settlement_bank_account: formData.settlement_bank_account || null, broker_cds_account: formData.broker_cds_account || null, is_active: formData.is_active };
+        const { data: inserted, error } = await supabase.from('brokers').insert([payload]).select('id').maybeSingle();
         if (error) throw error;
+        logAudit({ tableName: 'brokers', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
       }
 
       await fetchBrokers();
@@ -219,12 +199,10 @@ export function Brokers() {
     if (!confirm('Are you sure you want to delete this broker?')) return;
 
     try {
-      const { error } = await supabase
-        .from('brokers')
-        .delete()
-        .eq('id', id);
-
+      const oldRecord = await fetchRecordForAudit('brokers', id);
+      const { error } = await supabase.from('brokers').delete().eq('id', id);
       if (error) throw error;
+      logAudit({ tableName: 'brokers', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await fetchBrokers();
     } catch (error) {
       console.error('Error deleting broker:', error);

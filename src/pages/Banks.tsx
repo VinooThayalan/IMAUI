@@ -1,6 +1,8 @@
 import { Plus, Search, DollarSign, Eye, Pencil, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface BankMasterItem {
   id: string;
@@ -59,6 +61,7 @@ const defaultForm: BankFormData = {
 };
 
 export function Banks() {
+  const { user } = useAuth();
   const [banks, setBanks] = useState<EntityBank[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [bankMasters, setBankMasters] = useState<BankMasterItem[]>([]);
@@ -162,11 +165,14 @@ export function Banks() {
       };
 
       if (editingBank) {
+        const oldRecord = await fetchRecordForAudit('banks', editingBank.id);
         const { error } = await supabase.from('banks').update(payload).eq('id', editingBank.id);
         if (error) throw error;
+        logAudit({ tableName: 'banks', recordId: editingBank.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload }, entityId: payload.entity_id });
       } else {
-        const { error } = await supabase.from('banks').insert(payload);
+        const { data: inserted, error } = await supabase.from('banks').insert(payload).select('id').maybeSingle();
         if (error) throw error;
+        logAudit({ tableName: 'banks', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload, entityId: payload.entity_id });
       }
       await loadData();
       closeModal();

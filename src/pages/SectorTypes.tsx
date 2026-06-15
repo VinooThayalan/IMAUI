@@ -1,6 +1,8 @@
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface SectorType {
   id: string;
@@ -16,6 +18,7 @@ interface SectorType {
 }
 
 export function SectorTypes() {
+  const { user } = useAuth();
   const [sectors, setSectors] = useState<SectorType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingSector, setEditingSector] = useState<SectorType | null>(null);
@@ -89,18 +92,23 @@ export function SectorTypes() {
       };
 
       if (editingSector) {
+        const oldRecord = await fetchRecordForAudit('sector_types', editingSector.id);
         const { error } = await supabase
           .from('sector_types')
           .update(dataToSubmit)
           .eq('id', editingSector.id);
 
         if (error) throw error;
+        logAudit({ tableName: 'sector_types', recordId: editingSector.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...dataToSubmit } });
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from('sector_types')
-          .insert([dataToSubmit]);
+          .insert([dataToSubmit])
+          .select('id')
+          .maybeSingle();
 
         if (error) throw error;
+        logAudit({ tableName: 'sector_types', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: dataToSubmit });
       }
 
       await fetchSectors();
@@ -115,12 +123,14 @@ export function SectorTypes() {
     if (!confirm('Are you sure you want to delete this sector? This may affect related shares.')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('sector_types', id);
       const { error } = await supabase
         .from('sector_types')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+      logAudit({ tableName: 'sector_types', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await fetchSectors();
     } catch (error) {
       console.error('Error deleting sector:', error);

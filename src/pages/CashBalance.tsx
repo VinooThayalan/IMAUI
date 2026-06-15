@@ -2,6 +2,7 @@ import { Plus, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRig
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit } from '../lib/auditLog';
 
 interface Entity {
   id: string;
@@ -150,6 +151,9 @@ export function CashBalance() {
         });
 
       if (error) throw error;
+
+      const cashEntry = { type: transactionType, description: formData.description, code: formData.code, amount, date: formData.date, running_balance: newBalance, entity_id: formData.entityId, bank_id: formData.bankId };
+      logAudit({ tableName: 'cash_balance_ledger', recordId: formData.entityId, action: 'CREATE', performedBy: createdBy, newValues: cashEntry, entityId: formData.entityId });
 
       await supabase
         .from('entities')

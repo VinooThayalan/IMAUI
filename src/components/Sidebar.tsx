@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers, Shield, Menu, MapPin } from 'lucide-react';
+import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers, Shield, Menu, MapPin, ClipboardList } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -78,6 +78,7 @@ const navSections: NavSection[] = [
       { icon: Users, label: 'User Management', href: '#user-management', menuName: 'user-management' },
       { icon: Menu, label: 'Menu Access', href: '#menu-access', menuName: 'menu-access' },
       { icon: MapPin, label: 'Entity Access', href: '#entity-access', menuName: 'entity-access' },
+      { icon: ClipboardList, label: 'Audit Trail', href: '#audit-log', menuName: 'audit-log' },
     ]
   }
 ];

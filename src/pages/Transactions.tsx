@@ -2,6 +2,7 @@ import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, M
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -589,13 +590,21 @@ export function Transactions() {
       };
 
       let error;
+      let oldRecord: Record<string, any> | null = null;
       if (editingDraftId) {
+        oldRecord = await fetchRecordForAudit('transactions', editingDraftId);
         ({ error } = await supabase.from('transactions').update(txnPayload).eq('id', editingDraftId));
       } else {
-        ({ error } = await supabase.from('transactions').insert(txnPayload));
+        ({ error } = await supabase.from('transactions').insert(txnPayload).select('id').maybeSingle());
       }
 
       if (error) throw error;
+
+      if (editingDraftId && oldRecord) {
+        logAudit({ tableName: 'transactions', recordId: editingDraftId, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...txnPayload }, entityId: txnPayload.entity_id });
+      } else {
+        logAudit({ tableName: 'transactions', recordId: txnPayload.entity_id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: txnPayload, entityId: txnPayload.entity_id });
+      }
 
       alert(editingDraftId ? 'Draft updated successfully' : 'Transaction created successfully');
       setShowModal(false);

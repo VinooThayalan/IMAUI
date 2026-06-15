@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { useAuth } from '../contexts/AuthContext';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
   getDocument: (src: { data: ArrayBuffer }) => {
@@ -225,6 +227,7 @@ function emptyManualRow(): ManualRow {
 }
 
 export function BuyAndSellNotes() {
+  const { user } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
@@ -2372,6 +2375,15 @@ export function BuyAndSellNotes() {
         .maybeSingle();
       if (insertError) throw insertError;
 
+      // Audit log for buy_sell_notes insert
+      await logAudit({
+        table: 'buy_sell_notes',
+        recordId: insertedNote?.id,
+        action: 'CREATE',
+        newValues: payload,
+        performedBy: user?.email || 'system',
+      });
+
       const transactionType = noteType === "Buy" ? "Deduction" : "Addition";
       const { data: existing } = await supabase
         .from("cash_balance_ledger")
@@ -2388,23 +2400,35 @@ export function BuyAndSellNotes() {
           ? lastBalance + totalNet
           : lastBalance - totalNet;
 
-      const { error: ledgerError } = await supabase
+      const ledgerPayload = {
+        type: transactionType,
+        description: `${selectedTransaction.transaction_type} - ${contractNo}`,
+        code: contractNo,
+        amount: totalNet,
+        date: extractedData.settlement || formData.settlement_date || null,
+        running_balance: newBalance,
+        on_hold_amount: 0,
+        entity_id: entity.id,
+        bank_id: null,
+        reference_id: insertedNote?.id || null,
+        created_by: "System",
+        notes: formData.remarks || null,
+      };
+      const { data: insertedLedger, error: ledgerError } = await supabase
         .from("cash_balance_ledger")
-        .insert({
-          type: transactionType,
-          description: `${selectedTransaction.transaction_type} - ${contractNo}`,
-          code: contractNo,
-          amount: totalNet,
-          date: extractedData.settlement || formData.settlement_date || null,
-          running_balance: newBalance,
-          on_hold_amount: 0,
-          entity_id: entity.id,
-          bank_id: null,
-          reference_id: insertedNote?.id || null,
-          created_by: "System",
-          notes: formData.remarks || null,
-        });
+        .insert(ledgerPayload)
+        .select()
+        .maybeSingle();
       if (ledgerError) throw ledgerError;
+
+      // Audit log for cash_balance_ledger insert
+      await logAudit({
+        table: 'cash_balance_ledger',
+        recordId: insertedLedger?.id,
+        action: 'CREATE',
+        newValues: ledgerPayload,
+        performedBy: user?.email || 'system',
+      });
 
       await loadData();
       handleCloseProcessModal();
@@ -2449,8 +2473,17 @@ export function BuyAndSellNotes() {
         storagePath,
       );
 
-      const { error } = await supabase.from("buy_sell_notes").insert(payload);
+      const { data: insertedNote2, error } = await supabase.from("buy_sell_notes").insert(payload).select().maybeSingle();
       if (error) throw error;
+
+      // Audit log for buy_sell_notes insert
+      await logAudit({
+        table: 'buy_sell_notes',
+        recordId: insertedNote2?.id,
+        action: 'CREATE',
+        newValues: payload,
+        performedBy: user?.email || 'system',
+      });
 
       await loadData();
       handleCloseProcessModal();
@@ -2515,49 +2548,69 @@ export function BuyAndSellNotes() {
         const pricePerShare = qty > 0 ? totalCost / qty : 0;
 
         // Create transaction record
+        const txnPayload = {
+          entity_id: row.entity_id,
+          share_id: row.share_id,
+          transaction_type: row.note_type === "Buy" ? "BUY" : "SELL",
+          order_type: "DAY",
+          transaction_date: row.settlement_date,
+          no_of_shares: qty,
+          price_per_share: pricePerShare,
+          total_amount_gross: totalCost,
+          fees: 0,
+          net_price_per_share: pricePerShare,
+          total_amount: totalCost,
+          approval_status: "MANUAL_APPROVED",
+          cds_account_id: row.broker_cds_account || null,
+        };
         const { data: insertedTxn, error: txnError } = await supabase
           .from("transactions")
-          .insert({
-            entity_id: row.entity_id,
-            share_id: row.share_id,
-            transaction_type: row.note_type === "Buy" ? "BUY" : "SELL",
-            order_type: "DAY",
-            transaction_date: row.settlement_date,
-            no_of_shares: qty,
-            price_per_share: pricePerShare,
-            total_amount_gross: totalCost,
-            fees: 0,
-            net_price_per_share: pricePerShare,
-            total_amount: totalCost,
-            approval_status: "MANUAL_APPROVED",
-            cds_account_id: row.broker_cds_account || null,
-          })
+          .insert(txnPayload)
           .select()
           .maybeSingle();
 
         if (txnError) throw txnError;
 
+        // Audit log for transactions insert
+        await logAudit({
+          table: 'transactions',
+          recordId: insertedTxn?.id,
+          action: 'CREATE',
+          newValues: txnPayload,
+          performedBy: user?.email || 'system',
+        });
+
         // Create buy/sell note linked to the transaction
         // broker column is NOT NULL in schema — use account info or placeholder
+        const notePayload = {
+          transaction_id: insertedTxn!.id,
+          note_type: row.note_type,
+          note_number: `MAN-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(Date.now()).slice(-5)}`,
+          broker: row.broker_cds_account || "Manual Entry",
+          settlement_date: row.settlement_date,
+          transaction_date: row.settlement_date,
+          trade_date: row.settlement_date,
+          no_of_shares: qty,
+          price_avg: pricePerShare,
+          gross_amount: totalCost,
+          net_amount: totalCost,
+        };
         const { data: insertedNote, error: noteError } = await supabase
           .from("buy_sell_notes")
-          .insert({
-            transaction_id: insertedTxn!.id,
-            note_type: row.note_type,
-            note_number: `MAN-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(Date.now()).slice(-5)}`,
-            broker: row.broker_cds_account || "Manual Entry",
-            settlement_date: row.settlement_date,
-            transaction_date: row.settlement_date,
-            trade_date: row.settlement_date,
-            no_of_shares: qty,
-            price_avg: pricePerShare,
-            gross_amount: totalCost,
-            net_amount: totalCost,
-          })
+          .insert(notePayload)
           .select()
           .maybeSingle();
 
         if (noteError) throw noteError;
+
+        // Audit log for buy_sell_notes insert
+        await logAudit({
+          table: 'buy_sell_notes',
+          recordId: insertedNote?.id,
+          action: 'CREATE',
+          newValues: notePayload,
+          performedBy: user?.email || 'system',
+        });
 
         // Update cash ledger — use entity.id (UUID), not entity.entity_id (code string)
         const transactionType =
@@ -2577,22 +2630,34 @@ export function BuyAndSellNotes() {
             ? lastBalance + totalCost
             : lastBalance - totalCost;
 
-        const { error: ledgerError } = await supabase
+        const ledgerPayload2 = {
+          type: transactionType,
+          description: `${row.note_type} - ${shares.find((s) => s.id === row.share_id)?.ticker || ""}`,
+          amount: totalCost,
+          date: row.settlement_date,
+          running_balance: newBalance,
+          on_hold_amount: 0,
+          entity_id: entity.id,
+          bank_id: null,
+          reference_id: insertedNote?.id || null,
+          created_by: "System",
+        };
+        const { data: insertedLedger2, error: ledgerError } = await supabase
           .from("cash_balance_ledger")
-          .insert({
-            type: transactionType,
-            description: `${row.note_type} - ${shares.find((s) => s.id === row.share_id)?.ticker || ""}`,
-            amount: totalCost,
-            date: row.settlement_date,
-            running_balance: newBalance,
-            on_hold_amount: 0,
-            entity_id: entity.id,
-            bank_id: null,
-            reference_id: insertedNote?.id || null,
-            created_by: "System",
-          });
+          .insert(ledgerPayload2)
+          .select()
+          .maybeSingle();
 
         if (ledgerError) throw ledgerError;
+
+        // Audit log for cash_balance_ledger insert
+        await logAudit({
+          table: 'cash_balance_ledger',
+          recordId: insertedLedger2?.id,
+          action: 'CREATE',
+          newValues: ledgerPayload2,
+          performedBy: user?.email || 'system',
+        });
       }
 
       await loadData();
@@ -2646,42 +2711,57 @@ export function BuyAndSellNotes() {
     if (!editNote) return;
     setIsSavingEdit(true);
     try {
+      // Fetch old record for audit logging
+      const oldRecord = await fetchRecordForAudit('buy_sell_notes', editNote.id);
+
+      const updatePayload = {
+        note_type: editNote.note_type,
+        note_number: editNote.note_number || `NOTE-${Date.now()}`,
+        broker: editNote.broker || "Unknown",
+        dealer_name: editNote.dealer_name || null,
+        trade_date: editNote.trade_date || null,
+        settlement_date: editNote.settlement_date,
+        contract_no: editNote.contract_no || null,
+        no_of_shares:
+          editNote.no_of_shares !== "" ? Number(editNote.no_of_shares) : null,
+        price_avg:
+          editNote.price_avg !== "" ? Number(editNote.price_avg) : null,
+        gross_amount:
+          editNote.gross_amount !== "" ? Number(editNote.gross_amount) : null,
+        brokerage:
+          editNote.brokerage !== "" ? Number(editNote.brokerage) : null,
+        sec: editNote.sec !== "" ? Number(editNote.sec) : null,
+        exchange: editNote.exchange !== "" ? Number(editNote.exchange) : null,
+        cds: editNote.cds !== "" ? Number(editNote.cds) : null,
+        gov_cess: editNote.gov_cess !== "" ? Number(editNote.gov_cess) : null,
+        clearing_fees:
+          editNote.clearing_fees !== ""
+            ? Number(editNote.clearing_fees)
+            : null,
+        net_amount:
+          editNote.net_amount !== "" ? Number(editNote.net_amount) : null,
+        foreign_brokerage:
+          editNote.foreign_brokerage !== ""
+            ? Number(editNote.foreign_brokerage)
+            : null,
+        remarks: editNote.remarks || null,
+      };
       const { error } = await supabase
         .from("buy_sell_notes")
-        .update({
-          note_type: editNote.note_type,
-          note_number: editNote.note_number || `NOTE-${Date.now()}`,
-          broker: editNote.broker || "Unknown",
-          dealer_name: editNote.dealer_name || null,
-          trade_date: editNote.trade_date || null,
-          settlement_date: editNote.settlement_date,
-          contract_no: editNote.contract_no || null,
-          no_of_shares:
-            editNote.no_of_shares !== "" ? Number(editNote.no_of_shares) : null,
-          price_avg:
-            editNote.price_avg !== "" ? Number(editNote.price_avg) : null,
-          gross_amount:
-            editNote.gross_amount !== "" ? Number(editNote.gross_amount) : null,
-          brokerage:
-            editNote.brokerage !== "" ? Number(editNote.brokerage) : null,
-          sec: editNote.sec !== "" ? Number(editNote.sec) : null,
-          exchange: editNote.exchange !== "" ? Number(editNote.exchange) : null,
-          cds: editNote.cds !== "" ? Number(editNote.cds) : null,
-          gov_cess: editNote.gov_cess !== "" ? Number(editNote.gov_cess) : null,
-          clearing_fees:
-            editNote.clearing_fees !== ""
-              ? Number(editNote.clearing_fees)
-              : null,
-          net_amount:
-            editNote.net_amount !== "" ? Number(editNote.net_amount) : null,
-          foreign_brokerage:
-            editNote.foreign_brokerage !== ""
-              ? Number(editNote.foreign_brokerage)
-              : null,
-          remarks: editNote.remarks || null,
-        })
+        .update(updatePayload)
         .eq("id", editNote.id);
       if (error) throw error;
+
+      // Audit log for buy_sell_notes update
+      await logAudit({
+        table: 'buy_sell_notes',
+        recordId: editNote.id,
+        action: 'UPDATE',
+        oldValues: oldRecord,
+        newValues: updatePayload,
+        performedBy: user?.email || 'system',
+      });
+
       await loadData();
       setEditNote(null);
     } catch (err: unknown) {
@@ -2717,6 +2797,11 @@ export function BuyAndSellNotes() {
       const ledgerEntry = ledgerRes.data;
       const linkedTransactionId = noteRes.data?.transaction_id ?? null;
 
+      // Fetch old records for audit logging before deletion
+      const oldNote = await fetchRecordForAudit('buy_sell_notes', id);
+      const oldTransaction = linkedTransactionId ? await fetchRecordForAudit('transactions', linkedTransactionId) : null;
+      const oldLedger = ledgerEntry ? await fetchRecordForAudit('cash_balance_ledger', ledgerEntry.id) : null;
+
       // Delete the buy/sell note
       const { error: deleteError } = await supabase
         .from("buy_sell_notes")
@@ -2724,12 +2809,30 @@ export function BuyAndSellNotes() {
         .eq("id", id);
       if (deleteError) throw deleteError;
 
+      // Audit log for buy_sell_notes delete
+      await logAudit({
+        table: 'buy_sell_notes',
+        recordId: id,
+        action: 'DELETE',
+        oldValues: oldNote,
+        performedBy: user?.email || 'system',
+      });
+
       // Delete the linked transaction so it disappears from analytics
       if (linkedTransactionId) {
         await supabase
           .from("transactions")
           .delete()
           .eq("id", linkedTransactionId);
+
+        // Audit log for transactions delete
+        await logAudit({
+          table: 'transactions',
+          recordId: linkedTransactionId,
+          action: 'DELETE',
+          oldValues: oldTransaction,
+          performedBy: user?.email || 'system',
+        });
       }
 
       // Reverse the cash ledger entry and recompute running balances
@@ -2739,6 +2842,15 @@ export function BuyAndSellNotes() {
           .delete()
           .eq("id", ledgerEntry.id);
         if (ledgerDeleteError) throw ledgerDeleteError;
+
+        // Audit log for cash_balance_ledger delete
+        await logAudit({
+          table: 'cash_balance_ledger',
+          recordId: ledgerEntry.id,
+          action: 'DELETE',
+          oldValues: oldLedger,
+          performedBy: user?.email || 'system',
+        });
 
         // Recompute running balances for all subsequent entries of the same entity
         const { data: subsequentEntries } = await supabase
@@ -2765,10 +2877,24 @@ export function BuyAndSellNotes() {
               entry.type === "Addition"
                 ? runningBal + Number(entry.amount)
                 : runningBal - Number(entry.amount);
+
+            // Fetch old record for audit logging
+            const oldEntryRecord = await fetchRecordForAudit('cash_balance_ledger', entry.id);
+
             await supabase
               .from("cash_balance_ledger")
               .update({ running_balance: runningBal })
               .eq("id", entry.id);
+
+            // Audit log for cash_balance_ledger update
+            await logAudit({
+              table: 'cash_balance_ledger',
+              recordId: entry.id,
+              action: 'UPDATE',
+              oldValues: oldEntryRecord,
+              newValues: { running_balance: runningBal },
+              performedBy: user?.email || 'system',
+            });
           }
         }
       }

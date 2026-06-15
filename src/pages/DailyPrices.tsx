@@ -2,6 +2,7 @@ import { Search, Calendar, TrendingUp, TrendingDown, Save, Minus, CheckCircle2 }
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Share {
   id: string;
@@ -119,14 +120,39 @@ export function DailyPrices() {
       const updates = toUpsert.filter((r) => r.id);
 
       if (newRecords.length > 0) {
-        const { error } = await supabase.from('daily_share_prices').insert(newRecords);
+        const { data: insertedData, error } = await supabase.from('daily_share_prices').insert(newRecords).select('id');
         if (error) throw error;
+        if (user && insertedData) {
+          for (let i = 0; i < newRecords.length; i++) {
+            const insertedId = insertedData[i]?.id;
+            if (insertedId) {
+              await logAudit({
+                userId: user.id,
+                action: 'CREATE',
+                tableName: 'daily_share_prices',
+                recordId: insertedId,
+                newData: newRecords[i]
+              });
+            }
+          }
+        }
       }
 
       for (const u of updates) {
         const { id, ...rest } = u;
+        const oldRecord = await fetchRecordForAudit('daily_share_prices', id);
         const { error } = await supabase.from('daily_share_prices').update(rest).eq('id', id);
         if (error) throw error;
+        if (user) {
+          await logAudit({
+            userId: user.id,
+            action: 'UPDATE',
+            tableName: 'daily_share_prices',
+            recordId: id,
+            oldData: oldRecord,
+            newData: rest
+          });
+        }
       }
 
       setFeedback({ type: 'success', message: `Saved ${toUpsert.length} price${toUpsert.length > 1 ? 's' : ''}` });

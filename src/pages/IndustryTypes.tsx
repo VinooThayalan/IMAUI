@@ -1,6 +1,8 @@
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface IndustryType {
   id: string;
@@ -12,6 +14,7 @@ interface IndustryType {
 }
 
 export function IndustryTypes() {
+  const { user } = useAuth();
   const [industries, setIndustries] = useState<IndustryType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingIndustry, setEditingIndustry] = useState<IndustryType | null>(null);
@@ -74,6 +77,7 @@ export function IndustryTypes() {
 
     try {
       if (editingIndustry) {
+        const oldRecord = await fetchRecordForAudit('industry_types', editingIndustry.id);
         const { error } = await supabase
           .from('industry_types')
           .update({
@@ -84,12 +88,16 @@ export function IndustryTypes() {
           .eq('id', editingIndustry.id);
 
         if (error) throw error;
+        logAudit({ tableName: 'industry_types', recordId: editingIndustry.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, industry_name: formData.industry_name, is_active: formData.is_active } });
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from('industry_types')
-          .insert([formData]);
+          .insert([formData])
+          .select('id')
+          .maybeSingle();
 
         if (error) throw error;
+        logAudit({ tableName: 'industry_types', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: formData });
       }
 
       await fetchIndustries();
@@ -104,12 +112,14 @@ export function IndustryTypes() {
     if (!confirm('Are you sure you want to delete this industry? This may affect related sectors.')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('industry_types', id);
       const { error } = await supabase
         .from('industry_types')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+      logAudit({ tableName: 'industry_types', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await fetchIndustries();
     } catch (error) {
       console.error('Error deleting industry:', error);

@@ -1,6 +1,8 @@
 import { Plus, Search, Trash2, Save, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Amalgamation {
   id: string;
@@ -28,6 +30,7 @@ interface Share {
 }
 
 export function Amalgamations() {
+  const { user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [amalgamations, setAmalgamations] = useState<Amalgamation[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -115,7 +118,7 @@ export function Amalgamations() {
     try {
       setSubmitting(true);
 
-      const { error } = await supabase.from('scrip_entries').insert({
+      const payload = {
         entity_id: formData.entity_id,
         share_id: formData.share_id,
         transaction_type: 'Amalgamation',
@@ -126,9 +129,13 @@ export function Amalgamations() {
         new_total_shares: parseFloat(formData.new_total_shares) || null,
         share_decrease: parseFloat(formData.share_decrease) || null,
         new_price_per_share: parseFloat(formData.new_price_per_share) || null
-      });
+      };
+
+      const { data: inserted, error } = await supabase.from('scrip_entries').insert(payload).select('id').maybeSingle();
 
       if (error) throw error;
+
+      logAudit({ tableName: 'scrip_entries', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
 
       alert('Amalgamation created successfully');
       setShowForm(false);
@@ -146,9 +153,13 @@ export function Amalgamations() {
     if (!confirm('Are you sure you want to delete this amalgamation?')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('scrip_entries', id);
+
       const { error } = await supabase.from('scrip_entries').delete().eq('id', id);
 
       if (error) throw error;
+
+      logAudit({ tableName: 'scrip_entries', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
 
       alert('Amalgamation deleted successfully');
       loadData();

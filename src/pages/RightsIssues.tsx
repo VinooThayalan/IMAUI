@@ -1,6 +1,8 @@
 import { Plus, Search, Trash2, Save, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface RightsIssue {
   id: string;
@@ -59,6 +61,7 @@ interface Bank {
 }
 
 export function RightsIssues() {
+  const { user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [rightsIssues, setRightsIssues] = useState<RightsIssue[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -188,7 +191,7 @@ export function RightsIssues() {
       const totalAmount = calculateTotalAmount();
       const selectedEB = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
 
-      const { error } = await supabase.from('scrip_entries').insert({
+      const payload = {
         entity_id: formData.entity_id,
         share_id: formData.share_id,
         transaction_type: 'Rights Issue',
@@ -203,9 +206,13 @@ export function RightsIssues() {
         allotted_shares: parseFloat(formData.allotted_shares) || null,
         additional_requested: formData.additional_requested || null,
         total_amount: totalAmount
-      });
+      };
+
+      const { data: inserted, error } = await supabase.from('scrip_entries').insert(payload).select('id').maybeSingle();
 
       if (error) throw error;
+
+      logAudit({ tableName: 'scrip_entries', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
 
       alert('Rights issue created successfully');
       setShowForm(false);
@@ -223,9 +230,13 @@ export function RightsIssues() {
     if (!confirm('Are you sure you want to delete this rights issue?')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('scrip_entries', id);
+
       const { error } = await supabase.from('scrip_entries').delete().eq('id', id);
 
       if (error) throw error;
+
+      logAudit({ tableName: 'scrip_entries', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
 
       alert('Rights issue deleted successfully');
       loadData();

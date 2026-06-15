@@ -5,6 +5,7 @@ import {
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Transaction {
   id: string;
@@ -293,8 +294,10 @@ export function TransactionApprovals() {
         updates.total_amount_gross = updates.no_of_shares * updates.price_per_share;
         updates.total_amount = updates.total_amount_gross - (selectedTransaction.fees || 0);
       }
+      const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(updates).eq('id', selectedTransaction.id);
       if (error) throw error;
+      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...updates }, entityId: selectedTransaction.entity_id, description: 'Approved transaction' });
       alert('Transaction approved successfully');
       closeModal();
       loadData();
@@ -313,16 +316,18 @@ export function TransactionApprovals() {
     }
     try {
       setSubmitting(true);
-      const { error } = await supabase.from('transactions').update({
+      const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
+      const rejectUpdates = {
         approval_status: 'REJECTED',
         approved_by: user?.email || 'system',
         approval_date: new Date().toISOString(),
         rejection_reason: actionFormData.rejection_reason,
         approval_notes: actionFormData.approval_notes || null
-      }).eq('id', selectedTransaction.id);
+      };
+      const { error } = await supabase.from('transactions').update(rejectUpdates).eq('id', selectedTransaction.id);
       if (error) throw error;
+      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...rejectUpdates }, entityId: selectedTransaction.entity_id, description: 'Rejected transaction' });
 
-      // Release on-hold cash
       await releaseOnHoldCash(selectedTransaction);
 
       alert('Transaction rejected successfully');
@@ -348,12 +353,15 @@ export function TransactionApprovals() {
         : new Date();
       const additionalHours = parseFloat(actionFormData.hold_hours);
       const newExpiry = new Date(currentExpiry.getTime() + additionalHours * 60 * 60 * 1000);
-      const { error } = await supabase.from('transactions').update({
+      const holdUpdates = {
         approval_expires_at: newExpiry.toISOString(),
         approval_validity_hours: (selectedTransaction.approval_validity_hours || 0) + additionalHours,
         approval_notes: actionFormData.approval_notes || selectedTransaction.approval_notes
-      }).eq('id', selectedTransaction.id);
+      };
+      const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
+      const { error } = await supabase.from('transactions').update(holdUpdates).eq('id', selectedTransaction.id);
       if (error) throw error;
+      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...holdUpdates }, entityId: selectedTransaction.entity_id, description: `Extended hold by ${additionalHours}h` });
       alert(`Approval extended by ${additionalHours} hour${additionalHours !== 1 ? 's' : ''}. New deadline: ${newExpiry.toLocaleString()}`);
       closeModal();
       loadData();
@@ -394,14 +402,16 @@ export function TransactionApprovals() {
     try {
       setSubmitting(true);
 
-      const { error } = await supabase.from('transactions').update({
+      const cancelUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
         approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
-      }).eq('id', selectedTransaction.id);
+      };
+      const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
+      const { error } = await supabase.from('transactions').update(cancelUpdates).eq('id', selectedTransaction.id);
       if (error) throw error;
+      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...cancelUpdates }, entityId: selectedTransaction.entity_id, description: 'Cancelled transaction' });
 
-      // Release on-hold cash
       await releaseOnHoldCash(selectedTransaction);
 
       // Optionally notify broker
@@ -441,17 +451,18 @@ export function TransactionApprovals() {
     try {
       setSubmitting(true);
 
-      const { error } = await supabase.from('transactions').update({
+      const cancelApproveUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
         approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
-      }).eq('id', selectedTransaction.id);
+      };
+      const oldApproveRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
+      const { error } = await supabase.from('transactions').update(cancelApproveUpdates).eq('id', selectedTransaction.id);
       if (error) throw error;
+      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldApproveRecord, newValues: { ...oldApproveRecord, ...cancelApproveUpdates }, entityId: selectedTransaction.entity_id, description: 'Cancelled approval' });
 
-      // Release on-hold cash
       await releaseOnHoldCash(selectedTransaction);
 
-      // Optionally notify broker
       if (actionFormData.notify_broker && selectedTransaction.broker_id) {
         const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
         if (broker?.contact_person_email) {

@@ -1,6 +1,8 @@
 import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface BuyAndSellNote {
   id: string;
@@ -78,6 +80,7 @@ interface EntityBroker {
 type ModalAction = 'approve' | 'reject' | null;
 
 export function BuyAndSellApprovals() {
+  const { user } = useAuth();
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -227,6 +230,9 @@ export function BuyAndSellApprovals() {
       const { entity, share, broker } = getDetails(selectedNote);
       if (!entity) throw new Error('Entity not found for this note');
 
+      // Fetch old record for audit
+      const oldRecord = await fetchRecordForAudit('buy_sell_notes', selectedNote.id);
+
       const reviewedAt = new Date().toISOString();
 
       const { error: noteErr } = await supabase
@@ -240,6 +246,20 @@ export function BuyAndSellApprovals() {
         .eq('id', selectedNote.id);
       if (noteErr) throw noteErr;
 
+      // Log UPDATE audit for buy_sell_notes
+      await logAudit('UPDATE', {
+        userId: user?.id,
+        table: 'buy_sell_notes',
+        recordId: selectedNote.id,
+        oldRecord,
+        newRecord: {
+          status: 'PROCESSED',
+          approved_by: 'Reviewer',
+          approved_at: reviewedAt,
+          approval_notes: actionRemarks || null,
+        },
+      });
+
       const totalNet = Number(selectedNote.net_amount) || 0;
       const transactionType = selectedNote.note_type === 'Buy' ? 'Deduction' : 'Addition';
 
@@ -252,7 +272,7 @@ export function BuyAndSellApprovals() {
       const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
       const newBalance = transactionType === 'Addition' ? lastBalance + totalNet : lastBalance - totalNet;
 
-      const { error: ledgerErr } = await supabase
+      const { data: ledgerData, error: ledgerErr } = await supabase
         .from('cash_balance_ledger')
         .insert({
           type: transactionType,
@@ -267,8 +287,33 @@ export function BuyAndSellApprovals() {
           reference_id: selectedNote.id,
           created_by: 'Reviewer',
           notes: actionRemarks || null,
-        });
+        })
+        .select('id')
+        .maybeSingle();
       if (ledgerErr) throw ledgerErr;
+
+      // Log CREATE audit for cash_balance_ledger
+      if (ledgerData) {
+        await logAudit('CREATE', {
+          userId: user?.id,
+          table: 'cash_balance_ledger',
+          recordId: ledgerData.id,
+          newRecord: {
+            type: transactionType,
+            description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
+            code: selectedNote.contract_no || selectedNote.note_number,
+            amount: totalNet,
+            date: selectedNote.trade_date || null,
+            running_balance: newBalance,
+            on_hold_amount: 0,
+            entity_id: entity.id,
+            bank_id: null,
+            reference_id: selectedNote.id,
+            created_by: 'Reviewer',
+            notes: actionRemarks || null,
+          },
+        });
+      }
 
       await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker);
 
@@ -287,16 +332,35 @@ export function BuyAndSellApprovals() {
     try {
       const { entity, share, broker } = getDetails(selectedNote);
 
+      // Fetch old record for audit
+      const oldRecord = await fetchRecordForAudit('buy_sell_notes', selectedNote.id);
+
+      const approvedAt = new Date().toISOString();
+
       const { error } = await supabase
         .from('buy_sell_notes')
         .update({
           status: 'REJECTED',
           approved_by: 'Reviewer',
-          approved_at: new Date().toISOString(),
+          approved_at: approvedAt,
           approval_notes: actionRemarks,
         })
         .eq('id', selectedNote.id);
       if (error) throw error;
+
+      // Log UPDATE audit for buy_sell_notes
+      await logAudit('UPDATE', {
+        userId: user?.id,
+        table: 'buy_sell_notes',
+        recordId: selectedNote.id,
+        oldRecord,
+        newRecord: {
+          status: 'REJECTED',
+          approved_by: 'Reviewer',
+          approved_at: approvedAt,
+          approval_notes: actionRemarks,
+        },
+      });
 
       await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker);
 

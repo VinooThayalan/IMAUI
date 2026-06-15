@@ -1,6 +1,8 @@
 import { Plus, Search, Pencil, X, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface BankMasterItem {
   id: string;
@@ -34,6 +36,7 @@ const defaultBankForm: BankFormData = { bank_name: '', bank_code: '', is_active:
 const defaultBranchForm: BranchFormData = { branch_name: '', branch_code: '', is_active: true };
 
 export function BankMaster() {
+  const { user } = useAuth();
   const [banks, setBanks] = useState<BankMasterItem[]>([]);
   const [branches, setBranches] = useState<BankBranch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,11 +97,31 @@ export function BankMaster() {
       setSaving(true);
       const payload = { bank_name: bankForm.bank_name.trim(), bank_code: bankForm.bank_code || null, is_active: bankForm.is_active };
       if (editingBank) {
+        const oldRecord = await fetchRecordForAudit('bank_master', editingBank.id);
         const { error } = await supabase.from('bank_master').update(payload).eq('id', editingBank.id);
         if (error) throw error;
+        if (user) {
+          await logAudit({
+            userId: user.id,
+            action: 'UPDATE',
+            tableName: 'bank_master',
+            recordId: editingBank.id,
+            oldData: oldRecord,
+            newData: payload
+          });
+        }
       } else {
-        const { error } = await supabase.from('bank_master').insert(payload);
+        const { data, error } = await supabase.from('bank_master').insert(payload).select('id').maybeSingle();
         if (error) throw error;
+        if (user && data) {
+          await logAudit({
+            userId: user.id,
+            action: 'CREATE',
+            tableName: 'bank_master',
+            recordId: data.id,
+            newData: payload
+          });
+        }
       }
       await loadData();
       setShowBankModal(false);
@@ -140,11 +163,31 @@ export function BankMaster() {
         is_active: branchForm.is_active
       };
       if (editingBranch) {
+        const oldRecord = await fetchRecordForAudit('bank_branches', editingBranch.id);
         const { error } = await supabase.from('bank_branches').update(payload).eq('id', editingBranch.id);
         if (error) throw error;
+        if (user) {
+          await logAudit({
+            userId: user.id,
+            action: 'UPDATE',
+            tableName: 'bank_branches',
+            recordId: editingBranch.id,
+            oldData: oldRecord,
+            newData: payload
+          });
+        }
       } else {
-        const { error } = await supabase.from('bank_branches').insert(payload);
+        const { data, error } = await supabase.from('bank_branches').insert(payload).select('id').maybeSingle();
         if (error) throw error;
+        if (user && data) {
+          await logAudit({
+            userId: user.id,
+            action: 'CREATE',
+            tableName: 'bank_branches',
+            recordId: data.id,
+            newData: payload
+          });
+        }
       }
       await loadData();
       setShowBranchModal(false);

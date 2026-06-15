@@ -1,6 +1,8 @@
-import { Plus, Search, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, CreditCard as Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface EntityType {
   id: string;
@@ -12,6 +14,7 @@ interface EntityType {
 }
 
 export function EntityTypes() {
+  const { user } = useAuth();
   const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingType, setEditingType] = useState<EntityType | null>(null);
@@ -78,6 +81,7 @@ export function EntityTypes() {
 
     try {
       if (editingType) {
+        const oldRecord = await fetchRecordForAudit('entity_types', editingType.id);
         const { error } = await supabase
           .from('entity_types')
           .update({
@@ -89,12 +93,16 @@ export function EntityTypes() {
           .eq('id', editingType.id);
 
         if (error) throw error;
+        logAudit({ tableName: 'entity_types', recordId: editingType.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, name: formData.name, description: formData.description, is_active: formData.is_active } });
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from('entity_types')
-          .insert([formData]);
+          .insert([formData])
+          .select('id')
+          .maybeSingle();
 
         if (error) throw error;
+        logAudit({ tableName: 'entity_types', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: formData });
       }
 
       await fetchEntityTypes();
@@ -109,12 +117,14 @@ export function EntityTypes() {
     if (!confirm('Are you sure you want to delete this entity type?')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('entity_types', id);
       const { error } = await supabase
         .from('entity_types')
         .delete()
         .eq('id', id);
 
       if (error) throw error;
+      logAudit({ tableName: 'entity_types', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await fetchEntityTypes();
     } catch (error) {
       console.error('Error deleting entity type:', error);

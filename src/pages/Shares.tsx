@@ -1,6 +1,8 @@
 import { Plus, Search, CreditCard as Edit, Trash2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Share {
   id: string;
@@ -35,6 +37,7 @@ interface SectorType {
 }
 
 export function Shares() {
+  const { user } = useAuth();
   const [shares, setShares] = useState<Share[]>([]);
   const [industries, setIndustries] = useState<IndustryType[]>([]);
   const [sectors, setSectors] = useState<SectorType[]>([]);
@@ -157,18 +160,14 @@ export function Shares() {
       };
 
       if (editingShare) {
-        const { error } = await supabase
-          .from('shares')
-          .update(dataToSubmit)
-          .eq('id', editingShare.id);
-
+        const oldRecord = await fetchRecordForAudit('shares', editingShare.id);
+        const { error } = await supabase.from('shares').update(dataToSubmit).eq('id', editingShare.id);
         if (error) throw error;
+        logAudit({ tableName: 'shares', recordId: editingShare.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...dataToSubmit } });
       } else {
-        const { error } = await supabase
-          .from('shares')
-          .insert([dataToSubmit]);
-
+        const { data: inserted, error } = await supabase.from('shares').insert([dataToSubmit]).select('id').maybeSingle();
         if (error) throw error;
+        logAudit({ tableName: 'shares', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: dataToSubmit });
       }
 
       await fetchShares();
@@ -183,12 +182,10 @@ export function Shares() {
     if (!confirm('Are you sure you want to delete this share? This may affect related transactions.')) return;
 
     try {
-      const { error } = await supabase
-        .from('shares')
-        .delete()
-        .eq('id', id);
-
+      const oldRecord = await fetchRecordForAudit('shares', id);
+      const { error } = await supabase.from('shares').delete().eq('id', id);
       if (error) throw error;
+      logAudit({ tableName: 'shares', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await fetchShares();
     } catch (error) {
       console.error('Error deleting share:', error);

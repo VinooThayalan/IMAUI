@@ -1,6 +1,8 @@
 import { Plus, CreditCard as Edit, Trash2, Percent, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface FeeBreakdownItem {
   name: string;
@@ -29,6 +31,7 @@ const DEFAULT_BREAKDOWN_NAMES = [
 ];
 
 export function BrokerageFeeTypes() {
+  const { user } = useAuth();
   const [feeTypes, setFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingFeeType, setEditingFeeType] = useState<BrokerageFeeType | null>(null);
@@ -79,6 +82,7 @@ export function BrokerageFeeTypes() {
     };
 
     if (editingFeeType) {
+      const oldRecord = await fetchRecordForAudit('brokerage_fee_types', editingFeeType.id);
       const { error } = await supabase
         .from('brokerage_fee_types')
         .update({ ...payload, updated_at: new Date().toISOString() })
@@ -89,16 +93,21 @@ export function BrokerageFeeTypes() {
         alert('Failed to update fee type');
         return;
       }
-    } else {
-      const { error } = await supabase
-        .from('brokerage_fee_types')
-        .insert(payload);
 
-      if (error) {
-        console.error('Error adding fee type:', error);
+      logAudit({ tableName: 'brokerage_fee_types', recordId: editingFeeType.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload } });
+    } else {
+      const { data: inserted } = await supabase
+        .from('brokerage_fee_types')
+        .insert(payload)
+        .select('id').maybeSingle();
+
+      if (!inserted) {
+        console.error('Error adding fee type: no data returned');
         alert('Failed to add fee type');
         return;
       }
+
+      logAudit({ tableName: 'brokerage_fee_types', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
     }
 
     closeModal();
@@ -124,20 +133,26 @@ export function BrokerageFeeTypes() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this fee type?')) return;
+    const oldRecord = await fetchRecordForAudit('brokerage_fee_types', id);
     const { error } = await supabase.from('brokerage_fee_types').delete().eq('id', id);
     if (error) {
       alert('Failed to delete fee type');
       return;
     }
+    logAudit({ tableName: 'brokerage_fee_types', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
     fetchFeeTypes();
   };
 
   const handleToggleActive = async (feeType: BrokerageFeeType) => {
+    const oldRecord = await fetchRecordForAudit('brokerage_fee_types', feeType.id);
     const { error } = await supabase
       .from('brokerage_fee_types')
       .update({ is_active: !feeType.is_active, updated_at: new Date().toISOString() })
       .eq('id', feeType.id);
-    if (!error) fetchFeeTypes();
+    if (!error) {
+      logAudit({ tableName: 'brokerage_fee_types', recordId: feeType.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, is_active: !feeType.is_active } });
+      fetchFeeTypes();
+    }
   };
 
   const closeModal = () => {

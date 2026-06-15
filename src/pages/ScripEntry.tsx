@@ -1,6 +1,8 @@
 import { Plus, Search, Filter, Trash2, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface ScripEntry {
   id: string;
@@ -55,6 +57,7 @@ const EMPTY_FORM = {
 };
 
 export function ScripEntry() {
+  const { user } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,11 +146,14 @@ export function ScripEntry() {
 
     try {
       if (editingId) {
+        const oldRecord = await fetchRecordForAudit('scrip_entries', editingId);
         const { error } = await supabase.from('scrip_entries').update(payload).eq('id', editingId);
         if (error) throw error;
+        logAudit({ tableName: 'scrip_entries', recordId: editingId, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload } });
       } else {
-        const { error } = await supabase.from('scrip_entries').insert(payload);
-        if (error) throw error;
+        const { data: inserted } = await supabase.from('scrip_entries').insert(payload).select('id').maybeSingle();
+        if (!inserted) throw new Error('No data returned from insert');
+        logAudit({ tableName: 'scrip_entries', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
       }
       closeModal();
       loadData();
@@ -160,8 +166,10 @@ export function ScripEntry() {
   async function handleDelete(id: string) {
     if (!confirm('Are you sure you want to delete this scrip entry?')) return;
     try {
+      const oldRecord = await fetchRecordForAudit('scrip_entries', id);
       const { error } = await supabase.from('scrip_entries').delete().eq('id', id);
       if (error) throw error;
+      logAudit({ tableName: 'scrip_entries', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       loadData();
     } catch (error) {
       console.error('Error deleting scrip entry:', error);

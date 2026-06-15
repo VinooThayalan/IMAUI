@@ -1,6 +1,8 @@
 import { Plus, Search, Trash2, Save, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface IpoTransaction {
   id: string;
@@ -56,6 +58,7 @@ interface Bank {
 }
 
 export function IpoTransactions() {
+  const { user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [transactions, setTransactions] = useState<IpoTransaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -186,7 +189,7 @@ export function IpoTransactions() {
       const totalAmount = calculateTotalAmount();
       const selectedEB = entityBrokers.find(eb => eb.id === formData.entity_broker_id);
 
-      const { error } = await supabase.from('transactions').insert({
+      const payload = {
         entity_id: formData.entity_id,
         share_id: formData.share_id,
         transaction_type: 'IPO',
@@ -198,9 +201,13 @@ export function IpoTransactions() {
         broker_id: selectedEB?.broker_id,
         cds_account_id: formData.relationship_type === 'Custodian' ? selectedEB?.custodian_account_number : selectedEB?.broker_account_number,
         bank_id: selectedEB?.bank_id
-      });
+      };
+
+      const { data: inserted, error } = await supabase.from('transactions').insert(payload).select('id').maybeSingle();
 
       if (error) throw error;
+
+      logAudit({ tableName: 'transactions', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
 
       alert('IPO transaction created successfully');
       setShowForm(false);
@@ -218,9 +225,13 @@ export function IpoTransactions() {
     if (!confirm('Are you sure you want to delete this IPO transaction?')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('transactions', id);
+
       const { error } = await supabase.from('transactions').delete().eq('id', id);
 
       if (error) throw error;
+
+      logAudit({ tableName: 'transactions', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
 
       alert('IPO transaction deleted successfully');
       loadData();

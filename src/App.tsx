@@ -31,6 +31,7 @@ const ShareBuybacks = lazy(() => import('./pages/ShareBuybacks').then(m => ({ de
 const ShareSubdivisions = lazy(() => import('./pages/ShareSubdivisions').then(m => ({ default: m.ShareSubdivisions })));
 const IpoTransactions = lazy(() => import('./pages/IpoTransactions').then(m => ({ default: m.IpoTransactions })));
 const UserManagement = lazy(() => import('./pages/UserManagement').then(m => ({ default: m.UserManagement })));
+const AuditLog = lazy(() => import('./pages/AuditLog').then(m => ({ default: m.AuditLog })));
 const MenuAccess = lazy(() => import('./pages/MenuAccess').then(m => ({ default: m.MenuAccess })));
 const EntityAccess = lazy(() => import('./pages/EntityAccess').then(m => ({ default: m.EntityAccess })));
 const EntityTypes = lazy(() => import('./pages/EntityTypes').then(m => ({ default: m.EntityTypes })));
@@ -157,6 +158,8 @@ function App() {
         return <MenuAccess />;
       case 'entity-access':
         return <EntityAccess />;
+      case 'audit-log':
+        return <AuditLog />;
       default:
         return hasMenuAccess('dashboard') ? <Dashboard /> : <AccessDenied />;
     }

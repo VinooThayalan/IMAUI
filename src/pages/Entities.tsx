@@ -2,6 +2,7 @@ import { Plus, Search, Filter, CreditCard as Edit, Trash2, Eye, UserPlus, Buildi
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Entity {
   id: string;
@@ -406,16 +407,36 @@ export function Entities() {
         insertData.broker_text = brokerFormData.broker_text || null;
       }
 
-      let error;
+      let error, data;
+      const wasEditing = !!editingBrokerId;
       if (editingBrokerId) {
-        ({ error } = await supabase.from('entity_brokers').update(insertData).eq('id', editingBrokerId));
+        const oldRecord = await fetchRecordForAudit('entity_brokers', editingBrokerId);
+        ({ error, data } = await supabase.from('entity_brokers').update(insertData).eq('id', editingBrokerId).select('id').maybeSingle());
+        if (!error && user) {
+          await logAudit({
+            userId: user.id,
+            action: 'UPDATE',
+            tableName: 'entity_brokers',
+            recordId: editingBrokerId,
+            oldData: oldRecord,
+            newData: insertData
+          });
+        }
       } else {
-        ({ error } = await supabase.from('entity_brokers').insert(insertData));
+        ({ error, data } = await supabase.from('entity_brokers').insert(insertData).select('id').maybeSingle());
+        if (!error && data && user) {
+          await logAudit({
+            userId: user.id,
+            action: 'CREATE',
+            tableName: 'entity_brokers',
+            recordId: data.id,
+            newData: insertData
+          });
+        }
       }
 
       if (error) throw error;
 
-      const wasEditing = !!editingBrokerId;
       setEditingBrokerId(null);
       await fetchEntityBrokers(selectedEntityId);
       setBrokerFormData({
@@ -453,12 +474,23 @@ export function Entities() {
     if (!confirm('Are you sure you want to remove this relationship?')) return;
 
     try {
+      const oldRecord = await fetchRecordForAudit('entity_brokers', relationshipId);
       const { error } = await supabase
         .from('entity_brokers')
         .delete()
         .eq('id', relationshipId);
 
       if (error) throw error;
+
+      if (user) {
+        await logAudit({
+          userId: user.id,
+          action: 'DELETE',
+          tableName: 'entity_brokers',
+          recordId: relationshipId,
+          oldData: oldRecord
+        });
+      }
 
       if (selectedEntityId) {
         await fetchEntityBrokers(selectedEntityId);
@@ -482,7 +514,7 @@ export function Entities() {
 
     try {
       const newId = crypto.randomUUID();
-      const { error } = await supabase.from('entities').insert({
+      const newEntityData = {
         id: newId,
         name: entityFormData.name,
         entity_type_id: entityFormData.entity_type_id || null,
@@ -496,11 +528,19 @@ export function Entities() {
         contact_mobile: entityFormData.contact_mobile || null,
         contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
         current_balance: 0
-      });
+      };
+      const { error } = await supabase.from('entities').insert(newEntityData);
 
       if (error) throw error;
 
       if (user) {
+        await logAudit({
+          userId: user.id,
+          action: 'CREATE',
+          tableName: 'entities',
+          recordId: newId,
+          newData: newEntityData
+        });
         await supabase.from('user_entity_access').insert({
           user_id: user.id,
           entity_id: newId
@@ -539,24 +579,37 @@ export function Entities() {
     }
 
     try {
+      const oldRecord = await fetchRecordForAudit('entities', selectedEntity.id);
+      const newData = {
+        name: entityFormData.name,
+        entity_type_id: entityFormData.entity_type_id || null,
+        tax_name: entityFormData.tax_name || null,
+        nic_company_id: entityFormData.nic_company_id || null,
+        key_contact_name: entityFormData.key_contact_name || null,
+        company_individual_address: entityFormData.company_individual_address || null,
+        contact_email_company_individual: entityFormData.contact_email_company_individual || null,
+        cc_email: entityFormData.cc_email || null,
+        contact_phone: entityFormData.contact_phone || null,
+        contact_mobile: entityFormData.contact_mobile || null,
+        contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null
+      };
       const { error } = await supabase
         .from('entities')
-        .update({
-          name: entityFormData.name,
-          entity_type_id: entityFormData.entity_type_id || null,
-          tax_name: entityFormData.tax_name || null,
-          nic_company_id: entityFormData.nic_company_id || null,
-          key_contact_name: entityFormData.key_contact_name || null,
-          company_individual_address: entityFormData.company_individual_address || null,
-          contact_email_company_individual: entityFormData.contact_email_company_individual || null,
-          cc_email: entityFormData.cc_email || null,
-          contact_phone: entityFormData.contact_phone || null,
-          contact_mobile: entityFormData.contact_mobile || null,
-          contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null
-        })
+        .update(newData)
         .eq('id', selectedEntity.id);
 
       if (error) throw error;
+
+      if (user) {
+        await logAudit({
+          userId: user.id,
+          action: 'UPDATE',
+          tableName: 'entities',
+          recordId: selectedEntity.id,
+          oldData: oldRecord,
+          newData: newData
+        });
+      }
 
       alert('Entity updated successfully!');
       setShowEditModal(false);

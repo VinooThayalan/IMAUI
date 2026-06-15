@@ -2,6 +2,7 @@ import { Users, Plus, X, Shield, UserCheck, UserX, Key, Search, AlertCircle } fr
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface ManagedUser {
   id: string;
@@ -121,12 +122,31 @@ export function UserManagement() {
   async function handleToggleRole(userId: string, currentRole: string) {
     try {
       const newRole = currentRole === 'admin' ? 'user' : 'admin';
+
+      // Fetch old record for audit
+      const oldRecord = await fetchRecordForAudit('app_users', userId);
+
+      const updatedAt = new Date().toISOString();
+
       const { error } = await supabase
         .from('app_users')
-        .update({ role: newRole, updated_at: new Date().toISOString() })
+        .update({ role: newRole, updated_at: updatedAt })
         .eq('id', userId);
 
       if (error) throw error;
+
+      // Log UPDATE audit for app_users
+      await logAudit('UPDATE', {
+        userId: currentUser?.id,
+        table: 'app_users',
+        recordId: userId,
+        oldRecord,
+        newRecord: {
+          role: newRole,
+          updated_at: updatedAt,
+        },
+      });
+
       await loadUsers();
     } catch (err: any) {
       setError(err.message);

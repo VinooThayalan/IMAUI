@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Pencil, Trash2, Save, X, Building2, TrendingUp, Calendar } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Entity {
   id: string;
@@ -153,16 +154,20 @@ export function OpeningBalances() {
       };
 
       if (editingId) {
+        const oldRecord = await fetchRecordForAudit('entity_share_opening_balances', editingId);
         const { error } = await supabase
           .from('entity_share_opening_balances')
           .update(payload)
           .eq('id', editingId);
         if (error) throw error;
+        logAudit({ tableName: 'entity_share_opening_balances', recordId: editingId, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload } });
       } else {
-        const { error } = await supabase
+        const { data: inserted } = await supabase
           .from('entity_share_opening_balances')
-          .insert({ ...payload, created_by: user?.id || null });
-        if (error) throw error;
+          .insert({ ...payload, created_by: user?.id || null })
+          .select('id').maybeSingle();
+        if (!inserted) throw new Error('No data returned from insert');
+        logAudit({ tableName: 'entity_share_opening_balances', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload });
       }
 
       setShowModal(false);
@@ -182,8 +187,10 @@ export function OpeningBalances() {
   async function handleDelete(id: string) {
     if (!confirm('Delete this opening balance?')) return;
     try {
+      const oldRecord = await fetchRecordForAudit('entity_share_opening_balances', id);
       const { error } = await supabase.from('entity_share_opening_balances').delete().eq('id', id);
       if (error) throw error;
+      logAudit({ tableName: 'entity_share_opening_balances', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord });
       await loadAll();
     } catch (e) {
       console.error(e);
