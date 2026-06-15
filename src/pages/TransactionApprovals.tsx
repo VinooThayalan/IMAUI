@@ -114,6 +114,7 @@ export function TransactionApprovals() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [actionType, setActionType] = useState<'APPROVE' | 'REJECT' | 'HOLD' | 'VIEW' | 'CANCEL' | 'CANCEL_APPROVE'>('VIEW');
   const [isEditing, setIsEditing] = useState(false);
+  const [editSaved, setEditSaved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [editFormData, setEditFormData] = useState({
@@ -251,7 +252,7 @@ export function TransactionApprovals() {
     setSelectedTransaction(transaction);
     setActionType(type);
     setIsEditing(false);
-    setActionFormData({ approval_notes: '', rejection_reason: '', hold_hours: '', cancel_reason: '', notify_broker: false });
+    setEditSaved(false);
     if (type !== 'VIEW') {
       setEditFormData({
         entity_id: transaction.entity_id,
@@ -269,6 +270,7 @@ export function TransactionApprovals() {
     setShowModal(false);
     setSelectedTransaction(null);
     setIsEditing(false);
+    setEditSaved(false);
   }
 
   async function handleApprove() {
@@ -281,7 +283,7 @@ export function TransactionApprovals() {
         approval_date: new Date().toISOString(),
         approval_notes: actionFormData.approval_notes || null
       };
-      if (isEditing) {
+      if (isEditing || editSaved) {
         updates.entity_id = editFormData.entity_id;
         updates.share_id = editFormData.share_id;
         updates.transaction_type = editFormData.transaction_type;
@@ -1049,6 +1051,9 @@ export function TransactionApprovals() {
                         <Edit2 className="w-4 h-4" />
                         <span>Edit Transaction (Audit Trail Maintained)</span>
                       </button>
+                      {editSaved && !isEditing && (
+                        <p className="mt-1 text-xs text-amber-700 font-medium">Edited values will be applied on approval.</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1092,8 +1097,8 @@ export function TransactionApprovals() {
                     </div>
                   </div>
                   <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                    <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancel Edit</button>
-                    <button onClick={() => setIsEditing(false)} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Changes</button>
+                    <button onClick={() => { setIsEditing(false); setEditSaved(false); }} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancel Edit</button>
+                    <button onClick={() => { setIsEditing(false); setEditSaved(true); }} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Changes</button>
                   </div>
                 </div>
               )}

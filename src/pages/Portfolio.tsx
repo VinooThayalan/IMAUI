@@ -89,25 +89,33 @@ export function Portfolio() {
   const [entityBreakdown, setEntityBreakdown] = useState<EntityRow[]>([]);
   const [topPerformers, setTopPerformers] = useState<PerformerRow[]>([]);
   const [bottomPerformers, setBottomPerformers] = useState<PerformerRow[]>([]);
+  const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState('');
 
-  const fetchPortfolioData = useCallback(async () => {
+  const fetchPortfolioData = useCallback(async (entityId?: string) => {
     setLoading(true);
     try {
-      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, entitiesRes, openingRes] = await Promise.all([
-        supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)').eq('is_active', true),
-        supabase
+      const txnQuery = supabase
           .from('transactions')
           .select(`
             id, entity_id, share_id, transaction_type, no_of_shares, total_amount, approval_status,
             shares ( ticker, share_name, sector, sector_types ( sector_name ) )
           `)
           .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true }),
+          .order('transaction_date', { ascending: true });
+        if (entityId) txnQuery.eq('entity_id', entityId);
+
+      const openingQuery = supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost');
+        if (entityId) openingQuery.eq('entity_id', entityId);
+
+      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, entitiesRes, openingRes] = await Promise.all([
+        supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)').eq('is_active', true),
+        txnQuery,
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('dividends').select('share_id, amount_net'),
         supabase.from('buy_sell_notes').select('transaction_id, no_of_shares, gross_amount, note_type').not('transaction_id', 'is', null),
         supabase.from('entities').select('id, name, current_balance'),
-        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost'),
+        openingQuery,
       ]);
 
       if (txnsRes.error) throw txnsRes.error;
@@ -132,8 +140,11 @@ export function Portfolio() {
       let cashBalance = 0;
       (entitiesRes.data || []).forEach((e: { id: string; name: string; current_balance: number }) => {
         entityNameMap.set(e.id, e.name);
-        cashBalance += Number(e.current_balance) || 0;
+        if (!entityId || e.id === entityId) {
+          cashBalance += Number(e.current_balance) || 0;
+        }
       });
+      setEntities((entitiesRes.data || []).map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
 
       const latestPrices = new Map<string, number>();
       (pricesRes.data || []).forEach((p: { share_id: string; share_price: number }) => {
@@ -317,8 +328,8 @@ export function Portfolio() {
   }, []);
 
   useEffect(() => {
-    fetchPortfolioData();
-  }, [fetchPortfolioData]);
+    fetchPortfolioData(selectedEntityId || undefined);
+  }, [fetchPortfolioData, selectedEntityId]);
 
   function handleExport() {
     const date = new Date().toISOString().split('T')[0];
@@ -358,14 +369,26 @@ export function Portfolio() {
           <h1 className="text-3xl font-bold text-gray-900">Portfolio Overview</h1>
           <p className="text-gray-500 mt-1">Comprehensive view of your investment portfolio</p>
         </div>
-        <button
-          onClick={handleExport}
-          disabled={sectorAllocation.length === 0 && entityBreakdown.length === 0}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-        >
-          <Download className="w-4 h-4" />
-          Export
-        </button>
+        <div className="flex items-center gap-3">
+          <select
+            value={selectedEntityId}
+            onChange={(e) => setSelectedEntityId(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="">All Entities</option>
+            {entities.map(e => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleExport}
+            disabled={sectorAllocation.length === 0 && entityBreakdown.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Export
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
