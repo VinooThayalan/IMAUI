@@ -72,7 +72,9 @@ interface ShareGroup {
   entity_id: string;
   entity_name: string;
   market_price: number;
-  cds_account: string;
+  market_price_date: string | null;
+  cds_accounts: string[];
+  brokerage_fee_rate: number;
   rows: ComputedRow[];
 }
 
@@ -230,7 +232,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
   function exportDetail() {
-    const headers = ['Date','Type','Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus'];
+    const headers = ['Date','Type','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
@@ -244,6 +246,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.dividend > 0 ? r.dividend.toFixed(2) : '',
       r.cum_surplus.toFixed(2),
       group.market_price > 0 ? r.market_value.toFixed(2) : '',
+      group.market_price > 0 ? (r.market_value * (1 - group.brokerage_fee_rate / 100)).toFixed(2) : '',
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
     ]);
@@ -376,7 +379,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus','Note'];
+  const mvDate = group.market_price_date ? ` (${fmtDate(group.market_price_date)})` : '';
+  // 'Market Value' column below can be re-enabled when needed
+  const COLS = ['Date','Status','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus', `Market Value${mvDate}`, `MV after Fees${mvDate}`,'Cash Flow','Total Surplus','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -390,18 +395,18 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               <h2 className="text-xl font-bold text-gray-900">{group.share_ticker}</h2>
               <span className="text-sm text-gray-500">{group.share_name}</span>
             </div>
-            <div className="flex items-center gap-4 mt-0.5">
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <p className="text-sm text-gray-400">{group.entity_name}</p>
-              {group.cds_account && (
-                <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
-                  CDS: {group.cds_account}
+              {group.cds_accounts.length > 0 && group.cds_accounts.map(cds => (
+                <span key={cds} className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md">
+                  CDS: {cds}
                 </span>
-              )}
+              ))}
             </div>
           </div>
 
           {/* Summary pills */}
-          <div className="flex items-center gap-5 mr-6 text-sm">
+          <div className="flex items-center gap-5 mr-6 text-sm flex-wrap">
             <div className="text-center">
               <div className="text-xs text-gray-400">Shares Held</div>
               <div className="font-bold text-gray-900">{fmtN(last.share_cum_bal)}</div>
@@ -412,14 +417,25 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             </div>
             {group.market_price > 0 && (
               <div className="text-center">
-                <div className="text-xs text-gray-400">Market Price</div>
+                <div className="text-xs text-gray-400">
+                  Market Price
+                  {group.market_price_date && <span className="ml-1 text-gray-300">({fmtDate(group.market_price_date)})</span>}
+                </div>
                 <div className="font-bold text-gray-900">Rs. {fmt(group.market_price)}</div>
               </div>
             )}
-            <div className="text-center">
-              <div className="text-xs text-gray-400">Market Value</div>
-              <div className="font-bold text-blue-700">Rs. {fmt(last.market_value)}</div>
-            </div>
+            {group.market_price > 0 && (
+              <div className="text-center">
+                <div className="text-xs text-gray-400">Market Value</div>
+                <div className="font-bold text-blue-700">Rs. {fmt(last.market_value)}</div>
+              </div>
+            )}
+            {group.market_price > 0 && (
+              <div className="text-center">
+                <div className="text-xs text-gray-400">MV after Fees</div>
+                <div className="font-bold text-indigo-700">Rs. {fmt(last.market_value * (1 - group.brokerage_fee_rate / 100))}</div>
+              </div>
+            )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
               <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
@@ -482,6 +498,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
                       <td className="px-3 py-2 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-right font-mono text-indigo-600">{group.market_price > 0 && group.brokerage_fee_rate > 0 ? fmt(row.market_value * (1 - group.brokerage_fee_rate / 100)) : group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono">
                         <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
                           {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
@@ -515,7 +532,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     {/* Inline note detail expansion */}
                     {isExpanded && (
                       <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
-                        <td colSpan={15} className="px-6 py-4">
+                        <td colSpan={16} className="px-6 py-4">
                           {!detail ? (
                             <div className="flex items-center justify-center py-4">
                               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
@@ -653,6 +670,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
                 <td className="px-3 py-2.5 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(last.market_value) : '—'}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-indigo-600">{group.market_price > 0 ? fmt(last.market_value * (1 - group.brokerage_fee_rate / 100)) : '—'}</td>
                 <td className="px-3 py-2.5 text-right font-mono">
                   <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
                     {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
@@ -695,7 +713,7 @@ export function ShareAnalytics() {
       const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
-        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id'),
+        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date').order('transaction_date', { ascending: false }),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
@@ -704,13 +722,20 @@ export function ShareAnalytics() {
       const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
       const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
 
-      // Build txn map; also capture CDS account per entity+share (first non-null wins)
-      const txnMap    = new Map<string, { entity_id: string; share_id: string }>();
-      const cdsMap    = new Map<string, string>(); // key: entity_id__share_id
+      // Build txn map; collect all distinct CDS accounts per entity+share; latest brokerage fee rate
+      const txnMap        = new Map<string, { entity_id: string; share_id: string }>();
+      const cdsSetMap     = new Map<string, Set<string>>(); // key: entity_id__share_id -> set of CDS accounts
+      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate
       for (const t of (txnsRes.data || [])) {
         txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id });
         const k = `${t.entity_id}__${t.share_id}`;
-        if (!cdsMap.has(k) && t.cds_account_id) cdsMap.set(k, t.cds_account_id);
+        if (t.cds_account_id) {
+          if (!cdsSetMap.has(k)) cdsSetMap.set(k, new Set());
+          cdsSetMap.get(k)!.add(t.cds_account_id);
+        }
+        if (!feeRateMap.has(k) && t.brokerage_fee_rate != null) {
+          feeRateMap.set(k, Number(t.brokerage_fee_rate));
+        }
       }
 
       const openingMap = new Map<string, OpeningBalance>();
@@ -730,9 +755,13 @@ export function ShareAnalytics() {
         dividendMap.get(k)!.push({ entity_id: d.entity_id, share_id: d.share_id, payment_date: d.payment_date, amount_net: Number(d.amount_net) || 0 });
       }
 
-      const priceMap = new Map<string, number>();
+      const priceMap     = new Map<string, number>();
+      const priceDateMap = new Map<string, string>();
       for (const p of (pricesRes.data || [])) {
-        if (!priceMap.has(p.share_id)) priceMap.set(p.share_id, Number(p.share_price) || 0);
+        if (!priceMap.has(p.share_id)) {
+          priceMap.set(p.share_id, Number(p.share_price) || 0);
+          priceDateMap.set(p.share_id, p.effective_date);
+        }
       }
 
       const { data: notesData, error: notesError } = await supabase
@@ -778,10 +807,12 @@ export function ShareAnalytics() {
         if (notes.length === 0 && !opening) continue;
 
         const [entityId, shareId] = key.split('__');
-        const share       = shareMap.get(shareId) ?? { ticker: '—', name: '—' };
-        const entityName  = entityMap.get(entityId) ?? '—';
-        const marketPrice = priceMap.get(shareId) ?? 0;
-        const cdsAccount  = cdsMap.get(key) ?? '';
+        const share            = shareMap.get(shareId) ?? { ticker: '—', name: '—' };
+        const entityName       = entityMap.get(entityId) ?? '—';
+        const marketPrice      = priceMap.get(shareId) ?? 0;
+        const marketPriceDate  = priceDateMap.get(shareId) ?? null;
+        const cdsAccounts      = cdsSetMap.has(key) ? Array.from(cdsSetMap.get(key)!) : [];
+        const brokerageFeeRate = feeRateMap.get(key) ?? 0;
 
         const computed = computeRows(notes, opening, divs, marketPrice);
         for (const row of computed) {
@@ -791,7 +822,7 @@ export function ShareAnalytics() {
         }
         if (computed.length === 0) continue;
 
-        result.push({ share_id: shareId, share_ticker: share.ticker, share_name: share.name, entity_id: entityId, entity_name: entityName, market_price: marketPrice, cds_account: cdsAccount, rows: computed });
+        result.push({ share_id: shareId, share_ticker: share.ticker, share_name: share.name, entity_id: entityId, entity_name: entityName, market_price: marketPrice, market_price_date: marketPriceDate, cds_accounts: cdsAccounts, brokerage_fee_rate: brokerageFeeRate, rows: computed });
       }
 
       result.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
@@ -812,30 +843,33 @@ export function ShareAnalytics() {
   // Aggregate totals across filtered groups
   const totals = filtered.reduce((acc, g) => {
     const last = g.rows[g.rows.length - 1];
+    const mvAfterFees = last.market_value * (1 - g.brokerage_fee_rate / 100);
     return {
-      share_cum_bal:   acc.share_cum_bal   + last.share_cum_bal,
-      purchase_cost:   acc.purchase_cost   + g.rows.reduce((s, r) => s + r.purchase_cost, 0),
-      sale_value:      acc.sale_value      + g.rows.reduce((s, r) => s + r.sale_value, 0),
-      av_cost:         acc.av_cost         + last.av_cost,
-      dividend:        acc.dividend        + g.rows.reduce((s, r) => s + r.dividend, 0),
-      cum_surplus:     acc.cum_surplus     + last.cum_surplus,
-      market_value:    acc.market_value    + last.market_value,
-      cash_flow:       acc.cash_flow       + g.rows.reduce((s, r) => s + r.cash_flow, 0),
-      total_surplus:   acc.total_surplus   + last.total_surplus,
+      share_cum_bal:      acc.share_cum_bal   + last.share_cum_bal,
+      purchase_cost:      acc.purchase_cost   + g.rows.reduce((s, r) => s + r.purchase_cost, 0),
+      sale_value:         acc.sale_value      + g.rows.reduce((s, r) => s + r.sale_value, 0),
+      av_cost:            acc.av_cost         + last.av_cost,
+      dividend:           acc.dividend        + g.rows.reduce((s, r) => s + r.dividend, 0),
+      cum_surplus:        acc.cum_surplus     + last.cum_surplus,
+      market_value:       acc.market_value    + last.market_value,
+      mv_after_fees:      acc.mv_after_fees   + mvAfterFees,
+      cash_flow:          acc.cash_flow       + g.rows.reduce((s, r) => s + r.cash_flow, 0),
+      total_surplus:      acc.total_surplus   + last.total_surplus,
     };
-  }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, cash_flow: 0, total_surplus: 0 });
+  }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
   function exportSummary() {
-    const headers = ['Share','Share Name','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus'];
+    const headers = ['Share','Share Name','Entity','CDS Accounts','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
     const rows = filtered.map(g => {
       const last = g.rows[g.rows.length - 1];
+      const mvAfterFees = g.market_price > 0 ? (last.market_value * (1 - g.brokerage_fee_rate / 100)).toFixed(2) : '';
       return [
         g.share_ticker,
         g.share_name,
         g.entity_name,
-        g.cds_account,
+        g.cds_accounts.join('; '),
         last.share_cum_bal,
         g.rows.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
         g.rows.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
@@ -844,6 +878,7 @@ export function ShareAnalytics() {
         g.rows.reduce((s, r) => s + r.dividend, 0).toFixed(2),
         last.cum_surplus.toFixed(2),
         g.market_price > 0 ? last.market_value.toFixed(2) : '',
+        mvAfterFees,
         g.rows.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
         g.market_price > 0 ? last.total_surplus.toFixed(2) : '',
       ];
@@ -916,6 +951,7 @@ export function ShareAnalytics() {
             <SummaryCard label="Total Sale Value"     value={`Rs. ${fmt(totals.sale_value)}`} />
             <SummaryCard label="Total Dividend"       value={`Rs. ${fmt(totals.dividend)}`}      color="text-yellow-700" />
             <SummaryCard label="Total Market Value"   value={`Rs. ${fmt(totals.market_value)}`}  color="text-blue-700" />
+            <SummaryCard label="MV after Brokerage"   value={`Rs. ${fmt(totals.mv_after_fees)}`} color="text-indigo-700" />
             <SummaryCard
               label="Cum Surplus (Realized)"
               value={`Rs. ${fmt(totals.cum_surplus)}`}
@@ -950,7 +986,7 @@ export function ShareAnalytics() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Share','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','Cash Flow','Total Surplus','Txns'].map(h => (
+                  {['Share','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus','Txns'].map(h => (
                     <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Share' || h === 'Entity' || h === 'CDS Account' ? 'text-left' : 'text-right'}`}>
                       {h}
                     </th>
@@ -977,7 +1013,11 @@ export function ShareAnalytics() {
                         <div className="text-xs text-gray-400 mt-0.5">{group.share_name}</div>
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-sm">{group.entity_name}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">{group.cds_account || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">
+                        {group.cds_accounts.length > 0
+                          ? group.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">{fmtN(last.share_cum_bal)}</td>
                       <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(totalPC)}</td>
                       <td className="px-4 py-3 text-right font-mono text-gray-800">{totalSV > 0 ? fmt(totalSV) : <span className="text-gray-300">—</span>}</td>
@@ -985,7 +1025,19 @@ export function ShareAnalytics() {
                       <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(last.av_price)}</td>
                       <td className="px-4 py-3 text-right font-mono">{totalDiv > 0 ? <span className="text-yellow-700 font-semibold">{fmt(totalDiv)}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
-                      <td className="px-4 py-3 text-right font-mono text-blue-600 font-semibold">{group.market_price > 0 ? fmt(last.market_value) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right font-mono text-blue-600 font-semibold">
+                        {group.market_price > 0
+                          ? <div>
+                              <div>{fmt(last.market_value)}</div>
+                              {group.market_price_date && <div className="text-xs text-gray-400 font-normal">({fmtDate(group.market_price_date)})</div>}
+                            </div>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-indigo-600 font-semibold">
+                        {group.market_price > 0
+                          ? fmt(last.market_value * (1 - group.brokerage_fee_rate / 100))
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono">
                         <span className={totalCF > 0 ? 'text-green-700 font-semibold' : totalCF < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
                           {fmt(totalCF)}
@@ -1016,6 +1068,7 @@ export function ShareAnalytics() {
                   <td className="px-4 py-3 text-right font-mono text-yellow-700">{fmt(totals.dividend)}</td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cum_surplus)}>{fmt(totals.cum_surplus)}</span></td>
                   <td className="px-4 py-3 text-right font-mono text-blue-600">{fmt(totals.market_value)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-indigo-600">{fmt(totals.mv_after_fees)}</td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cash_flow)}>{fmt(totals.cash_flow)}</span></td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.total_surplus)}>{fmt(totals.total_surplus)}</span></td>
                   <td />
