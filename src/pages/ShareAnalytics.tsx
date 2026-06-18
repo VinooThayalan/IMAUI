@@ -258,14 +258,13 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
-  // XIRR for this group
+  // XIRR for this group — terminal date is always today to match Portfolio Summary
   const groupAer = (() => {
     const today = new Date();
-    const termDate = group.market_price_date ? new Date(group.market_price_date + 'T00:00:00') : today;
     const cfs = group.rows
       .filter(r => r.cash_flow !== 0 && r.trade_date)
       .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
-    if (last.market_value > 0) cfs.push({ date: termDate, amount: last.market_value });
+    if (last.market_value > 0) cfs.push({ date: today, amount: last.market_value });
     if (cfs.length < 2) return null;
     try {
       const rate = xirr(cfs);
@@ -895,7 +894,7 @@ export function ShareAnalytics() {
     };
   }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
-  // Portfolio-level XIRR: combine cash flows from all filtered groups
+  // Portfolio-level XIRR — terminal date is always today to match Portfolio Summary
   const portfolioAer = (() => {
     const today = new Date();
     const cfs: Array<{ date: Date; amount: number }> = [];
@@ -906,11 +905,7 @@ export function ShareAnalytics() {
           cfs.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: r.cash_flow });
         }
       }
-      // Terminal value: current market value as positive inflow
-      if (last.market_value > 0) {
-        const termDate = g.market_price_date ? new Date(g.market_price_date + 'T00:00:00') : today;
-        cfs.push({ date: termDate, amount: last.market_value });
-      }
+      if (last.market_value > 0) cfs.push({ date: today, amount: last.market_value });
     }
     if (cfs.length < 2) return null;
     try {
