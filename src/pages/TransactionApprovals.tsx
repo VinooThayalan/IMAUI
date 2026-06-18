@@ -48,6 +48,8 @@ interface Entity {
   name: string;
   contact_email_company_individual: string | null;
   cc_email: string | null;
+  cc_email_2: string | null;
+  cc_email_3: string | null;
 }
 
 interface Share {
@@ -162,7 +164,7 @@ export function TransactionApprovals() {
           .select('*')
           .in('approval_status', ALL_STATUSES)
           .order('submitted_for_approval_at', { ascending: false, nullsFirst: false }),
-        supabase.from('entities').select('id, name, contact_email_company_individual, cc_email').order('name'),
+        supabase.from('entities').select('id, name, contact_email_company_individual, cc_email, cc_email_2, cc_email_3').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email, contact_person_name').order('broker_name'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
@@ -570,6 +572,8 @@ export function TransactionApprovals() {
     const entity = entities.find(e => e.id === transaction.entity_id);
     const autoCc: string[] = [];
     if (entity?.cc_email) autoCc.push(entity.cc_email);
+    if (entity?.cc_email_2) autoCc.push(entity.cc_email_2);
+    if (entity?.cc_email_3) autoCc.push(entity.cc_email_3);
     setCcAddresses(autoCc);
     setShowEmailModal(true);
   }
@@ -778,7 +782,7 @@ export function TransactionApprovals() {
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
                         <StatusIcon className="w-3 h-3" />
-                        <span>{cfg.label}</span>
+                        <span>{transaction.approval_status === 'CANCELLED' ? `Cancelled ${transaction.transaction_type}` : cfg.label}</span>
                       </span>
                     </td>
                     <td className="px-4 py-3">
@@ -1018,7 +1022,7 @@ export function TransactionApprovals() {
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</p>
                       <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium mt-0.5 ${statusConfig[selectedTransaction.approval_status]?.bg} ${statusConfig[selectedTransaction.approval_status]?.color}`}>
-                        <span>{statusConfig[selectedTransaction.approval_status]?.label}</span>
+                        <span>{selectedTransaction.approval_status === 'CANCELLED' ? `Cancelled ${selectedTransaction.transaction_type}` : statusConfig[selectedTransaction.approval_status]?.label}</span>
                       </span>
                     </div>
                   </div>

@@ -54,6 +54,8 @@ interface Entity {
   name: string;
   current_balance: number;
   cc_email: string | null;
+  cc_email_2: string | null;
+  cc_email_3: string | null;
 }
 
 interface Share {
@@ -254,7 +256,7 @@ export function Transactions() {
 
       const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
-        supabase.from('entities').select('id, name, current_balance, cc_email').order('name'),
+        supabase.from('entities').select('id, name, current_balance, cc_email, cc_email_2, cc_email_3').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
@@ -1023,7 +1025,11 @@ export function Transactions() {
     const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
     setEmailAddress(broker?.contact_person_email || '');
     const entity = entities.find(e => e.id === transaction.entity_id);
-    setCcAddresses(entity?.cc_email ? [entity.cc_email] : []);
+    const autoCc: string[] = [];
+    if (entity?.cc_email) autoCc.push(entity.cc_email);
+    if (entity?.cc_email_2) autoCc.push(entity.cc_email_2);
+    if (entity?.cc_email_3) autoCc.push(entity.cc_email_3);
+    setCcAddresses(autoCc);
     setCcInput('');
     setEmailNote('');
     setShowEmailModal(true);
@@ -1608,6 +1614,7 @@ export function Transactions() {
                         const label =
                           s === 'PENDING_APPROVAL' ? 'PENDING' :
                           s === 'MANUAL_APPROVED' ? 'APPROVED' :
+                          s === 'CANCELLED' ? `CANCELLED ${transaction.transaction_type}` :
                           s;
                         return (
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
@@ -2323,7 +2330,9 @@ export function Transactions() {
                       selectedTransaction.approval_status === 'CANCELLED' ? 'bg-rose-100 text-rose-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'APPROVED' : selectedTransaction.approval_status}
+                      {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'APPROVED' :
+                       selectedTransaction.approval_status === 'CANCELLED' ? `CANCELLED ${selectedTransaction.transaction_type}` :
+                       selectedTransaction.approval_status}
                     </span>
                     {selectedTransaction.offline_approval && (
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>

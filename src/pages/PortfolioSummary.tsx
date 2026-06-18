@@ -32,6 +32,7 @@ export function PortfolioSummary() {
   const [sortField, setSortField] = useState<SortField>('entity_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [asOfDate, setAsOfDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedEntityId, setSelectedEntityId] = useState<string>('');
 
   useEffect(() => {
     fetchPortfolioData();
@@ -290,8 +291,11 @@ export function PortfolioSummary() {
     }
   }
 
+  const entityOptions = Array.from(new Map(data.map(r => [r.entity_id, r.entity_name])).entries());
+
   function getSortedData(): PortfolioRow[] {
-    return [...data].sort((a, b) => {
+    const filtered = selectedEntityId ? data.filter(r => r.entity_id === selectedEntityId) : data;
+    return [...filtered].sort((a, b) => {
       const aVal = a[sortField];
       const bVal = b[sortField];
 
@@ -324,11 +328,12 @@ export function PortfolioSummary() {
     );
   }
 
-  const totalCost = data.reduce((sum, row) => sum + row.cost, 0);
-  const totalMarketValue = data.reduce((sum, row) => sum + row.market_value_net, 0);
-  const totalReturns = data.reduce((sum, row) => sum + row.total_returns, 0);
-  const totalDiv = data.reduce((sum, row) => sum + row.div, 0);
-  const totalCashDiv = data.reduce((sum, row) => sum + row.cash_div, 0);
+  const filteredData = selectedEntityId ? data.filter(r => r.entity_id === selectedEntityId) : data;
+  const totalCost = filteredData.reduce((sum, row) => sum + row.cost, 0);
+  const totalMarketValue = filteredData.reduce((sum, row) => sum + row.market_value_net, 0);
+  const totalReturns = filteredData.reduce((sum, row) => sum + row.total_returns, 0);
+  const totalDiv = filteredData.reduce((sum, row) => sum + row.div, 0);
+  const totalCashDiv = filteredData.reduce((sum, row) => sum + row.cash_div, 0);
 
   if (loading) {
     return (
@@ -356,16 +361,31 @@ export function PortfolioSummary() {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center space-x-3">
-            <Calendar className="w-5 h-5 text-gray-500" />
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-3">
+              <Calendar className="w-5 h-5 text-gray-500" />
+              <div>
+                <label className="text-sm font-medium text-gray-700 mr-2">As of Date:</label>
+                <input
+                  type="date"
+                  value={asOfDate}
+                  onChange={(e) => setAsOfDate(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
             <div>
-              <label className="text-sm font-medium text-gray-700 mr-2">As of Date:</label>
-              <input
-                type="date"
-                value={asOfDate}
-                onChange={(e) => setAsOfDate(e.target.value)}
+              <label className="text-sm font-medium text-gray-700 mr-2">Entity:</label>
+              <select
+                value={selectedEntityId}
+                onChange={(e) => setSelectedEntityId(e.target.value)}
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">All Entities</option>
+                {entityOptions.map(([id, name]) => (
+                  <option key={id} value={id}>{name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex items-center space-x-6">
