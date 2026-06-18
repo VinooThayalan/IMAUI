@@ -258,8 +258,23 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
+  // XIRR for this group
+  const groupAer = (() => {
+    const today = new Date();
+    const termDate = group.market_price_date ? new Date(group.market_price_date + 'T00:00:00') : today;
+    const cfs = group.rows
+      .filter(r => r.cash_flow !== 0 && r.trade_date)
+      .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
+    if (last.market_value > 0) cfs.push({ date: termDate, amount: last.market_value });
+    if (cfs.length < 2) return null;
+    try {
+      const rate = xirr(cfs);
+      return isFinite(rate) ? rate * 100 : null;
+    } catch { return null; }
+  })();
+
   function exportDetail() {
-    const headers = ['Date','Type','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
+    const headers = ['Date','Type','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Cash Flow','Total Surplus'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
@@ -273,8 +288,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.av_price.toFixed(2),
       r.dividend > 0 ? r.dividend.toFixed(2) : '',
       r.cum_surplus.toFixed(2),
-      group.market_price > 0 ? r.market_value.toFixed(2) : '',
-      group.market_price > 0 ? (r.market_value * (1 - group.brokerage_fee_rate / 100)).toFixed(2) : '',
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
     ]);
@@ -407,9 +420,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const mvDate = group.market_price_date ? ` (${fmtDate(group.market_price_date)})` : '';
-  // 'Market Value' column below can be re-enabled when needed
-  const COLS = ['Date','Status','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus', `Market Value${mvDate}`, `MV after Fees${mvDate}`,'Cash Flow','Total Surplus','Note'];
+  const COLS = ['Date','Status','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Cash Flow','Total Surplus','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -452,18 +463,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <div className="font-bold text-gray-900">Rs. {fmt(group.market_price)}</div>
               </div>
             )}
-            {group.market_price > 0 && (
-              <div className="text-center">
-                <div className="text-xs text-gray-400">Market Value</div>
-                <div className="font-bold text-blue-700">Rs. {fmt(last.market_value)}</div>
-              </div>
-            )}
-            {group.market_price > 0 && (
-              <div className="text-center">
-                <div className="text-xs text-gray-400">MV after Fees</div>
-                <div className="font-bold text-indigo-700">Rs. {fmt(last.market_value * (1 - group.brokerage_fee_rate / 100))}</div>
-              </div>
-            )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
               <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
@@ -472,6 +471,14 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               <div className="text-xs text-gray-400">Total Surplus</div>
               <div className={clsSurplus(last.total_surplus)}>Rs. {fmt(last.total_surplus)}</div>
             </div>
+            {groupAer !== null && (
+              <div className="text-center">
+                <div className="text-xs text-gray-400">AER (XIRR)</div>
+                <div className={`font-bold ${groupAer >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  {groupAer >= 0 ? '+' : ''}{groupAer.toFixed(2)}%
+                </div>
+              </div>
+            )}
           </div>
 
           <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
@@ -530,8 +537,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
                       <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
-                      <td className="px-3 py-2 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-right font-mono text-indigo-600">{group.market_price > 0 && group.brokerage_fee_rate > 0 ? fmt(row.market_value * (1 - group.brokerage_fee_rate / 100)) : group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono">
                         <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
                           {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
@@ -565,7 +570,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     {/* Inline note detail expansion */}
                     {isExpanded && (
                       <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
-                        <td colSpan={17} className="px-6 py-4">
+                        <td colSpan={15} className="px-6 py-4">
                           {!detail ? (
                             <div className="flex items-center justify-center py-4">
                               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
@@ -702,8 +707,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
-                <td className="px-3 py-2.5 text-right font-mono text-blue-600">{group.market_price > 0 ? fmt(last.market_value) : '—'}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-indigo-600">{group.market_price > 0 ? fmt(last.market_value * (1 - group.brokerage_fee_rate / 100)) : '—'}</td>
                 <td className="px-3 py-2.5 text-right font-mono">
                   <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
                     {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
