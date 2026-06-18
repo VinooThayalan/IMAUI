@@ -2261,9 +2261,12 @@ export function Transactions() {
                   <p className="text-sm font-medium text-gray-500">Transaction Type</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                      selectedTransaction.approval_status === 'CANCELLED' ? 'bg-rose-100 text-rose-800' :
                       selectedTransaction.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
-                      {selectedTransaction.transaction_type}
+                      {selectedTransaction.approval_status === 'CANCELLED'
+                        ? `CANCELLED ${selectedTransaction.transaction_type}`
+                        : selectedTransaction.transaction_type}
                     </span>
                   </p>
                 </div>

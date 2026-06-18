@@ -232,10 +232,12 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
   function exportDetail() {
-    const headers = ['Date','Type','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
+    const headers = ['Date','Type','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
+    const cdsStr = group.cds_accounts.join(' / ');
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
+      (r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'opening') ? cdsStr : '',
       r.price_avg ?? '',
       r.no_of_shares > 0 ? r.no_of_shares : '',
       r.share_cum_bal,
@@ -381,7 +383,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
 
   const mvDate = group.market_price_date ? ` (${fmtDate(group.market_price_date)})` : '';
   // 'Market Value' column below can be re-enabled when needed
-  const COLS = ['Date','Status','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus', `Market Value${mvDate}`, `MV after Fees${mvDate}`,'Cash Flow','Total Surplus','Note'];
+  const COLS = ['Date','Status','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus', `Market Value${mvDate}`, `MV after Fees${mvDate}`,'Cash Flow','Total Surplus','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -488,6 +490,11 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     <tr key={row.id} className={`${bg} border-b border-gray-50 hover:bg-blue-50/30 transition-colors`}>
                       <td className="px-3 py-2 text-gray-700">{fmtDate(row.trade_date)}</td>
                       <td className="px-3 py-2">{badge(row.note_type)}</td>
+                      <td className="px-3 py-2 text-xs font-mono text-gray-600">
+                        {(isNote || isOp) && group.cds_accounts.length > 0
+                          ? group.cds_accounts.map(cds => <div key={cds}>{cds}</div>)
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-right font-mono text-gray-700">{row.price_avg != null ? fmt(row.price_avg) : '—'}</td>
                       <td className="px-3 py-2 text-right font-mono text-gray-700">{row.no_of_shares > 0 ? fmtN(row.no_of_shares) : '—'}</td>
                       <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmtN(row.share_cum_bal)}</td>
@@ -532,7 +539,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     {/* Inline note detail expansion */}
                     {isExpanded && (
                       <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
-                        <td colSpan={16} className="px-6 py-4">
+                        <td colSpan={17} className="px-6 py-4">
                           {!detail ? (
                             <div className="flex items-center justify-center py-4">
                               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
@@ -662,7 +669,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             </tbody>
             <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300 text-xs font-bold">
               <tr>
-                <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
+                <td colSpan={6} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
