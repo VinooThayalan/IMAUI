@@ -2,6 +2,34 @@ import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
+// XIRR: annualized internal rate of return for irregular cash flows
+function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
+  if (cashFlows.length < 2) return 0;
+
+  const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
+  const d0 = sorted[0].date.getTime();
+  const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+  let rate = guess;
+  for (let iter = 0; iter < 200; iter++) {
+    let f = 0;
+    let df = 0;
+    for (const cf of sorted) {
+      const t = (cf.date.getTime() - d0) / MS_PER_YEAR;
+      const base = 1 + rate;
+      if (base <= 0) break;
+      const pv = Math.pow(base, t);
+      f += cf.amount / pv;
+      df -= (t * cf.amount) / (pv * base);
+    }
+    if (Math.abs(df) < 1e-12) break;
+    const newRate = rate - f / df;
+    if (Math.abs(newRate - rate) < 1e-8) return newRate;
+    rate = Math.max(-0.999, newRate); // clamp to avoid log(0)
+  }
+  return rate;
+}
+
 interface PortfolioRow {
   entity_id: string;
   entity_name: string;
@@ -14,7 +42,7 @@ interface PortfolioRow {
   cost: number;
   cost_per_share: number;
   market_price_per_share: number;
-  market_value_net: number;
+  market_value_gross: number;
   div: number;
   total_returns: number;
   aer: number;
@@ -122,6 +150,8 @@ export function PortfolioSummary() {
       };
 
       const holdingsMap = new Map<string, Holding>();
+      // Cash flows per entity+share for XIRR: negative = money out (buy), positive = money in (sell/div/terminal)
+      const cashFlowsMap = new Map<string, Array<{ date: Date; amount: number }>>();
 
       function ensureHolding(entityId: string, shareId: string, entityName?: string, cdsAccount?: string): Holding {
         const key = `${entityId}_${shareId}`;
@@ -139,6 +169,12 @@ export function PortfolioSummary() {
         return holdingsMap.get(key)!;
       }
 
+      function ensureCashFlows(entityId: string, shareId: string): Array<{ date: Date; amount: number }> {
+        const key = `${entityId}_${shareId}`;
+        if (!cashFlowsMap.has(key)) cashFlowsMap.set(key, []);
+        return cashFlowsMap.get(key)!;
+      }
+
       function applyBuy(holding: Holding, shares: number, amount: number) {
         holding.shares += shares;
         holding.cost += amount;
@@ -150,29 +186,40 @@ export function PortfolioSummary() {
         holding.cost = Math.max(0, holding.cost - avgCost * shares);
       }
 
+      // Opening balances
       (openingRes.data || []).forEach((ob: {
         entity_id: string;
         share_id: string;
         opening_shares: number;
         average_purchase_cost: number;
+        effective_date: string;
       }) => {
         const holding = ensureHolding(ob.entity_id, ob.share_id);
         const shares = Number(ob.opening_shares) || 0;
         const cost = shares * (Number(ob.average_purchase_cost) || 0);
         applyBuy(holding, shares, cost);
+
+        if (cost > 0 && ob.effective_date) {
+          ensureCashFlows(ob.entity_id, ob.share_id).push({
+            date: new Date(ob.effective_date),
+            amount: -cost, // money out
+          });
+        }
       });
 
-      const noteByTxn = new Map<string, { shares: number; gross: number; note_type: string }>();
+      const noteByTxn = new Map<string, { shares: number; gross: number; note_type: string; trade_date: string | null }>();
       (notesRes.data || []).forEach((n: {
         transaction_id: string;
         note_type: string;
         no_of_shares: number;
         gross_amount: number;
+        trade_date: string | null;
       }) => {
         noteByTxn.set(n.transaction_id, {
           shares: Number(n.no_of_shares) || 0,
           gross: Number(n.gross_amount) || 0,
           note_type: n.note_type,
+          trade_date: n.trade_date,
         });
       });
 
@@ -183,6 +230,7 @@ export function PortfolioSummary() {
         transaction_type: string;
         no_of_shares: number;
         total_amount: number;
+        transaction_date: string;
         entities?: { name: string; entity_id: string } | null;
         shares?: {
           ticker: string;
@@ -211,28 +259,56 @@ export function PortfolioSummary() {
         const amount = note ? note.gross : Number(tx.total_amount) || 0;
         const txType = note?.note_type || tx.transaction_type;
         const isBuy = (txType || '').toUpperCase() === 'BUY';
+        const txDate = note?.trade_date || tx.transaction_date;
 
-        if (isBuy) applyBuy(holding, shares, amount);
-        else applySell(holding, shares);
+        if (isBuy) {
+          applyBuy(holding, shares, amount);
+          if (amount > 0 && txDate) {
+            ensureCashFlows(tx.entity_id, tx.share_id).push({
+              date: new Date(txDate),
+              amount: -amount, // money out
+            });
+          }
+        } else {
+          applySell(holding, shares);
+          if (amount > 0 && txDate) {
+            ensureCashFlows(tx.entity_id, tx.share_id).push({
+              date: new Date(txDate),
+              amount: +amount, // money in
+            });
+          }
+        }
       });
 
+      // Build dividend map and add to cash flows
       const dividendMap = new Map<string, { total: number; dps_last_fy: number }>();
       (dividendsRes.data || []).forEach((div: {
         entity_id: string;
         share_id: string;
         amount_net: number;
         net_dividend_per_share?: number;
+        payment_date?: string;
       }) => {
         const key = `${div.entity_id}_${div.share_id}`;
         if (!dividendMap.has(key)) {
           dividendMap.set(key, { total: 0, dps_last_fy: 0 });
         }
         const divData = dividendMap.get(key)!;
-        divData.total += Number(div.amount_net) || 0;
+        const net = Number(div.amount_net) || 0;
+        divData.total += net;
         if (div.net_dividend_per_share != null) {
           divData.dps_last_fy = Number(div.net_dividend_per_share);
         }
+        // Add dividend as positive cash flow for XIRR
+        if (net > 0 && div.payment_date) {
+          ensureCashFlows(div.entity_id, div.share_id).push({
+            date: new Date(div.payment_date),
+            amount: +net,
+          });
+        }
       });
+
+      const terminalDate = new Date(asOfDate);
 
       const portfolioData: PortfolioRow[] = Array.from(holdingsMap.entries())
         .map(([key, holding]) => {
@@ -242,12 +318,26 @@ export function PortfolioSummary() {
           const marketPrice = latestPrices.get(holding.share_id) || 0;
           const costPerShare = holding.shares > 0 ? holding.cost / holding.shares : 0;
           const marketValueGross = holding.shares * marketPrice;
-          const brokerageCost = marketValueGross * 0.0025;
-          const marketValueNet = marketValueGross - brokerageCost;
 
           const divData = dividendMap.get(key) || { total: 0, dps_last_fy: 0 };
-          const totalReturns = marketValueNet - holding.cost + divData.total;
-          const aer = holding.cost > 0 ? (totalReturns / holding.cost) * 100 : 0;
+          const totalReturns = marketValueGross - holding.cost + divData.total;
+
+          // XIRR: add terminal value (current market value) as final positive cash flow
+          const cfs = ensureCashFlows(holding.entity_id, holding.share_id);
+          let aerPct = 0;
+          if (marketValueGross > 0 && cfs.length > 0) {
+            const xirrFlows = [
+              ...cfs,
+              { date: terminalDate, amount: marketValueGross },
+            ];
+            try {
+              const rate = xirr(xirrFlows);
+              aerPct = isFinite(rate) ? rate * 100 : 0;
+            } catch {
+              aerPct = 0;
+            }
+          }
+
           const cashDiv = holding.shares * divData.dps_last_fy;
 
           return {
@@ -262,13 +352,13 @@ export function PortfolioSummary() {
             cost: holding.cost,
             cost_per_share: costPerShare,
             market_price_per_share: marketPrice,
-            market_value_net: marketValueNet,
+            market_value_gross: marketValueGross,
             div: divData.total,
             total_returns: totalReturns,
-            aer: aer,
+            aer: aerPct,
             cash_dps_last_fy: divData.dps_last_fy,
             cash_div: cashDiv,
-            remarks: ''
+            remarks: '',
           };
         })
         .filter((row): row is PortfolioRow => row !== null);
@@ -306,11 +396,7 @@ export function PortfolioSummary() {
       const aStr = String(aVal).toLowerCase();
       const bStr = String(bVal).toLowerCase();
 
-      if (sortDirection === 'asc') {
-        return aStr.localeCompare(bStr);
-      } else {
-        return bStr.localeCompare(aStr);
-      }
+      return sortDirection === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
     });
   }
 
@@ -330,7 +416,6 @@ export function PortfolioSummary() {
 
   const filteredData = selectedEntityId ? data.filter(r => r.entity_id === selectedEntityId) : data;
   const totalCost = filteredData.reduce((sum, row) => sum + row.cost, 0);
-  const totalMarketValue = filteredData.reduce((sum, row) => sum + row.market_value_net, 0);
   const totalReturns = filteredData.reduce((sum, row) => sum + row.total_returns, 0);
   const totalDiv = filteredData.reduce((sum, row) => sum + row.div, 0);
   const totalCashDiv = filteredData.reduce((sum, row) => sum + row.cash_div, 0);
@@ -394,10 +479,6 @@ export function PortfolioSummary() {
               <p className="text-lg font-bold text-gray-900">Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
             <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase">Market Value</p>
-              <p className="text-lg font-bold text-gray-900">Rs. {totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            </div>
-            <div className="text-center">
               <p className="text-xs text-gray-500 uppercase">Total Returns</p>
               <p className={`text-lg font-bold ${totalReturns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                 Rs. {totalReturns.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -419,7 +500,6 @@ export function PortfolioSummary() {
                 <SortableHeader field="cost">Cost</SortableHeader>
                 <SortableHeader field="cost_per_share">Cost per share</SortableHeader>
                 <SortableHeader field="market_price_per_share">Market price per share</SortableHeader>
-                <SortableHeader field="market_value_net">Market value (net)</SortableHeader>
                 <SortableHeader field="div">Div</SortableHeader>
                 <SortableHeader field="total_returns">Total Returns</SortableHeader>
                 <SortableHeader field="aer">AER %</SortableHeader>
@@ -446,9 +526,6 @@ export function PortfolioSummary() {
                   </td>
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.market_price_per_share.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900 border-r border-gray-200">
-                    Rs. {row.market_value_net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.div.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -477,9 +554,6 @@ export function PortfolioSummary() {
                   Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 <td colSpan={2} className="px-4 py-3 border-r border-gray-200"></td>
-                <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
-                  Rs. {totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                   Rs. {totalDiv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
@@ -510,10 +584,9 @@ export function PortfolioSummary() {
             <p className="font-semibold mb-2">Report Notes:</p>
             <ul className="space-y-1 list-disc list-inside">
               <li><strong>Cost:</strong> Final Average (AV) Cost based on transactions up to the selected date</li>
-              <li><strong>Market price per share:</strong> Latest updated market value from CSE (before brokerage adjustments)</li>
-              <li><strong>Market value (net):</strong> Market value × number of shares - brokerage cost (2.5%)</li>
-              <li><strong>Total Returns:</strong> Market value - Total AV cost + Dividends</li>
-              <li><strong>AER:</strong> Absolute Equity Return percentage</li>
+              <li><strong>Market price per share:</strong> Latest updated market value from CSE</li>
+              <li><strong>Total Returns:</strong> Market value (gross) - Total AV cost + Dividends</li>
+              <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, current market value as terminal inflow)</li>
               <li><strong>Cash DPS (net) last FY:</strong> Dividend per share based on shares held at dividend date</li>
             </ul>
           </div>
