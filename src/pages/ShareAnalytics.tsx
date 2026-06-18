@@ -79,6 +79,32 @@ interface ShareGroup {
   rows: ComputedRow[];
 }
 
+// ── XIRR ─────────────────────────────────────────────────────────────────────
+
+function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
+  if (cashFlows.length < 2) return 0;
+  const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
+  const d0 = sorted[0].date.getTime();
+  const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+  let rate = guess;
+  for (let iter = 0; iter < 200; iter++) {
+    let f = 0, df = 0;
+    for (const cf of sorted) {
+      const t = (cf.date.getTime() - d0) / MS_PER_YEAR;
+      const base = 1 + rate;
+      if (base <= 0) break;
+      const pv = Math.pow(base, t);
+      f  += cf.amount / pv;
+      df -= (t * cf.amount) / (pv * base);
+    }
+    if (Math.abs(df) < 1e-12) break;
+    const nr = rate - f / df;
+    if (Math.abs(nr - rate) < 1e-8) return nr;
+    rate = Math.max(-0.999, nr);
+  }
+  return rate;
+}
+
 // ── Core calculation ─────────────────────────────────────────────────────────
 
 function computeRows(
@@ -866,6 +892,32 @@ export function ShareAnalytics() {
     };
   }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
+  // Portfolio-level XIRR: combine cash flows from all filtered groups
+  const portfolioAer = (() => {
+    const today = new Date();
+    const cfs: Array<{ date: Date; amount: number }> = [];
+    for (const g of filtered) {
+      const last = g.rows[g.rows.length - 1];
+      for (const r of g.rows) {
+        if (r.cash_flow !== 0 && r.trade_date) {
+          cfs.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: r.cash_flow });
+        }
+      }
+      // Terminal value: current market value as positive inflow
+      if (last.market_value > 0) {
+        const termDate = g.market_price_date ? new Date(g.market_price_date + 'T00:00:00') : today;
+        cfs.push({ date: termDate, amount: last.market_value });
+      }
+    }
+    if (cfs.length < 2) return null;
+    try {
+      const rate = xirr(cfs);
+      return isFinite(rate) ? rate * 100 : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
   function exportSummary() {
@@ -973,6 +1025,14 @@ export function ShareAnalytics() {
               color={totals.total_surplus >= 0 ? 'text-green-700' : 'text-red-600'}
               sub={`Across ${filtered.length} share${filtered.length !== 1 ? 's' : ''}`}
             />
+            {portfolioAer !== null && (
+              <SummaryCard
+                label="AER (XIRR)"
+                value={`${portfolioAer >= 0 ? '+' : ''}${portfolioAer.toFixed(2)}%`}
+                color={portfolioAer >= 0 ? 'text-green-700' : 'text-red-600'}
+                sub="Annualised portfolio return"
+              />
+            )}
           </div>
         </div>
       )}
