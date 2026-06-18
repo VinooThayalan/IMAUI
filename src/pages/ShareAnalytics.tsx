@@ -46,6 +46,7 @@ interface RawNote {
   share_id: string;
   share_ticker: string;
   share_name: string;
+  cds_account: string | null;
 }
 
 interface ComputedRow extends RawNote {
@@ -126,7 +127,7 @@ function computeRows(
       no_of_shares: opening.opening_shares, price_avg: opening.average_purchase_cost,
       gross_amount: heldCost,
       entity_id: opening.entity_id, entity_name: '', share_id: opening.share_id,
-      share_ticker: '', share_name: '',
+      share_ticker: '', share_name: '', cds_account: null,
       row_type: 'opening',
       purchase_cost: heldCost, sale_value: 0, dividend: 0,
       cash_flow: -heldCost, ...s,
@@ -162,7 +163,7 @@ function computeRows(
         note_type: 'Dividend', trade_date: d.payment_date,
         no_of_shares: 0, price_avg: null, gross_amount: d.amount_net,
         entity_id: d.entity_id, entity_name: '', share_id: d.share_id,
-        share_ticker: '', share_name: '',
+        share_ticker: '', share_name: '', cds_account: null,
         row_type: 'dividend',
         purchase_cost: 0, sale_value: 0, dividend: d.amount_net,
         cash_flow: d.amount_net, ...s,
@@ -233,11 +234,10 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
 
   function exportDetail() {
     const headers = ['Date','Type','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
-    const cdsStr = group.cds_accounts.join(' / ');
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
-      (r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'opening') ? cdsStr : '',
+      (r.row_type === 'buy' || r.row_type === 'sell') ? (r.cds_account ?? '') : '',
       r.price_avg ?? '',
       r.no_of_shares > 0 ? r.no_of_shares : '',
       r.share_cum_bal,
@@ -491,8 +491,8 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-gray-700">{fmtDate(row.trade_date)}</td>
                       <td className="px-3 py-2">{badge(row.note_type)}</td>
                       <td className="px-3 py-2 text-xs font-mono text-gray-600">
-                        {(isNote || isOp) && group.cds_accounts.length > 0
-                          ? group.cds_accounts.map(cds => <div key={cds}>{cds}</div>)
+                        {isNote && row.cds_account
+                          ? row.cds_account
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-gray-700">{row.price_avg != null ? fmt(row.price_avg) : '—'}</td>
@@ -730,11 +730,11 @@ export function ShareAnalytics() {
       const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
 
       // Build txn map; collect all distinct CDS accounts per entity+share; latest brokerage fee rate
-      const txnMap        = new Map<string, { entity_id: string; share_id: string }>();
+      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null }>();
       const cdsSetMap     = new Map<string, Set<string>>(); // key: entity_id__share_id -> set of CDS accounts
       const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate
       for (const t of (txnsRes.data || [])) {
-        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id });
+        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null });
         const k = `${t.entity_id}__${t.share_id}`;
         if (t.cds_account_id) {
           if (!cdsSetMap.has(k)) cdsSetMap.set(k, new Set());
@@ -789,6 +789,7 @@ export function ShareAnalytics() {
             gross_amount: Number(n.gross_amount) || 0,
             entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
+            cds_account: txn.cds_account_id ?? null,
           };
         })
         .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
