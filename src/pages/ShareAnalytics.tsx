@@ -290,6 +290,23 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
     ]);
+    // Append Cost row if market price is available
+    if (group.market_price > 0) {
+      const feeRate     = group.brokerage_fee_rate / 100;
+      const cumShares   = last.share_cum_bal;
+      const mvAfterFees = (cumShares - cumShares * feeRate) * group.market_price;
+      const totalPC     = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
+      const totalSV     = group.rows.reduce((s, r) => s + r.sale_value, 0);
+      const totalDiv    = group.rows.reduce((s, r) => s + r.dividend, 0);
+      const totalSurplus = mvAfterFees + totalSV + totalDiv - totalPC;
+      const today = new Date().toISOString().split('T')[0];
+      rows.push([
+        today, 'Cost', '', group.market_price.toFixed(4), cumShares,
+        cumShares, '', mvAfterFees.toFixed(2),
+        last.av_cost.toFixed(2), last.av_price.toFixed(2), '',
+        totalSurplus.toFixed(2), mvAfterFees.toFixed(2), totalSurplus.toFixed(2),
+      ]);
+    }
     const date = new Date().toISOString().split('T')[0];
     exportCsv(`${group.share_ticker}_${group.entity_name}_analytics_${date}.csv`, headers, rows);
   }
@@ -697,8 +714,41 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 );
               })}
             </tbody>
-            <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300 text-xs font-bold">
-              <tr>
+            <tfoot className="sticky bottom-0 border-t-2 border-gray-300 text-xs font-bold">
+              {/* Cost row: terminal value row mirroring the Excel "Cost" summary row */}
+              {group.market_price > 0 && (() => {
+                const cumShares   = last.share_cum_bal;
+                const feeRate     = group.brokerage_fee_rate / 100;         // e.g. 0.0112
+                const mvAfterFees = (cumShares - cumShares * feeRate) * group.market_price;
+                const totalPC     = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
+                const totalSV     = group.rows.reduce((s, r) => s + r.sale_value, 0);
+                const totalDiv    = group.rows.reduce((s, r) => s + r.dividend, 0);
+                // Total Surplus = (mvAfterFees + cumSaleValue + cumDividend) - cumPurchaseCost
+                const totalSurplus = mvAfterFees + totalSV + totalDiv - totalPC;
+                const today = new Date().toLocaleDateString('en-GB');
+                return (
+                  <tr className="bg-slate-800 text-white">
+                    <td className="px-3 py-2.5 text-slate-300">{today}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Cost</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-400">—</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(group.market_price)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-white">{fmtN(cumShares)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-blue-300">{fmt(last.av_cost)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(last.av_price)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
+                    <td className="px-3 py-2.5 text-right font-mono"><span className={totalSurplus >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(totalSurplus)}</span></td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono"><span className={totalSurplus >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(totalSurplus)}</span></td>
+                    <td className="px-3 py-2.5 text-slate-400">—</td>
+                  </tr>
+                );
+              })()}
+              <tr className="bg-gray-100">
                 <td colSpan={6} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
