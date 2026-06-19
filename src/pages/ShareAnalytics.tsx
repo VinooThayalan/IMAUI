@@ -273,11 +273,10 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   })();
 
   function exportDetail() {
-    const headers = ['Date','Type','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Cash Flow','Total Surplus'];
+    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
-      (r.row_type === 'buy' || r.row_type === 'sell') ? (r.cds_account ?? '') : '',
       r.price_avg ?? '',
       r.no_of_shares > 0 ? r.no_of_shares : '',
       r.share_cum_bal,
@@ -286,25 +285,28 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.av_cost.toFixed(2),
       r.av_price.toFixed(2),
       r.dividend > 0 ? r.dividend.toFixed(2) : '',
-      r.cum_surplus.toFixed(2),
+      group.market_price > 0 ? r.market_value.toFixed(2) : '',
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
+      r.cum_surplus.toFixed(2),
     ]);
     // Append Cost row if market price is available
     if (group.market_price > 0) {
-      const feeRate     = group.brokerage_fee_rate / 100;
-      const cumShares   = last.share_cum_bal;
-      const mvAfterFees = (cumShares - cumShares * feeRate) * group.market_price;
-      const totalPC     = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-      const totalSV     = group.rows.reduce((s, r) => s + r.sale_value, 0);
-      const totalDiv    = group.rows.reduce((s, r) => s + r.dividend, 0);
+      const feeRate      = group.brokerage_fee_rate / 100;
+      const cumShares    = last.share_cum_bal;
+      const mvAfterFees  = (cumShares - cumShares * feeRate) * group.market_price;
+      const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
+      const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
+      const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
       const totalSurplus = mvAfterFees + totalSV + totalDiv - totalPC;
-      const today = new Date().toISOString().split('T')[0];
+      const today        = new Date().toISOString().split('T')[0];
       rows.push([
-        today, 'Cost', '', group.market_price.toFixed(4), cumShares,
-        cumShares, '', mvAfterFees.toFixed(2),
-        last.av_cost.toFixed(2), last.av_price.toFixed(2), '',
-        totalSurplus.toFixed(2), mvAfterFees.toFixed(2), totalSurplus.toFixed(2),
+        today, 'Cost',
+        group.market_price.toFixed(4), cumShares, cumShares,
+        '', mvAfterFees.toFixed(2),
+        last.av_cost.toFixed(2), last.av_price.toFixed(2),
+        '', mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
+        totalSurplus.toFixed(2), totalSurplus.toFixed(2),
       ]);
     }
     const date = new Date().toISOString().split('T')[0];
@@ -436,7 +438,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','CDS Account','Unit Price','No. Shares','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Cash Flow','Total Surplus','Note'];
+  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -511,7 +513,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
               <tr>
                 {COLS.map(h => (
-                  <th key={h} className={`px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Date' || h === 'Status' ? 'text-left' : 'text-right'}`}>
+                  <th key={h} className={`px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Date' || h === 'Status' || h === 'Note' ? 'text-left' : 'text-right'}`}>
                     {h}
                   </th>
                 ))}
@@ -539,11 +541,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     <tr key={row.id} className={`${bg} border-b border-gray-50 hover:bg-blue-50/30 transition-colors`}>
                       <td className="px-3 py-2 text-gray-700">{fmtDate(row.trade_date)}</td>
                       <td className="px-3 py-2">{badge(row.note_type)}</td>
-                      <td className="px-3 py-2 text-xs font-mono text-gray-600">
-                        {isNote && row.cds_account
-                          ? row.cds_account
-                          : <span className="text-gray-300">—</span>}
-                      </td>
                       <td className="px-3 py-2 text-right font-mono text-gray-700">{row.price_avg != null ? fmt(row.price_avg) : '—'}</td>
                       <td className="px-3 py-2 text-right font-mono text-gray-700">{row.no_of_shares > 0 ? fmtN(row.no_of_shares) : '—'}</td>
                       <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmtN(row.share_cum_bal)}</td>
@@ -552,7 +549,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{fmt(row.av_cost)}</td>
                       <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
                       <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
+                      <td className="px-3 py-2 text-right font-mono text-blue-600 font-semibold">
+                        {group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-right font-mono">
                         <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
                           {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
@@ -561,6 +560,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-right font-mono">
                         {group.market_price > 0 ? <span className={clsSurplus(row.total_surplus)}>{fmt(row.total_surplus)}</span> : <span className="text-gray-300">—</span>}
                       </td>
+                      <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
                       <td className="px-3 py-2 text-center">
                         {isNote ? (
                           <button
@@ -732,30 +732,32 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     <td className="px-3 py-2.5">
                       <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Cost</span>
                     </td>
-                    <td className="px-3 py-2.5 text-slate-400">—</td>
                     <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(group.market_price)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-white">{fmtN(cumShares)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-300">{fmtN(cumShares)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
                     <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-blue-300">{fmt(last.av_cost)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(last.av_price)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                    <td className="px-3 py-2.5 text-right font-mono"><span className={totalSurplus >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(totalSurplus)}</span></td>
                     <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono"><span className={totalSurplus >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(totalSurplus)}</span></td>
                     <td className="px-3 py-2.5 text-right font-mono"><span className={totalSurplus >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(totalSurplus)}</span></td>
                     <td className="px-3 py-2.5 text-slate-400">—</td>
                   </tr>
                 );
               })()}
               <tr className="bg-gray-100">
-                <td colSpan={6} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
+                <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono text-blue-600">
+                  {group.market_price > 0 ? fmt(last.market_value) : '—'}
+                </td>
                 <td className="px-3 py-2.5 text-right font-mono">
                   <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
                     {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
@@ -764,6 +766,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono">
                   {group.market_price > 0 ? <span className={clsSurplus(last.total_surplus)}>{fmt(last.total_surplus)}</span> : '—'}
                 </td>
+                <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
                 <td />
               </tr>
             </tfoot>
