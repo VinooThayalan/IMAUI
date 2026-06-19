@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -96,6 +96,8 @@ export function BuyAndSellApprovals() {
   const [selectedNote, setSelectedNote] = useState<BuyAndSellNote | null>(null);
   const [actionRemarks, setActionRemarks] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sendEmail, setSendEmail] = useState(true);
+  const [ccEntityEmail, setCcEntityEmail] = useState(true);
 
   useEffect(() => { loadData(); }, []);
 
@@ -162,6 +164,8 @@ export function BuyAndSellApprovals() {
     setSelectedNote(note);
     setModalAction(action);
     setActionRemarks('');
+    setSendEmail(true);
+    setCcEntityEmail(true);
   }
 
   function closeModal() {
@@ -169,6 +173,8 @@ export function BuyAndSellApprovals() {
     setSelectedNote(null);
     setActionRemarks('');
     setIsSubmitting(false);
+    setSendEmail(true);
+    setCcEntityEmail(true);
   }
 
   async function sendBrokerNotification(
@@ -178,9 +184,12 @@ export function BuyAndSellApprovals() {
     entity: Entity | null,
     share: Share | null,
     broker: Broker | null,
+    withCcEntity: boolean,
   ) {
     const brokerEmail = broker?.contact_person_email;
     if (!brokerEmail) return;
+    const ccEmails: string[] = [];
+    if (withCcEntity && entity?.cc_email) ccEmails.push(entity.cc_email);
 
     const reviewedAt = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const fmt = (n?: number | null) => n != null ? Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
@@ -198,6 +207,7 @@ export function BuyAndSellApprovals() {
       body: JSON.stringify({
         type: 'approval_notification',
         to: brokerEmail,
+        cc: ccEmails.length > 0 ? ccEmails : undefined,
         notification: {
           action,
           contract_no: note.contract_no || note.note_number || '-',
@@ -315,7 +325,7 @@ export function BuyAndSellApprovals() {
         });
       }
 
-      await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker);
+      if (sendEmail) await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail);
 
       await loadData();
       closeModal();
@@ -362,7 +372,7 @@ export function BuyAndSellApprovals() {
         },
       });
 
-      await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker);
+      if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail);
 
       await loadData();
       closeModal();
@@ -676,6 +686,39 @@ const displayNotes = notes.filter(n => {
                   placeholder="Add any notes about this approval..."
                 />
               </div>
+              {/* Email options */}
+              <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sendEmail}
+                    onChange={e => setSendEmail(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Send approval notification to broker
+                    {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
+                  </span>
+                </label>
+                {sendEmail && (() => {
+                  const { entity } = getDetails(selectedNote!);
+                  return entity?.cc_email ? (
+                    <label className="flex items-center gap-2 cursor-pointer ml-6">
+                      <input
+                        type="checkbox"
+                        checked={ccEntityEmail}
+                        onChange={e => setCcEntityEmail(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                      />
+                      <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                    </label>
+                  ) : null;
+                })()}
+              </div>
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
                 <button
@@ -718,6 +761,39 @@ const displayNotes = notes.filter(n => {
                   className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   placeholder="Describe why this note is being rejected..."
                 />
+              </div>
+              {/* Email options */}
+              <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={sendEmail}
+                    onChange={e => setSendEmail(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Send rejection notification to broker
+                    {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
+                  </span>
+                </label>
+                {sendEmail && (() => {
+                  const { entity } = getDetails(selectedNote!);
+                  return entity?.cc_email ? (
+                    <label className="flex items-center gap-2 cursor-pointer ml-6">
+                      <input
+                        type="checkbox"
+                        checked={ccEntityEmail}
+                        onChange={e => setCcEntityEmail(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                      />
+                      <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                    </label>
+                  ) : null;
+                })()}
               </div>
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
