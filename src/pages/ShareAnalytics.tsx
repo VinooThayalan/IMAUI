@@ -85,7 +85,7 @@ function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): nu
   if (cashFlows.length < 2) return 0;
   const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
   const d0 = sorted[0].date.getTime();
-  const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+  const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
   let rate = guess;
   for (let iter = 0; iter < 200; iter++) {
     let f = 0, df = 0;
