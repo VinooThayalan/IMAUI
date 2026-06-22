@@ -96,6 +96,7 @@ export function PortfolioSummary() {
             transaction_date,
             approval_status,
             cds_account_id,
+            brokerage_fee_rate,
             entities ( name, entity_id ),
             shares ( ticker, share_name, sector, sector_types ( sector_name ) )
           `)
@@ -250,6 +251,9 @@ export function PortfolioSummary() {
         });
       });
 
+      // latest brokerage_fee_rate per entity+share (transactions ordered ascending → last wins)
+      const feeRateMap = new Map<string, number>();
+
       (transactionsRes.data || []).forEach((tx: {
         id: string;
         entity_id: string;
@@ -259,6 +263,7 @@ export function PortfolioSummary() {
         total_amount: number;
         transaction_date: string;
         cds_account_id?: string | null;
+        brokerage_fee_rate?: number | null;
         entities?: { name: string; entity_id: string } | null;
         shares?: {
           ticker: string;
@@ -276,6 +281,9 @@ export function PortfolioSummary() {
         }
 
         recordCds(tx.entity_id, tx.share_id, tx.cds_account_id);
+        if (tx.brokerage_fee_rate != null) {
+          feeRateMap.set(`${tx.entity_id}_${tx.share_id}`, Number(tx.brokerage_fee_rate));
+        }
         const holding = ensureHolding(tx.entity_id, tx.share_id, tx.entities?.name);
 
         const note = noteByTxn.get(tx.id);
@@ -347,13 +355,15 @@ export function PortfolioSummary() {
           // Total Returns = (current market value + all sale proceeds + dividends) - total cost ever paid
           const totalReturns = marketValueGross + holding.sale_proceeds + divData.total - holding.total_cost_paid;
 
-          // XIRR: add terminal value (current market value) as final positive cash flow
+          // XIRR: terminal value = market value after deducting sell brokerage fee (matches ShareAnalytics)
+          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? 0) / 100;
+          const terminalValue = marketValueGross * (1 - feeRate);
           const cfs = ensureCashFlows(holding.entity_id, holding.share_id);
           let aerPct = 0;
-          if (marketValueGross > 0 && cfs.length > 0) {
+          if (terminalValue > 0 && cfs.length > 0) {
             const xirrFlows = [
               ...cfs,
-              { date: terminalDate, amount: marketValueGross },
+              { date: terminalDate, amount: terminalValue },
             ];
             try {
               const rate = xirr(xirrFlows);
