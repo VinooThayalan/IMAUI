@@ -796,34 +796,25 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                   </>
                 );
               })()}
-              {(() => {
-                const totFeeRate = group.brokerage_fee_rate / 100;
-                const totMV = group.market_price > 0
-                  ? (last.share_cum_bal - last.share_cum_bal * totFeeRate) * group.market_price
-                  : 0;
-                const totCashFlow = group.rows.reduce((s, r) => s + r.cash_flow, 0);
-                return (
-                <tr className="bg-gray-100">
-                  <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
-                  <td className="px-3 py-2.5 text-right font-mono text-gray-300">—</td>
-                  <td className="px-3 py-2.5 text-right font-mono">
-                    <span className={clsSurplus(totCashFlow)}>{fmt(totCashFlow)}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono">
-                    {group.market_price > 0 ? <span className={clsSurplus(totMV)}>{fmt(totMV)}</span> : '—'}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono">
-                    {group.market_price > 0 ? <span className={clsSurplus(totMV)}>{fmt(totMV)}</span> : <span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span>}
-                  </td>
-                  <td />
-                </tr>
-                );
-              })()}
+              <tr className="bg-gray-100">
+                <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
+                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
+                <td className="px-3 py-2.5 text-right font-mono text-gray-300">—</td>
+                <td className="px-3 py-2.5 text-right font-mono">
+                  <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
+                    {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono">
+                  {group.market_price > 0 ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span> : '—'}
+                </td>
+                <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
+                <td />
+              </tr>
             </tfoot>
           </table>
         </div>
