@@ -2,6 +2,19 @@ import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 // XIRR: annualized internal rate of return for irregular cash flows
 function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
   if (cashFlows.length < 2) return 0;
@@ -33,7 +46,7 @@ function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): nu
 interface PortfolioRow {
   entity_id: string;
   entity_name: string;
-  cds_account: string;
+  cds_accounts: string[];
   sector: string;
   share_id: string;
   ticker: string;
@@ -51,7 +64,7 @@ interface PortfolioRow {
   remarks: string;
 }
 
-type SortField = keyof PortfolioRow;
+type SortField = Exclude<keyof PortfolioRow, 'cds_accounts'>;
 type SortDirection = 'asc' | 'desc';
 
 export function PortfolioSummary() {
@@ -82,6 +95,7 @@ export function PortfolioSummary() {
             total_amount,
             transaction_date,
             approval_status,
+            cds_account_id,
             entities ( name, entity_id ),
             shares ( ticker, share_name, sector, sector_types ( sector_name ) )
           `)
@@ -143,30 +157,36 @@ export function PortfolioSummary() {
       type Holding = {
         entity_id: string;
         entity_name: string;
-        cds_account: string;
         share_id: string;
         shares: number;
         cost: number;
       };
 
       const holdingsMap = new Map<string, Holding>();
+      const cdsSetMap = new Map<string, Set<string>>(); // key: entity_id_share_id
       // Cash flows per entity+share for XIRR: negative = money out (buy), positive = money in (sell/div/terminal)
       const cashFlowsMap = new Map<string, Array<{ date: Date; amount: number }>>();
 
-      function ensureHolding(entityId: string, shareId: string, entityName?: string, cdsAccount?: string): Holding {
+      function ensureHolding(entityId: string, shareId: string, entityName?: string): Holding {
         const key = `${entityId}_${shareId}`;
         if (!holdingsMap.has(key)) {
           const entity = entityMap.get(entityId);
           holdingsMap.set(key, {
             entity_id: entityId,
             entity_name: entityName || entity?.name || 'Unknown',
-            cds_account: cdsAccount || entity?.entity_id || '',
             share_id: shareId,
             shares: 0,
             cost: 0,
           });
         }
         return holdingsMap.get(key)!;
+      }
+
+      function recordCds(entityId: string, shareId: string, cdsAccountId: string | null | undefined) {
+        if (!cdsAccountId) return;
+        const key = `${entityId}_${shareId}`;
+        if (!cdsSetMap.has(key)) cdsSetMap.set(key, new Set());
+        cdsSetMap.get(key)!.add(cdsAccountId);
       }
 
       function ensureCashFlows(entityId: string, shareId: string): Array<{ date: Date; amount: number }> {
@@ -194,7 +214,7 @@ export function PortfolioSummary() {
         average_purchase_cost: number;
         effective_date: string;
       }) => {
-        const holding = ensureHolding(ob.entity_id, ob.share_id);
+        const holding = ensureHolding(ob.entity_id, ob.share_id, undefined);
         const shares = Number(ob.opening_shares) || 0;
         const cost = shares * (Number(ob.average_purchase_cost) || 0);
         applyBuy(holding, shares, cost);
@@ -231,6 +251,7 @@ export function PortfolioSummary() {
         no_of_shares: number;
         total_amount: number;
         transaction_date: string;
+        cds_account_id?: string | null;
         entities?: { name: string; entity_id: string } | null;
         shares?: {
           ticker: string;
@@ -247,12 +268,8 @@ export function PortfolioSummary() {
           });
         }
 
-        const holding = ensureHolding(
-          tx.entity_id,
-          tx.share_id,
-          tx.entities?.name,
-          tx.entities?.entity_id,
-        );
+        recordCds(tx.entity_id, tx.share_id, tx.cds_account_id);
+        const holding = ensureHolding(tx.entity_id, tx.share_id, tx.entities?.name);
 
         const note = noteByTxn.get(tx.id);
         const shares = note ? note.shares : Number(tx.no_of_shares) || 0;
@@ -340,10 +357,13 @@ export function PortfolioSummary() {
 
           const cashDiv = holding.shares * divData.dps_last_fy;
 
+          const cdsKey = `${holding.entity_id}_${holding.share_id}`;
+          const cdsAccounts = cdsSetMap.has(cdsKey) ? Array.from(cdsSetMap.get(cdsKey)!) : [];
+
           return {
             entity_id: holding.entity_id,
             entity_name: holding.entity_name,
-            cds_account: holding.cds_account,
+            cds_accounts: cdsAccounts,
             sector: share?.sector || 'N/A',
             share_id: holding.share_id,
             ticker: share?.ticker || 'N/A',
@@ -438,7 +458,20 @@ export function PortfolioSummary() {
           <h1 className="text-3xl font-bold text-gray-900">Portfolio Summary Report</h1>
           <p className="text-gray-500 mt-1">Comprehensive portfolio holdings with cost and return analysis</p>
         </div>
-        <button className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+        <button
+          onClick={() => exportCsv(
+            `portfolio_summary_${asOfDate}.csv`,
+            ['Entity','Sector','Share','Balance Shares','Cost','Cost per Share','Market Price per Share','Div','Total Returns','AER %','Cash DPS (net) last FY','CDS Account','Remarks','Cash Div'],
+            getSortedData().map(r => [
+              r.entity_name, r.sector, r.ticker, r.balance_shares,
+              r.cost.toFixed(2), r.cost_per_share.toFixed(2), r.market_price_per_share.toFixed(2),
+              r.div.toFixed(2), r.total_returns.toFixed(2), r.aer.toFixed(2) + '%',
+              r.cash_dps_last_fy.toFixed(2), r.cds_accounts.join('; '), r.remarks || '', r.cash_div.toFixed(2),
+            ])
+          )}
+          disabled={data.length === 0}
+          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+        >
           <Download className="w-4 h-4" />
           <span>Export</span>
         </button>
@@ -504,7 +537,7 @@ export function PortfolioSummary() {
                 <SortableHeader field="total_returns">Total Returns</SortableHeader>
                 <SortableHeader field="aer">AER %</SortableHeader>
                 <SortableHeader field="cash_dps_last_fy">cash DPS (net) last FY</SortableHeader>
-                <SortableHeader field="cds_account">CDS Account</SortableHeader>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-200">CDS Account</th>
                 <SortableHeader field="remarks">Remarks</SortableHeader>
                 <SortableHeader field="cash_div">Cash div</SortableHeader>
               </tr>
@@ -539,7 +572,11 @@ export function PortfolioSummary() {
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.cash_dps_last_fy.toFixed(2)}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200">{row.cds_account || 'N/A'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200 font-mono">
+                    {row.cds_accounts.length > 0
+                      ? row.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200">{row.remarks || '-'}</td>
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.cash_div.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
