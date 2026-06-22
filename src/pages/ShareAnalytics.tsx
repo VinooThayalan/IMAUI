@@ -277,7 +277,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   })();
 
   function exportDetail() {
-    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account'];
+    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account','Note'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
@@ -457,7 +457,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','Note','CDS Account'];
+  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -580,6 +580,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
+                      <td className="px-3 py-2 text-left text-xs font-mono text-gray-500">
+                        {row.cds_account ?? <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-center">
                         {isNote ? (
                           <button
@@ -599,9 +602,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                         ) : (
                           <span className="text-gray-300 text-xs">—</span>
                         )}
-                      </td>
-                      <td className="px-3 py-2 text-left text-xs font-mono text-gray-500">
-                        {row.cds_account ?? <span className="text-gray-300">—</span>}
                       </td>
                     </tr>
 
