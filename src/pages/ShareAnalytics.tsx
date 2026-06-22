@@ -291,7 +291,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.dividend > 0 ? r.dividend.toFixed(2) : '',
       group.market_price > 0 ? r.market_value.toFixed(2) : '',
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
-      group.market_price > 0 ? r.total_surplus.toFixed(2) : '',
+      r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       r.cum_surplus.toFixed(2),
     ]);
     // Append Cost row + Cost per share row if market price is available
@@ -574,7 +574,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {group.market_price > 0 ? <span className={clsSurplus(row.total_surplus)}>{fmt(row.total_surplus)}</span> : <span className="text-gray-300">—</span>}
+                        <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
+                          {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono"><span className={clsSurplus(row.cum_surplus)}>{fmt(row.cum_surplus)}</span></td>
                       <td className="px-3 py-2 text-center">
@@ -808,7 +810,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0 ? <span className={clsSurplus(last.total_surplus)}>{fmt(last.total_surplus)}</span> : '—'}
+                  {group.market_price > 0 ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span> : '—'}
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
                 <td />
