@@ -48,6 +48,10 @@ interface ApprovalNotificationData {
   approval_notes?: string;
   reviewed_by: string;
   reviewed_at: string;
+  // System transaction values (for rejection comparison)
+  txn_no_of_shares?: string;
+  txn_price_per_share?: string;
+  txn_total_amount?: string;
 }
 
 async function sendViaResend(to: string, cc: string[] | undefined, subject: string, html: string): Promise<boolean> {
@@ -172,6 +176,39 @@ function buildApprovalHtml(data: ApprovalNotificationData): string {
           <td style="padding: 12px; font-size: 16px; font-weight: 700; color: white; font-family: monospace;">Rs. ${data.net_amount}</td>
         </tr>
       </table>
+
+      ${!isApproved && (data.txn_no_of_shares || data.txn_price_per_share || data.txn_total_amount) ? `
+      <!-- Value Comparison -->
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <tr style="background: #7f1d1d;">
+          <td colspan="3" style="padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fecaca;">Value Discrepancy — System vs Contract Note</td>
+        </tr>
+        <tr style="background: #f1f5f9;">
+          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748b; width: 180px;">Field</td>
+          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1d4ed8;">System (Transaction)</td>
+          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #b91c1c;">Broker Note</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">No. of Shares</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">${data.txn_no_of_shares || "-"}</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">${data.no_of_shares}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Price per Share</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_price_per_share || "-"}</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.price_avg}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Gross Amount</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_total_amount || "-"}</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.gross_amount}</td>
+        </tr>
+        <tr style="background: #fafafa;">
+          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Net Amount</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.net_amount}</td>
+        </tr>
+      </table>` : ""}
 
       ${data.approval_notes ? `
       <!-- Review Notes -->

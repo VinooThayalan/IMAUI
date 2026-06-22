@@ -185,6 +185,7 @@ export function BuyAndSellApprovals() {
     share: Share | null,
     broker: Broker | null,
     withCcEntity: boolean,
+    transaction?: Transaction | null,
   ) {
     const brokerEmail = broker?.contact_person_email;
     if (!brokerEmail) return;
@@ -228,6 +229,10 @@ export function BuyAndSellApprovals() {
           approval_notes: reviewRemarks || undefined,
           reviewed_by: 'Reviewer',
           reviewed_at: reviewedAt,
+          // Transaction (system) values for comparison — included on rejections
+          txn_no_of_shares: transaction?.no_of_shares != null ? transaction.no_of_shares.toLocaleString() : undefined,
+          txn_price_per_share: transaction?.price_per_share != null ? fmt(transaction.price_per_share) : undefined,
+          txn_total_amount: transaction?.total_amount != null ? fmt(transaction.total_amount) : undefined,
         },
       }),
     }).catch(err => console.error('Email notification failed:', err));
@@ -372,7 +377,8 @@ export function BuyAndSellApprovals() {
         },
       });
 
-      if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail);
+      const linkedTxn = transactions.find(t => t.id === selectedNote.transaction_id) ?? null;
+      if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn);
 
       await loadData();
       closeModal();
