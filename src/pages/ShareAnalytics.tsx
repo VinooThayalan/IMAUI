@@ -1018,7 +1018,7 @@ export function ShareAnalytics() {
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
   function exportSummary() {
-    const headers = ['Share','Share Name','Entity','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus','CDS Accounts'];
+    const headers = ['Share','Share Name','Entity','CDS Accounts','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
     const rows = filtered.map(g => {
       const last = g.rows[g.rows.length - 1];
       const mvAfterFees = g.market_price > 0 ? (last.market_value * (1 - g.brokerage_fee_rate / 100)).toFixed(2) : '';
@@ -1026,6 +1026,7 @@ export function ShareAnalytics() {
         g.share_ticker,
         g.share_name,
         g.entity_name,
+        g.cds_accounts.join('; '),
         last.share_cum_bal,
         g.rows.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
         g.rows.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
@@ -1037,7 +1038,6 @@ export function ShareAnalytics() {
         mvAfterFees,
         g.rows.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
         g.market_price > 0 ? last.total_surplus.toFixed(2) : '',
-        g.cds_accounts.join('; '),
       ];
     });
     const date = new Date().toISOString().split('T')[0];
@@ -1151,7 +1151,7 @@ export function ShareAnalytics() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Share','Entity','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus','Txns','CDS Account'].map(h => (
+                  {['Share','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus','Txns'].map(h => (
                     <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Share' || h === 'Entity' || h === 'CDS Account' ? 'text-left' : 'text-right'}`}>
                       {h}
                     </th>
@@ -1178,6 +1178,11 @@ export function ShareAnalytics() {
                         <div className="text-xs text-gray-400 mt-0.5">{group.share_name}</div>
                       </td>
                       <td className="px-4 py-3 text-gray-600 text-sm">{group.entity_name}</td>
+                      <td className="px-4 py-3 text-left text-gray-500 text-xs font-mono">
+                        {group.cds_accounts.length > 0
+                          ? group.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">{fmtN(last.share_cum_bal)}</td>
                       <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(totalPC)}</td>
                       <td className="px-4 py-3 text-right font-mono text-gray-800">{totalSV > 0 ? fmt(totalSV) : <span className="text-gray-300">—</span>}</td>
@@ -1211,11 +1216,6 @@ export function ShareAnalytics() {
                       <td className="px-4 py-3 text-right">
                         <span className="inline-block bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-0.5 rounded-full">{txnCount}</span>
                       </td>
-                      <td className="px-4 py-3 text-left text-gray-500 text-xs font-mono">
-                        {group.cds_accounts.length > 0
-                          ? group.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
-                          : <span className="text-gray-300">—</span>}
-                      </td>
                     </tr>
                   );
                 })}
@@ -1224,7 +1224,7 @@ export function ShareAnalytics() {
               {/* Grand totals footer */}
               <tfoot className="bg-gray-100 border-t-2 border-gray-300 text-xs font-bold">
                 <tr>
-                  <td colSpan={2} className="px-4 py-3 text-gray-500 uppercase">Grand Total ({filtered.length} shares)</td>
+                  <td colSpan={3} className="px-4 py-3 text-gray-500 uppercase">Grand Total ({filtered.length} shares)</td>
                   <td className="px-4 py-3 text-right font-mono text-gray-900">{fmtN(totals.share_cum_bal)}</td>
                   <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.purchase_cost)}</td>
                   <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.sale_value)}</td>
@@ -1236,7 +1236,6 @@ export function ShareAnalytics() {
                   <td className="px-4 py-3 text-right font-mono text-indigo-600">{fmt(totals.mv_after_fees)}</td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cash_flow)}>{fmt(totals.cash_flow)}</span></td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.total_surplus)}>{fmt(totals.total_surplus)}</span></td>
-                  <td />
                   <td />
                 </tr>
               </tfoot>
