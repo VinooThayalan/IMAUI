@@ -323,8 +323,8 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
         costPerShare.toFixed(4), totalSharesBought, '',
         totalPC.toFixed(2), totalSV.toFixed(2),
         last.av_cost.toFixed(2), last.av_price.toFixed(2),
-        '', mvAfterFees.toFixed(2), realizedSurplus.toFixed(2),
-        realizedSurplus.toFixed(2), realizedSurplus.toFixed(2),
+        '', mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
+        mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
       ]);
     }
     const date = new Date().toISOString().split('T')[0];
@@ -786,9 +786,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(last.av_price)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
                       <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={realizedSurplus >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(realizedSurplus)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={realizedSurplus >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(realizedSurplus)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={realizedSurplus >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(realizedSurplus)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
                       <td className="px-3 py-2.5 text-amber-700">—</td>
                     </tr>
                   </>
