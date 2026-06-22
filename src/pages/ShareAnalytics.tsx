@@ -277,7 +277,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   })();
 
   function exportDetail() {
-    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus'];
+    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
@@ -293,6 +293,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
       r.cum_surplus.toFixed(2),
+      r.cds_account ?? '',
     ]);
     // Append Cost row + Cost per share row if market price is available
     if (group.market_price > 0) {
@@ -456,7 +457,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','Note'];
+  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','Note','CDS Account'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -531,7 +532,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
               <tr>
                 {COLS.map(h => (
-                  <th key={h} className={`px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Date' || h === 'Status' || h === 'Note' ? 'text-left' : 'text-right'}`}>
+                  <th key={h} className={`px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Date' || h === 'Status' || h === 'Note' || h === 'CDS Account' ? 'text-left' : 'text-right'}`}>
                     {h}
                   </th>
                 ))}
@@ -599,12 +600,15 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                           <span className="text-gray-300 text-xs">—</span>
                         )}
                       </td>
+                      <td className="px-3 py-2 text-left text-xs font-mono text-gray-500">
+                        {row.cds_account ?? <span className="text-gray-300">—</span>}
+                      </td>
                     </tr>
 
                     {/* Inline note detail expansion */}
                     {isExpanded && (
                       <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
-                        <td colSpan={15} className="px-6 py-4">
+                        <td colSpan={16} className="px-6 py-4">
                           {!detail ? (
                             <div className="flex items-center justify-center py-4">
                               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
