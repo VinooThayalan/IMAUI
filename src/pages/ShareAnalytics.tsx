@@ -788,9 +788,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(last.av_price)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
                       <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-green-700 font-bold' : 'text-red-600 font-bold'}>{fmt(mvAfterFees)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}>{fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(totalSurplus)}>{fmt(totalSurplus)}</span></td>
+                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(realizedSurplus)}>{fmt(realizedSurplus)}</span></td>
                       <td className="px-3 py-2.5 text-amber-700">—</td>
                     </tr>
                   </>
