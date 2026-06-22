@@ -567,9 +567,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                       <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{fmt(row.av_cost)}</td>
                       <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
                       <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-right font-mono text-blue-600 font-semibold">
-                        {group.market_price > 0 ? fmt(row.market_value) : <span className="text-gray-300">—</span>}
-                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-300">—</td>
                       <td className="px-3 py-2 text-right font-mono">
                         <span className={row.cash_flow > 0 ? 'text-green-700 font-semibold' : row.cash_flow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
                           {row.cash_flow !== 0 ? fmt(row.cash_flow) : '—'}
@@ -802,9 +800,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-blue-600">
-                  {group.market_price > 0 ? fmt(last.market_value) : '—'}
-                </td>
+                <td className="px-3 py-2.5 text-right font-mono text-gray-300">—</td>
                 <td className="px-3 py-2.5 text-right font-mono">
                   <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
                     {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
