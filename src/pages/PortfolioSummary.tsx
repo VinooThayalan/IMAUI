@@ -110,7 +110,8 @@ export function PortfolioSummary() {
         supabase
           .from('dividends')
           .select('share_id, entity_id, amount_net, net_dividend_per_share, payment_date')
-          .lte('payment_date', asOfDate),
+          .lte('payment_date', asOfDate)
+          .order('payment_date', { ascending: true }),
         supabase.from('entities').select('id, name, entity_id'),
         supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)'),
         supabase
@@ -159,7 +160,9 @@ export function PortfolioSummary() {
         entity_name: string;
         share_id: string;
         shares: number;
-        cost: number;
+        cost: number;           // running AV cost of currently held shares
+        total_cost_paid: number; // cumulative cost of all buys + opening balance
+        sale_proceeds: number;  // cumulative proceeds from all sells
       };
 
       const holdingsMap = new Map<string, Holding>();
@@ -177,6 +180,8 @@ export function PortfolioSummary() {
             share_id: shareId,
             shares: 0,
             cost: 0,
+            total_cost_paid: 0,
+            sale_proceeds: 0,
           });
         }
         return holdingsMap.get(key)!;
@@ -198,12 +203,14 @@ export function PortfolioSummary() {
       function applyBuy(holding: Holding, shares: number, amount: number) {
         holding.shares += shares;
         holding.cost += amount;
+        holding.total_cost_paid += amount;
       }
 
-      function applySell(holding: Holding, shares: number) {
+      function applySell(holding: Holding, shares: number, proceeds: number) {
         const avgCost = holding.shares > 0 ? holding.cost / holding.shares : 0;
         holding.shares = Math.max(0, holding.shares - shares);
         holding.cost = Math.max(0, holding.cost - avgCost * shares);
+        holding.sale_proceeds += proceeds;
       }
 
       // Opening balances
@@ -287,7 +294,7 @@ export function PortfolioSummary() {
             });
           }
         } else {
-          applySell(holding, shares);
+          applySell(holding, shares, amount);
           if (amount > 0 && txDate) {
             ensureCashFlows(tx.entity_id, tx.share_id).push({
               date: new Date(txDate),
@@ -337,7 +344,8 @@ export function PortfolioSummary() {
           const marketValueGross = holding.shares * marketPrice;
 
           const divData = dividendMap.get(key) || { total: 0, dps_last_fy: 0 };
-          const totalReturns = marketValueGross - holding.cost + divData.total;
+          // Total Returns = (current market value + all sale proceeds + dividends) - total cost ever paid
+          const totalReturns = marketValueGross + holding.sale_proceeds + divData.total - holding.total_cost_paid;
 
           // XIRR: add terminal value (current market value) as final positive cash flow
           const cfs = ensureCashFlows(holding.entity_id, holding.share_id);
@@ -461,12 +469,13 @@ export function PortfolioSummary() {
         <button
           onClick={() => exportCsv(
             `portfolio_summary_${asOfDate}.csv`,
-            ['Entity','Sector','Share','Balance Shares','Cost','Cost per Share','Market Price per Share','Div','Total Returns','AER %','Cash DPS (net) last FY','CDS Account','Remarks','Cash Div'],
+            ['Entity','Sector','Share','Balance Shares','Cost','Cost per Share','Market Price per Share','Market Value (Gross)','Div','Total Returns','AER %','Cash DPS (net) last FY','CDS Account','Remarks','Cash Div'],
             getSortedData().map(r => [
               r.entity_name, r.sector, r.ticker, r.balance_shares,
               r.cost.toFixed(2), r.cost_per_share.toFixed(2), r.market_price_per_share.toFixed(2),
-              r.div.toFixed(2), r.total_returns.toFixed(2), r.aer.toFixed(2) + '%',
-              r.cash_dps_last_fy.toFixed(2), r.cds_accounts.join('; '), r.remarks || '', r.cash_div.toFixed(2),
+              r.market_value_gross.toFixed(2), r.div.toFixed(2), r.total_returns.toFixed(2),
+              r.aer.toFixed(2) + '%', r.cash_dps_last_fy.toFixed(2),
+              r.cds_accounts.join('; '), r.remarks || '', r.cash_div.toFixed(2),
             ])
           )}
           disabled={data.length === 0}
@@ -533,6 +542,7 @@ export function PortfolioSummary() {
                 <SortableHeader field="cost">Cost</SortableHeader>
                 <SortableHeader field="cost_per_share">Cost per share</SortableHeader>
                 <SortableHeader field="market_price_per_share">Market price per share</SortableHeader>
+                <SortableHeader field="market_value_gross">Market value (gross)</SortableHeader>
                 <SortableHeader field="div">Div</SortableHeader>
                 <SortableHeader field="total_returns">Total Returns</SortableHeader>
                 <SortableHeader field="aer">AER %</SortableHeader>
@@ -560,6 +570,9 @@ export function PortfolioSummary() {
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.market_price_per_share.toFixed(2)}
                   </td>
+                  <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 border-r border-gray-200">
+                    Rs. {row.market_value_gross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.div.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
@@ -586,18 +599,29 @@ export function PortfolioSummary() {
             </tbody>
             <tfoot className="bg-gray-100 border-t-2 border-gray-300">
               <tr className="font-bold">
+                {/* cols 1-4: Entity, Sector, Share, Balance Shares */}
                 <td colSpan={4} className="px-4 py-3 text-sm text-gray-900 border-r border-gray-200">TOTAL</td>
+                {/* col 5: Cost */}
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                   Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                {/* cols 6-7: Cost per share, Market price per share */}
                 <td colSpan={2} className="px-4 py-3 border-r border-gray-200"></td>
+                {/* col 8: Market Value Gross */}
+                <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 border-r border-gray-200">
+                  Rs. {filteredData.reduce((s, r) => s + r.market_value_gross, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                {/* col 9: Div */}
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                   Rs. {totalDiv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                {/* col 10: Total Returns */}
                 <td className={`px-4 py-3 text-sm text-right border-r border-gray-200 ${totalReturns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   Rs. {totalReturns.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
+                {/* cols 11-14: AER%, Cash DPS, CDS Account, Remarks */}
                 <td colSpan={4} className="px-4 py-3 border-r border-gray-200"></td>
+                {/* col 15: Cash Div */}
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                   Rs. {totalCashDiv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
@@ -622,7 +646,7 @@ export function PortfolioSummary() {
             <ul className="space-y-1 list-disc list-inside">
               <li><strong>Cost:</strong> Final Average (AV) Cost based on transactions up to the selected date</li>
               <li><strong>Market price per share:</strong> Latest updated market value from CSE</li>
-              <li><strong>Total Returns:</strong> Market value (gross) - Total AV cost + Dividends</li>
+              <li><strong>Total Returns:</strong> Market value (gross) + Total sale proceeds + Dividends - Total cost paid (includes realized gains from sells)</li>
               <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, current market value as terminal inflow)</li>
               <li><strong>Cash DPS (net) last FY:</strong> Dividend per share based on shares held at dividend date</li>
             </ul>
