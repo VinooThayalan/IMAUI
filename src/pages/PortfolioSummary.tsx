@@ -2,6 +2,15 @@ import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
+function fmtCompact(v: number) {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}Rs. ${(abs / 1_000_000_000).toFixed(2)}bn`;
+  if (abs >= 1_000_000)     return `${sign}Rs. ${(abs / 1_000_000).toFixed(2)}m`;
+  if (abs >= 1_000)         return `${sign}Rs. ${(abs / 1_000).toFixed(2)}k`;
+  return `Rs. ${v.toFixed(2)}`;
+}
+
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
     const s = String(v ?? '');
@@ -528,12 +537,12 @@ export function PortfolioSummary() {
           <div className="flex items-center space-x-6">
             <div className="text-center">
               <p className="text-xs text-gray-500 uppercase">Total Cost</p>
-              <p className="text-lg font-bold text-gray-900">Rs. {totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-lg font-bold text-gray-900">{fmtCompact(totalCost)}</p>
             </div>
             <div className="text-center">
               <p className="text-xs text-gray-500 uppercase">Total Returns</p>
               <p className={`text-lg font-bold ${totalReturns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                Rs. {totalReturns.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {fmtCompact(totalReturns)}
               </p>
             </div>
           </div>

@@ -40,9 +40,11 @@ function mkPiePct<T extends { value: number }>(arr: T[]): (T & { percentage: num
 // ── Formatters ─────────────────────────────────────────────────────────────────
 
 function fmtCur(v: number) {
-  if (v >= 1_000_000_000) return `Rs. ${(v / 1_000_000_000).toFixed(2)}bn`;
-  if (v >= 1_000_000)     return `Rs. ${(v / 1_000_000).toFixed(2)}m`;
-  if (v >= 1_000)         return `Rs. ${(v / 1_000).toFixed(2)}k`;
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}Rs. ${(abs / 1_000_000_000).toFixed(2)}bn`;
+  if (abs >= 1_000_000)     return `${sign}Rs. ${(abs / 1_000_000).toFixed(2)}m`;
+  if (abs >= 1_000)         return `${sign}Rs. ${(abs / 1_000).toFixed(2)}k`;
   return `Rs. ${v.toFixed(2)}`;
 }
 
