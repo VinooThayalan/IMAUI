@@ -277,7 +277,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   })();
 
   function exportDetail() {
-    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account','Note'];
+    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus','Cum surplus','CDS Account','Note'];
     const rows = group.rows.map(r => [
       r.trade_date ?? '',
       r.note_type,
@@ -307,7 +307,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       const today           = new Date().toISOString().split('T')[0];
       // Cost row
       rows.push([
-        today, 'Cost',
+        today, 'Market Value',
         group.market_price.toFixed(4), cumShares, cumShares,
         '', mvAfterFees.toFixed(2),
         last.av_cost.toFixed(2), last.av_price.toFixed(2),
@@ -457,7 +457,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     );
   };
 
-  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus as per LOLC sheet','Cum surplus','CDS Account','Note'];
+  const COLS = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus','Cum surplus','CDS Account','Note'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -761,7 +761,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                     <tr className="bg-slate-800 text-white">
                       <td className="px-3 py-2.5 text-slate-300">{today}</td>
                       <td className="px-3 py-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Cost</span>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Market Value</span>
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(group.market_price)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-white">{fmtN(cumShares)}</td>
