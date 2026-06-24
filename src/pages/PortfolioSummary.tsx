@@ -64,7 +64,7 @@ interface PortfolioRow {
   cost: number;
   cost_per_share: number;
   market_price_per_share: number;
-  market_value_gross: number;
+  market_value_net: number;
   div: number;
   total_returns: number;
   aer: number;
@@ -83,6 +83,9 @@ export function PortfolioSummary() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [asOfDate, setAsOfDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedEntityId, setSelectedEntityId] = useState<string>('');
+  // Editable overrides: key = entity_id_share_id
+  const [editedDps, setEditedDps]       = useState<Map<string, string>>(new Map());
+  const [editedRemarks, setEditedRemarks] = useState<Map<string, string>>(new Map());
 
   useEffect(() => {
     fetchPortfolioData();
@@ -358,15 +361,17 @@ export function PortfolioSummary() {
           const share = shareMap.get(holding.share_id);
           const marketPrice = latestPrices.get(holding.share_id) || 0;
           const costPerShare = holding.shares > 0 ? holding.cost / holding.shares : 0;
+          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? 0) / 100;
           const marketValueGross = holding.shares * marketPrice;
+          // Net market value = gross market value after deducting sell brokerage fee (matches ShareAnalytics)
+          const marketValueNet = marketValueGross * (1 - feeRate);
 
           const divData = dividendMap.get(key) || { total: 0, dps_last_fy: 0 };
-          // Total Returns = (current market value + all sale proceeds + dividends) - total cost ever paid
-          const totalReturns = marketValueGross + holding.sale_proceeds + divData.total - holding.total_cost_paid;
+          // Total Returns = (net market value + all sale proceeds + dividends) - total cost ever paid
+          const totalReturns = marketValueNet + holding.sale_proceeds + divData.total - holding.total_cost_paid;
 
-          // XIRR: terminal value = market value after deducting sell brokerage fee (matches ShareAnalytics)
-          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? 0) / 100;
-          const terminalValue = marketValueGross * (1 - feeRate);
+          // XIRR: terminal value = net market value (same as ShareAnalytics)
+          const terminalValue = marketValueNet;
           const cfs = ensureCashFlows(holding.entity_id, holding.share_id);
           let aerPct = 0;
           if (terminalValue > 0 && cfs.length > 0) {
@@ -399,7 +404,7 @@ export function PortfolioSummary() {
             cost: holding.cost,
             cost_per_share: costPerShare,
             market_price_per_share: marketPrice,
-            market_value_gross: marketValueGross,
+            market_value_net: marketValueNet,
             div: divData.total,
             total_returns: totalReturns,
             aer: aerPct,
@@ -488,14 +493,20 @@ export function PortfolioSummary() {
         <button
           onClick={() => exportCsv(
             `portfolio_summary_${asOfDate}.csv`,
-            ['Entity','Sector','Share','Balance Shares','Cost','Cost per Share','Market Price per Share','Market Value (Gross)','Div','Total Returns','AER %','Cash DPS (net) last FY','CDS Account','Remarks','Cash Div'],
-            getSortedData().map(r => [
-              r.entity_name, r.sector, r.ticker, r.balance_shares,
-              r.cost.toFixed(2), r.cost_per_share.toFixed(2), r.market_price_per_share.toFixed(2),
-              r.market_value_gross.toFixed(2), r.div.toFixed(2), r.total_returns.toFixed(2),
-              r.aer.toFixed(2) + '%', r.cash_dps_last_fy.toFixed(2),
-              r.cds_accounts.join('; '), r.remarks || '', r.cash_div.toFixed(2),
-            ])
+            ['Entity','Sector','Share','Balance Shares','Cost','Cost per Share','Market Price per Share','Market Value (Net)','Div','Total Returns','AER %','Cash DPS (net) last FY','CDS Account','Remarks','Cash Div'],
+            getSortedData().map(r => {
+              const key = `${r.entity_id}_${r.share_id}`;
+              const dpsOverride = editedDps.get(key);
+              const dps = dpsOverride !== undefined ? (parseFloat(dpsOverride) || 0) : r.cash_dps_last_fy;
+              const cashDiv = r.balance_shares * dps;
+              return [
+                r.entity_name, r.sector, r.ticker, r.balance_shares,
+                r.cost.toFixed(2), r.cost_per_share.toFixed(2), r.market_price_per_share.toFixed(2),
+                r.market_value_net.toFixed(2), r.div.toFixed(2), r.total_returns.toFixed(2),
+                r.aer.toFixed(2) + '%', dps.toFixed(2),
+                r.cds_accounts.join('; '), editedRemarks.get(key) ?? r.remarks ?? '', cashDiv.toFixed(2),
+              ];
+            })
           )}
           disabled={data.length === 0}
           className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
@@ -561,14 +572,14 @@ export function PortfolioSummary() {
                 <SortableHeader field="cost">Cost</SortableHeader>
                 <SortableHeader field="cost_per_share">Cost per share</SortableHeader>
                 <SortableHeader field="market_price_per_share">Market price per share</SortableHeader>
-                <SortableHeader field="market_value_gross">Market value (gross)</SortableHeader>
+                <SortableHeader field="market_value_net">Market Value (Net)</SortableHeader>
                 <SortableHeader field="div">Div</SortableHeader>
                 <SortableHeader field="total_returns">Total Returns</SortableHeader>
                 <SortableHeader field="aer">AER %</SortableHeader>
-                <SortableHeader field="cash_dps_last_fy">cash DPS (net) last FY</SortableHeader>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 uppercase border-r border-gray-200 bg-blue-50" title="Click cell to edit">Cash DPS (Net) Last FY ✎</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-200">CDS Account</th>
-                <SortableHeader field="remarks">Remarks</SortableHeader>
-                <SortableHeader field="cash_div">Cash div</SortableHeader>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 uppercase border-r border-gray-200 bg-blue-50" title="Click cell to edit">Remarks ✎</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-blue-700 uppercase border-r border-gray-200 bg-blue-50" title="Calculated from Cash DPS × Balance">Cash Div</th>
               </tr>
             </thead>
             <tbody>
@@ -590,7 +601,7 @@ export function PortfolioSummary() {
                     Rs. {row.market_price_per_share.toFixed(2)}
                   </td>
                   <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 border-r border-gray-200">
-                    Rs. {row.market_value_gross.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    Rs. {row.market_value_net.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                     Rs. {row.div.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -601,17 +612,39 @@ export function PortfolioSummary() {
                   <td className={`px-4 py-3 text-sm text-right font-semibold border-r border-gray-200 ${row.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {row.aer.toFixed(2)}%
                   </td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
-                    Rs. {row.cash_dps_last_fy.toFixed(2)}
+                  {/* Editable: Cash DPS (Net) Last FY */}
+                  <td className="px-2 py-1 text-sm text-right border-r border-gray-200 bg-blue-50/40">
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-24 px-2 py-1 text-right text-sm border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                      value={editedDps.get(`${row.entity_id}_${row.share_id}`) ?? row.cash_dps_last_fy.toFixed(2)}
+                      onChange={e => setEditedDps(prev => new Map(prev).set(`${row.entity_id}_${row.share_id}`, e.target.value))}
+                    />
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200 font-mono">
                     {row.cds_accounts.length > 0
                       ? row.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
                       : <span className="text-gray-300">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 border-r border-gray-200">{row.remarks || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
-                    Rs. {row.cash_div.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {/* Editable: Remarks */}
+                  <td className="px-2 py-1 text-sm border-r border-gray-200 bg-blue-50/40">
+                    <input
+                      type="text"
+                      className="w-36 px-2 py-1 text-sm border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                      placeholder="Add remark…"
+                      value={editedRemarks.get(`${row.entity_id}_${row.share_id}`) ?? row.remarks ?? ''}
+                      onChange={e => setEditedRemarks(prev => new Map(prev).set(`${row.entity_id}_${row.share_id}`, e.target.value))}
+                    />
+                  </td>
+                  {/* Cash Div: computed from overridden DPS × balance shares */}
+                  <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200 bg-blue-50/40">
+                    {(() => {
+                      const key = `${row.entity_id}_${row.share_id}`;
+                      const dpsStr = editedDps.get(key);
+                      const dps = dpsStr !== undefined ? (parseFloat(dpsStr) || 0) : row.cash_dps_last_fy;
+                      return `Rs. ${(row.balance_shares * dps).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    })()}
                   </td>
                 </tr>
               ))}
@@ -626,9 +659,9 @@ export function PortfolioSummary() {
                 </td>
                 {/* cols 6-7: Cost per share, Market price per share */}
                 <td colSpan={2} className="px-4 py-3 border-r border-gray-200"></td>
-                {/* col 8: Market Value Gross */}
+                {/* col 8: Market Value Net */}
                 <td className="px-4 py-3 text-sm text-right font-semibold text-blue-700 border-r border-gray-200">
-                  Rs. {filteredData.reduce((s, r) => s + r.market_value_gross, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Rs. {filteredData.reduce((s, r) => s + r.market_value_net, 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
                 {/* col 9: Div */}
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
@@ -665,9 +698,11 @@ export function PortfolioSummary() {
             <ul className="space-y-1 list-disc list-inside">
               <li><strong>Cost:</strong> Final Average (AV) Cost based on transactions up to the selected date</li>
               <li><strong>Market price per share:</strong> Latest updated market value from CSE</li>
-              <li><strong>Total Returns:</strong> Market value (gross) + Total sale proceeds + Dividends - Total cost paid (includes realized gains from sells)</li>
-              <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, current market value as terminal inflow)</li>
-              <li><strong>Cash DPS (net) last FY:</strong> Dividend per share based on shares held at dividend date</li>
+              <li><strong>Market Value (Net):</strong> Balance shares × market price × (1 − brokerage fee rate) — matches Share Analytics</li>
+              <li><strong>Total Returns:</strong> Market value (net) + Total sale proceeds + Dividends − Total cost paid (includes realized gains from sells)</li>
+              <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, net market value as terminal inflow)</li>
+              <li><strong>Cash DPS (Net) Last FY:</strong> Editable — enter the cash dividend per share for the last financial year. Cash Div column = Balance Shares × Cash DPS entered.</li>
+              <li><strong>Remarks:</strong> Editable — free-text remarks per holding. Click the cell to type.</li>
             </ul>
           </div>
         </div>

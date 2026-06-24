@@ -851,7 +851,7 @@ export function ShareAnalytics() {
       const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
-        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date').order('transaction_date', { ascending: false }),
+        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
