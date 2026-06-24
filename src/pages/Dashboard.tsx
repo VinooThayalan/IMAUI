@@ -100,23 +100,23 @@ interface BarChartProps {
 function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) {
   if (bars.length === 0) return null;
   const maxVal = Math.max(...bars.map(b => Math.abs(b.value)), 1);
-  const W = 480, H = 280, padL = 66, padR = 10, padT = 24, padB = 80;
+  const W = 620, H = 400, padL = 80, padR = 16, padT = 32, padB = 110;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
-  const barW = Math.min(48, (chartW / bars.length) * 0.6);
+  const barW = Math.min(64, (chartW / bars.length) * 0.65);
   const gap  = chartW / bars.length;
 
-  const yTicks = 4;
+  const yTicks = 5;
   const yStep  = maxVal / yTicks;
 
   return (
     <div>
-      {title && <p className="text-sm font-bold text-gray-700 mb-2">{title}</p>}
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 280 }}>
+      {title && <p className="text-sm font-bold text-gray-700 mb-3">{title}</p>}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minHeight: 320 }}>
         {/* y-axis label */}
         {yLabel && (
-          <text x={10} y={H / 2} textAnchor="middle" fontSize={9} fill="#9CA3AF"
-            transform={`rotate(-90, 10, ${H / 2})`}>{yLabel}</text>
+          <text x={12} y={H / 2} textAnchor="middle" fontSize={11} fill="#9CA3AF"
+            transform={`rotate(-90, 12, ${H / 2})`}>{yLabel}</text>
         )}
         {/* grid lines + y ticks */}
         {Array.from({ length: yTicks + 1 }).map((_, i) => {
@@ -125,7 +125,7 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
           return (
             <g key={i}>
               <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#E5E7EB" strokeWidth={1} />
-              <text x={padL - 5} y={y + 3} textAnchor="end" fontSize={9} fill="#9CA3AF">
+              <text x={padL - 6} y={y + 4} textAnchor="end" fontSize={11} fill="#9CA3AF">
                 {val >= 1_000_000 ? `${(val / 1_000_000).toFixed(1)}m` : val >= 1_000 ? `${(val / 1_000).toFixed(0)}k` : val.toFixed(0)}
               </text>
             </g>
@@ -135,23 +135,23 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
         {bars.map((b, i) => {
           const x    = padL + i * gap + gap / 2 - barW / 2;
           const pct  = Math.abs(b.value) / maxVal;
-          const bH   = Math.max(2, pct * chartH);
+          const bH   = Math.max(3, pct * chartH);
           const y    = padT + chartH - bH;
           return (
             <g key={i}>
-              <rect x={x} y={y} width={barW} height={bH} fill={b.color} rx={3} />
-              <text x={x + barW / 2} y={padT + chartH + 14} textAnchor="end" fontSize={9} fill="#374151"
-                transform={`rotate(-45, ${x + barW / 2}, ${padT + chartH + 14})`}>
+              <rect x={x} y={y} width={barW} height={bH} fill={b.color} rx={4} />
+              <text x={x + barW / 2} y={padT + chartH + 16} textAnchor="end" fontSize={11} fill="#374151"
+                transform={`rotate(-42, ${x + barW / 2}, ${padT + chartH + 16})`}>
                 {b.label}
               </text>
-              <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize={8} fill="#4B5563" fontWeight="600">
+              <text x={x + barW / 2} y={y - 6} textAnchor="middle" fontSize={10} fill="#1F2937" fontWeight="700">
                 {formatValue(b.value)}
               </text>
             </g>
           );
         })}
         {/* x-axis */}
-        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1} />
+        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1.5} />
       </svg>
     </div>
   );
@@ -162,26 +162,26 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
 function PriceCostBarChart({ title, bars }: { title: string; bars: { label: string; price: number; cost: number }[] }) {
   if (bars.length === 0) return null;
   const maxVal = Math.max(...bars.flatMap(b => [b.price, b.cost]), 1);
-  const W = 420, H = 230, padL = 65, padR = 10, padT = 30, padB = 54;
+  const W = 620, H = 400, padL = 80, padR = 16, padT = 40, padB = 110;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
   const groupW = chartW / bars.length;
-  const barW   = Math.min(16, groupW * 0.3);
-  const yTicks = 4;
+  const barW   = Math.min(28, groupW * 0.35);
+  const yTicks = 5;
   const yStep  = maxVal / yTicks;
 
   return (
     <div>
-      {title && <p className="text-xs font-bold text-gray-700 mb-2">{title}</p>}
+      {title && <p className="text-sm font-bold text-gray-700 mb-3">{title}</p>}
       {/* Legend */}
-      <div className="flex items-center gap-4 mb-1">
-        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#1E3A5F' }} /><span className="text-xs text-gray-500">Net Market Price per share</span></div>
-        <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: '#F59E0B' }} /><span className="text-xs text-gray-500">Cost per share</span></div>
+      <div className="flex items-center gap-6 mb-2">
+        <div className="flex items-center gap-2"><span className="w-4 h-4 rounded inline-block" style={{ background: '#1E3A5F' }} /><span className="text-sm text-gray-600 font-medium">Market Price per share</span></div>
+        <div className="flex items-center gap-2"><span className="w-4 h-4 rounded inline-block" style={{ background: '#F59E0B' }} /><span className="text-sm text-gray-600 font-medium">Cost per share</span></div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 230 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minHeight: 320 }}>
         {/* y-axis label */}
-        <text x={10} y={H / 2} textAnchor="middle" fontSize={9} fill="#9CA3AF"
-          transform={`rotate(-90, 10, ${H / 2})`}>Net Market Price per share</text>
+        <text x={12} y={H / 2} textAnchor="middle" fontSize={11} fill="#9CA3AF"
+          transform={`rotate(-90, 12, ${H / 2})`}>Price (Rs.)</text>
         {/* grid + ticks */}
         {Array.from({ length: yTicks + 1 }).map((_, i) => {
           const y = padT + chartH - (i / yTicks) * chartH;
@@ -189,7 +189,7 @@ function PriceCostBarChart({ title, bars }: { title: string; bars: { label: stri
           return (
             <g key={i}>
               <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#E5E7EB" strokeWidth={1} />
-              <text x={padL - 4} y={y + 3} textAnchor="end" fontSize={8} fill="#9CA3AF">
+              <text x={padL - 6} y={y + 4} textAnchor="end" fontSize={11} fill="#9CA3AF">
                 {val >= 1_000 ? `${(val / 1_000).toFixed(0)}k` : val.toFixed(0)}
               </text>
             </g>
@@ -197,23 +197,23 @@ function PriceCostBarChart({ title, bars }: { title: string; bars: { label: stri
         })}
         {bars.map((b, i) => {
           const cx    = padL + i * groupW + groupW / 2;
-          const pxH   = Math.max(2, (b.price / maxVal) * chartH);
-          const cxH   = Math.max(2, (b.cost / maxVal) * chartH);
+          const pxH   = Math.max(3, (b.price / maxVal) * chartH);
+          const cxH   = Math.max(3, (b.cost / maxVal) * chartH);
           const pxY   = padT + chartH - pxH;
           const cxY   = padT + chartH - cxH;
           return (
             <g key={i}>
-              <rect x={cx - barW - 1} y={pxY} width={barW} height={pxH} fill="#1E3A5F" rx={2} />
-              <rect x={cx + 1}        y={cxY} width={barW} height={cxH} fill="#F59E0B" rx={2} />
-              <text x={cx} y={padT + chartH + 12} textAnchor="middle" fontSize={8} fill="#374151"
-                transform={`rotate(-35, ${cx}, ${padT + chartH + 12})`}>{b.label}</text>
-              <text x={cx - barW / 2 - 1} y={pxY - 3} textAnchor="middle" fontSize={6} fill="#6B7280">
+              <rect x={cx - barW - 2} y={pxY} width={barW} height={pxH} fill="#1E3A5F" rx={3} />
+              <rect x={cx + 2}        y={cxY} width={barW} height={cxH} fill="#F59E0B" rx={3} />
+              <text x={cx} y={padT + chartH + 16} textAnchor="end" fontSize={11} fill="#374151"
+                transform={`rotate(-42, ${cx}, ${padT + chartH + 16})`}>{b.label}</text>
+              <text x={cx - barW / 2 - 2} y={pxY - 6} textAnchor="middle" fontSize={10} fill="#1E3A5F" fontWeight="700">
                 {b.price >= 1000 ? `${(b.price/1000).toFixed(1)}k` : b.price.toFixed(0)}
               </text>
             </g>
           );
         })}
-        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1} />
+        <line x1={padL} y1={padT + chartH} x2={W - padR} y2={padT + chartH} stroke="#D1D5DB" strokeWidth={1.5} />
       </svg>
     </div>
   );
