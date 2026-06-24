@@ -9,9 +9,10 @@ interface PieChartProps {
   data: PieChartData[];
   title: string;
   size?: number;
+  formatValue?: (v: number) => string;
 }
 
-export function PieChart({ data, title, size = 200 }: PieChartProps) {
+export function PieChart({ data, title, size = 200, formatValue }: PieChartProps) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
 
   if (total === 0) {
@@ -52,8 +53,8 @@ export function PieChart({ data, title, size = 200 }: PieChartProps) {
   });
 
   return (
-    <div className="flex flex-col items-center">
-      <svg width={size} height={size} viewBox="0 0 200 200" className="mb-4">
+    <div className="flex flex-col items-center w-full">
+      <svg width={size} height={size} viewBox="0 0 200 200" className="mb-3">
         {paths.map((path, index) => (
           <g key={index}>
             <path
@@ -67,21 +68,24 @@ export function PieChart({ data, title, size = 200 }: PieChartProps) {
         ))}
       </svg>
 
-      <p className="text-sm font-semibold text-gray-700 mb-3">{title}</p>
+      {title && <p className="text-sm font-semibold text-gray-700 mb-3 text-center">{title}</p>}
 
       <div className="w-full space-y-1.5">
         {data.map((item, index) => (
-          <div key={index} className="flex items-center justify-between text-xs">
-            <div className="flex items-center space-x-2">
+          <div key={index} className="flex items-center justify-between text-xs gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <div
-                className="w-3 h-3 rounded-sm"
+                className="w-3 h-3 rounded-sm flex-shrink-0"
                 style={{ backgroundColor: item.color }}
               />
-              <span className="text-gray-700">{item.label}</span>
+              <span className="text-gray-700 truncate">{item.label}</span>
             </div>
-            <span className="font-semibold text-gray-900">
-              {item.percentage.toFixed(2)}%
-            </span>
+            <div className="flex items-center gap-1.5 flex-shrink-0 text-right">
+              {formatValue && (
+                <span className="font-mono text-gray-700">{formatValue(item.value)}</span>
+              )}
+              <span className="font-bold text-gray-900">({item.percentage.toFixed(1)}%)</span>
+            </div>
           </div>
         ))}
       </div>

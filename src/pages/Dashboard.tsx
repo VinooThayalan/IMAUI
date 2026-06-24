@@ -100,10 +100,10 @@ interface BarChartProps {
 function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) {
   if (bars.length === 0) return null;
   const maxVal = Math.max(...bars.map(b => Math.abs(b.value)), 1);
-  const W = 420, H = 220, padL = 60, padR = 10, padT = 20, padB = 54;
+  const W = 480, H = 280, padL = 66, padR = 10, padT = 24, padB = 80;
   const chartW = W - padL - padR;
   const chartH = H - padT - padB;
-  const barW = Math.min(40, (chartW / bars.length) * 0.55);
+  const barW = Math.min(48, (chartW / bars.length) * 0.6);
   const gap  = chartW / bars.length;
 
   const yTicks = 4;
@@ -111,8 +111,8 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
 
   return (
     <div>
-      {title && <p className="text-xs font-bold text-gray-700 mb-2">{title}</p>}
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 220 }}>
+      {title && <p className="text-sm font-bold text-gray-700 mb-2">{title}</p>}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 280 }}>
         {/* y-axis label */}
         {yLabel && (
           <text x={10} y={H / 2} textAnchor="middle" fontSize={9} fill="#9CA3AF"
@@ -125,7 +125,7 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
           return (
             <g key={i}>
               <line x1={padL} y1={y} x2={W - padR} y2={y} stroke="#E5E7EB" strokeWidth={1} />
-              <text x={padL - 4} y={y + 3} textAnchor="end" fontSize={8} fill="#9CA3AF">
+              <text x={padL - 5} y={y + 3} textAnchor="end" fontSize={9} fill="#9CA3AF">
                 {val >= 1_000_000 ? `${(val / 1_000_000).toFixed(1)}m` : val >= 1_000 ? `${(val / 1_000).toFixed(0)}k` : val.toFixed(0)}
               </text>
             </g>
@@ -139,12 +139,12 @@ function BarChart({ title, bars, formatValue = fmtCur, yLabel }: BarChartProps) 
           const y    = padT + chartH - bH;
           return (
             <g key={i}>
-              <rect x={x} y={y} width={barW} height={bH} fill={b.color} rx={2} />
-              <text x={x + barW / 2} y={padT + chartH + 12} textAnchor="middle" fontSize={8} fill="#374151"
-                transform={`rotate(-35, ${x + barW / 2}, ${padT + chartH + 12})`}>
+              <rect x={x} y={y} width={barW} height={bH} fill={b.color} rx={3} />
+              <text x={x + barW / 2} y={padT + chartH + 14} textAnchor="end" fontSize={9} fill="#374151"
+                transform={`rotate(-45, ${x + barW / 2}, ${padT + chartH + 14})`}>
                 {b.label}
               </text>
-              <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={7} fill="#6B7280">
+              <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize={8} fill="#4B5563" fontWeight="600">
                 {formatValue(b.value)}
               </text>
             </g>
@@ -364,10 +364,10 @@ export function Dashboard() {
   const top5ReturnsPie = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalReturns,    color: shareColor(i) })));
   const top5CostPie    = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalCostAll,    color: shareColor(i) })));
 
-  // Top-5 bar charts
-  const top5PriceCost  = top5.map((m, i) => ({ label: m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(i) }));
-  const top5BalShares  = top5.map((m, i) => ({ label: m.ticker, value: m.heldShares,        color: shareColor(i) }));
-  const top5AER        = top5.map((m, i) => ({ label: m.ticker, value: m.aer,               color: shareColor(i) }));
+  // Top-5 bar charts — use share name for x-axis labels
+  const top5PriceCost  = top5.map((m, i) => ({ label: m.shareName || m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(i) }));
+  const top5BalShares  = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.heldShares,        color: shareColor(i) }));
+  const top5AER        = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.aer,               color: shareColor(i) }));
 
   // Share portfolio table — all active shares
   const portfolioShares = shares.filter(s => held.some(m => m.shareId === s.id) || true);
@@ -380,24 +380,43 @@ export function Dashboard() {
 
         {/* Share portfolio table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100">
-            <h2 className="text-base font-bold text-gray-900">Metrocorp Share Portfolio</h2>
+          <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-700">
+            <h2 className="text-base font-bold text-white">Metrocorp Share Portfolio</h2>
+            <p className="text-xs text-slate-400 mt-0.5">{portfolioShares.length} listed securities</p>
           </div>
           <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Share Names</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Sector</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Share</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Sector</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
-                {portfolioShares.map((s, i) => (
-                  <tr key={s.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
-                    <td className="px-4 py-2 text-gray-800 font-medium">{s.share_name || s.ticker}</td>
-                    <td className="px-4 py-2 text-gray-500">{s.sector}</td>
-                  </tr>
-                ))}
+              <tbody>
+                {portfolioShares.map((s) => {
+                  const sc = sectorColor(s.sector);
+                  const isHeld = held.some(m => m.shareId === s.id);
+                  return (
+                    <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50/60 transition-colors"
+                      style={{ borderLeftColor: sc, borderLeftWidth: 3 }}>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-white leading-none"
+                            style={{ backgroundColor: sc }}>{s.ticker}</span>
+                          <span className={`text-sm font-medium ${isHeld ? 'text-slate-800' : 'text-slate-400'}`}>
+                            {s.share_name || s.ticker}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: sc }} />
+                          <span className="text-xs text-slate-600">{s.sector}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {portfolioShares.length === 0 && (
                   <tr><td colSpan={2} className="px-4 py-6 text-center text-gray-400 text-xs">No shares found</td></tr>
                 )}
@@ -419,69 +438,73 @@ export function Dashboard() {
 
       {/* ── Section 2: Sector pie charts ───────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
+        <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50">
           <h2 className="text-lg font-bold text-gray-900">Portfolio by Sector</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectorMap.size} sectors</p>
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="flex flex-col items-center">
-            <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="Total Returns on Bal. Shares by Sector" size={210} />
+          <div className="bg-gradient-to-br from-rose-50 to-orange-50 rounded-xl p-5 border border-rose-100">
+            <p className="text-xs font-bold text-rose-600 mb-4 text-center uppercase tracking-wide">Total Returns by Sector</p>
+            <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
-          <div className="flex flex-col items-center">
-            <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="Total Dividends by Sector" size={210} />
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-5 border border-emerald-100">
+            <p className="text-xs font-bold text-emerald-600 mb-4 text-center uppercase tracking-wide">Total Dividends by Sector</p>
+            <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
-          <div className="flex flex-col items-center">
-            <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="Market Value of Share Portfolio by Sector" size={210} />
+          <div className="bg-gradient-to-br from-blue-50 to-sky-50 rounded-xl p-5 border border-blue-100">
+            <p className="text-xs font-bold text-blue-600 mb-4 text-center uppercase tracking-wide">Market Value by Sector</p>
+            <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
         </div>
       </div>
 
       {/* ── Section 3: Metrocorp's Main Contributors – pie charts ─────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-50 to-blue-50">
-          <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Metrocorp's Main Contributors</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Top 5 shares by net market value</p>
+        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-800 to-blue-700">
+          <h2 className="text-xl font-extrabold text-white tracking-tight">Metrocorp's Main Contributors</h2>
+          <p className="text-xs text-sky-200 mt-0.5">Top 5 shares by net market value</p>
           {top5.length > 0 && (
             <div className="flex flex-wrap gap-3 mt-3">
               {top5.map((m, i) => (
-                <span key={m.shareId} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: shareColor(i) }}>
+                <span key={m.shareId} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm border border-white/20" style={{ background: shareColor(i) }}>
                   {m.ticker}
-                  <span className="opacity-80">{fmtCur(m.netMarketValue)}</span>
+                  <span className="opacity-90 font-mono">{fmtCur(m.netMarketValue)}</span>
                 </span>
               ))}
             </div>
           )}
         </div>
-        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-          <div className="flex flex-col items-center">
-            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Net Market by Share</p>
-            <PieChart data={top5NetMktPie} title="" size={200} />
+        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-6 border border-blue-100">
+            <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Net Market Value by Share</p>
+            <PieChart data={top5NetMktPie} title="" size={260} formatValue={fmtCur} />
           </div>
-          <div className="flex flex-col items-center">
-            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Dividends by Share</p>
-            <PieChart data={top5DivPie.filter(d => d.value > 0)} title="" size={200} />
+          <div className="bg-gradient-to-br from-slate-50 to-emerald-50 rounded-xl p-6 border border-emerald-100">
+            <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Dividends by Share</p>
+            <PieChart data={top5DivPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
           </div>
-          <div className="flex flex-col items-center">
-            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Returns by Share</p>
-            <PieChart data={top5ReturnsPie.filter(d => d.value > 0)} title="" size={200} />
+          <div className="bg-gradient-to-br from-slate-50 to-rose-50 rounded-xl p-6 border border-rose-100">
+            <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Returns by Share</p>
+            <PieChart data={top5ReturnsPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
           </div>
-          <div className="flex flex-col items-center">
-            <p className="text-xs font-bold text-red-600 mb-3 text-center">Total Cost by Share</p>
-            <PieChart data={top5CostPie} title="" size={200} />
+          <div className="bg-gradient-to-br from-slate-50 to-amber-50 rounded-xl p-6 border border-amber-100">
+            <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Cost by Share</p>
+            <PieChart data={top5CostPie} title="" size={260} formatValue={fmtCur} />
           </div>
         </div>
       </div>
 
       {/* ── Section 4: Metrocorp's Main Contributors – bar charts ─────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-50 to-blue-50">
-          <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Metrocorp's Main Contributors</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Detailed metrics for top 5 contributors</p>
+        <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-800 to-blue-700">
+          <h2 className="text-xl font-extrabold text-white tracking-tight">Metrocorp's Main Contributors — Detail</h2>
+          <p className="text-xs text-sky-200 mt-0.5">Detailed metrics for top 5 contributors</p>
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-            <PriceCostBarChart title="Net Market Price per share and Cost per share by Share" bars={top5PriceCost} />
+          <div className="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-5 border border-blue-100">
+            <PriceCostBarChart title="Market Price vs Cost per Share" bars={top5PriceCost} />
           </div>
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+          <div className="bg-gradient-to-br from-slate-50 to-yellow-50 rounded-xl p-5 border border-yellow-100">
             <BarChart
               title="AER by Share"
               bars={top5AER}
@@ -489,7 +512,7 @@ export function Dashboard() {
               yLabel="AER %"
             />
           </div>
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+          <div className="bg-gradient-to-br from-slate-50 to-emerald-50 rounded-xl p-5 border border-emerald-100">
             <BarChart
               title="Total Balance No. of Shares by Share"
               bars={top5BalShares}
@@ -497,8 +520,7 @@ export function Dashboard() {
               yLabel="Shares"
             />
           </div>
-          {/* spacer / future chart */}
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex items-center justify-center text-gray-300 text-sm">
+          <div className="bg-gradient-to-br from-slate-50 to-rose-50 rounded-xl p-5 border border-rose-100 flex items-center justify-center text-gray-300 text-sm">
             {top5.length === 0 && 'No contributor data available'}
             {top5.length > 0 && (
               <div className="w-full">
@@ -619,8 +641,8 @@ function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) 
 function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
   const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
 
-  // Shares ordered ascending by total market value (heldShares > 0 first, then rest with 0)
-  const allMetrics = [...metrics].sort((a, b) => a.marketValue - b.marketValue);
+  // Shares ordered descending by total market value
+  const allMetrics = [...metrics].sort((a, b) => b.marketValue - a.marketValue);
 
   const selected = selectedShareId ? allMetrics.find(m => m.shareId === selectedShareId) : null;
 
@@ -631,51 +653,58 @@ function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-gray-100">
-        <h2 className="text-xl font-extrabold text-gray-900 tracking-tight">Share Portfolio Details</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Ordered by total market value (ascending). Select a share to see details.</p>
+      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-700">
+        <h2 className="text-xl font-extrabold text-white tracking-tight">Share Portfolio Details</h2>
+        <p className="text-xs text-slate-400 mt-0.5">Ordered by market value (highest first). Select a share to see details.</p>
       </div>
 
       <div className="p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           {/* Left: Table */}
-          <div className="overflow-hidden rounded-xl border border-gray-200">
+          <div className="overflow-hidden rounded-xl border border-gray-200 shadow-sm">
             <div className="overflow-y-auto" style={{ maxHeight: 520 }}>
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
+                <thead className="sticky top-0 bg-slate-700 z-10">
                   <tr>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Share Names</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Total Market Value</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-slate-300 uppercase tracking-wide">#&nbsp;&nbsp;Share</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-slate-300 uppercase tracking-wide">Market Value</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody>
                   {allMetrics.map((m, i) => {
                     const isSelected = selectedShareId === m.shareId;
+                    const sc = sectorColor(m.sector);
                     return (
                       <tr
                         key={m.shareId}
                         onClick={() => setSelectedShareId(isSelected ? null : m.shareId)}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected
-                            ? 'bg-blue-50 border-l-2 border-l-blue-500'
-                            : i % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50/40 hover:bg-gray-100/60'
+                        className={`cursor-pointer transition-colors border-b border-slate-100 ${
+                          isSelected ? 'bg-blue-50' : 'hover:bg-slate-50'
                         }`}
+                        style={{ borderLeftColor: isSelected ? '#3B82F6' : sc, borderLeftWidth: 3 }}
                       >
-                        <td className={`px-4 py-2.5 font-medium ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                          {m.shareName || m.ticker}
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-400 w-4 text-right">{i + 1}</span>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold text-white leading-none"
+                              style={{ backgroundColor: sc }}>{m.ticker}</span>
+                            <span className={`font-medium text-sm truncate ${isSelected ? 'text-blue-700' : m.heldShares > 0 ? 'text-slate-800' : 'text-slate-400'}`}>
+                              {m.shareName || m.ticker}
+                            </span>
+                          </div>
                         </td>
-                        <td className={`px-4 py-2.5 text-right font-mono text-xs ${isSelected ? 'text-blue-700 font-bold' : 'text-gray-600'}`}>
-                          {m.marketValue > 0 ? fmtCur(m.marketValue) : <span className="text-gray-300">—</span>}
+                        <td className={`px-4 py-2.5 text-right font-mono text-xs ${isSelected ? 'text-blue-700 font-bold' : 'text-slate-600'}`}>
+                          {m.marketValue > 0 ? fmtCur(m.marketValue) : <span className="text-slate-300">—</span>}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
-                <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-300">
+                <tfoot className="sticky bottom-0 bg-slate-800 border-t-2 border-slate-600">
                   <tr>
-                    <td className="px-4 py-2.5 text-xs font-bold text-gray-700 uppercase">Total</td>
-                    <td className="px-4 py-2.5 text-right text-xs font-bold text-gray-900 font-mono">{fmtCur(grandTotal.marketValue)}</td>
+                    <td className="px-4 py-2.5 text-xs font-bold text-slate-300 uppercase">Total</td>
+                    <td className="px-4 py-2.5 text-right text-xs font-bold text-white font-mono">{fmtCur(grandTotal.marketValue)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -691,9 +720,9 @@ function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
             ) : (
               <>
                 {/* Header card */}
-                <div className="bg-blue-50 border border-blue-200 rounded-xl px-6 py-5 text-center">
-                  <p className="text-2xl font-extrabold text-blue-900">{selected.shareName || selected.ticker}</p>
-                  <p className="text-xs text-blue-500 mt-1 font-semibold uppercase tracking-wide">Share Name</p>
+                <div className="rounded-xl px-6 py-5 text-center text-white" style={{ background: sectorColor(selected.sector) }}>
+                  <p className="text-2xl font-extrabold">{selected.shareName || selected.ticker}</p>
+                  <p className="text-xs mt-1 font-semibold uppercase tracking-wide opacity-80">{selected.sector} · {selected.ticker}</p>
                 </div>
 
                 {/* 2-column metric cards */}
