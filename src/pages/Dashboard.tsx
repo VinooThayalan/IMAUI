@@ -229,78 +229,122 @@ export function Dashboard() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes] = await Promise.all([
-        supabase.from('shares').select('id, ticker, share_name, sector').eq('is_active', true).order('share_name'),
-        supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount, price_per_share, approval_status'),
-        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, openingRes] = await Promise.all([
+        supabase.from('shares')
+          .select('id, ticker, share_name, sector, sector_types(sector_name)')
+          .eq('is_active', true)
+          .order('share_name'),
+        // Must include `id` so buy_sell_notes can be matched; filter to approved transactions only
+        supabase.from('transactions')
+          .select('id, share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate')
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('transaction_date', { ascending: true }),
+        supabase.from('daily_share_prices')
+          .select('share_id, share_price, effective_date')
+          .order('effective_date', { ascending: false }),
         supabase.from('dividends').select('share_id, amount_net'),
-        supabase.from('buy_sell_notes').select('transaction_id, no_of_shares, price_avg, gross_amount, note_type').not('transaction_id', 'is', null),
+        // Notes override transaction amounts with more accurate settled figures
+        supabase.from('buy_sell_notes')
+          .select('transaction_id, no_of_shares, gross_amount, note_type')
+          .not('transaction_id', 'is', null),
+        // Opening balances are part of the portfolio (pre-system holdings)
+        supabase.from('entity_share_opening_balances')
+          .select('share_id, opening_shares, average_purchase_cost'),
       ]);
 
       const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
-        id: s.id, ticker: s.ticker || '', share_name: s.share_name || s.ticker || '', sector: s.sector || 'Other',
+        id: s.id,
+        ticker: s.ticker || '',
+        share_name: s.share_name || s.ticker || '',
+        // Prefer sector_types.sector_name, fall back to shares.sector column
+        sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
       }));
       setShares(shareRows);
 
       const shareMap = new Map(shareRows.map(s => [s.id, s]));
 
-      // latest price per share
+      // Latest price per share
       const latestPrices = new Map<string, number>();
       (pricesRes.data || []).forEach((p: any) => {
         if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, Number(p.share_price) || 0);
       });
 
-      // dividends by share
+      // Dividends by share (aggregate across all entities for dashboard totals)
       const divMap = new Map<string, number>();
       (dividendsRes.data || []).forEach((d: any) => {
         divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + Number(d.amount_net));
       });
 
-      // build holdings from buy_sell_notes (processed) + transactions
-      // Use notes where available (more accurate), fall back to transactions
+      // Notes map: transaction_id → settled amounts (more accurate than raw transaction)
       const txnNoteMap = new Map<string, { shares: number; gross: number; type: string }>();
       (notesRes.data || []).forEach((n: any) => {
-        txnNoteMap.set(n.transaction_id, { shares: Number(n.no_of_shares) || 0, gross: Number(n.gross_amount) || 0, type: n.note_type });
+        if (n.transaction_id) {
+          txnNoteMap.set(n.transaction_id, {
+            shares: Number(n.no_of_shares) || 0,
+            gross:  Number(n.gross_amount)  || 0,
+            type:   n.note_type,
+          });
+        }
       });
 
-      // holdings accumulator: share_id -> { held, cost, totalCostAll, saleProceeds }
-      type HoldingAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number };
+      // Holdings accumulator: share_id → { held, cost, totalCostAll, saleProceeds, feeRate }
+      type HoldingAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
       const holdMap = new Map<string, HoldingAcc>();
 
+      const ensureHolding = (shareId: string): HoldingAcc => {
+        if (!holdMap.has(shareId)) holdMap.set(shareId, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
+        return holdMap.get(shareId)!;
+      };
+
+      // Seed with opening balances first (they represent pre-system holdings)
+      (openingRes.data || []).forEach((ob: any) => {
+        if (!shareMap.has(ob.share_id)) return;
+        const h = ensureHolding(ob.share_id);
+        const qty  = Number(ob.opening_shares) || 0;
+        const cost = qty * (Number(ob.average_purchase_cost) || 0);
+        h.held        += qty;
+        h.cost        += cost;
+        h.totalCostAll += cost;
+      });
+
+      // Apply approved transactions (notes take precedence for settled amounts)
       (txnsRes.data || []).forEach((tx: any) => {
         if (!shareMap.has(tx.share_id)) return;
-        const note = txnNoteMap.get(tx.id);
+        const note       = txnNoteMap.get(tx.id);
         const shares_qty = note ? note.shares : Number(tx.no_of_shares) || 0;
-        const gross      = note ? note.gross  : Number(tx.total_amount) || 0;
-        const isBuy      = (tx.transaction_type || '').toUpperCase() === 'BUY';
+        const gross      = note ? note.gross  : Number(tx.total_amount)  || 0;
+        const txType     = note?.type || tx.transaction_type || '';
+        const isBuy      = txType.toUpperCase() === 'BUY';
+        const h = ensureHolding(tx.share_id);
 
-        if (!holdMap.has(tx.share_id)) holdMap.set(tx.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0 });
-        const h = holdMap.get(tx.share_id)!;
+        // Track the latest brokerage fee rate for this share
+        if (tx.brokerage_fee_rate != null) h.feeRate = Number(tx.brokerage_fee_rate);
 
         if (isBuy) {
-          h.held += shares_qty;
-          h.cost += gross;
+          h.held        += shares_qty;
+          h.cost        += gross;
           h.totalCostAll += gross;
         } else {
           const avgCPS = h.held > 0 ? h.cost / h.held : 0;
-          const rmCost = avgCPS * shares_qty;
           h.held          = Math.max(0, h.held - shares_qty);
-          h.cost          = Math.max(0, h.cost - rmCost);
+          h.cost          = Math.max(0, h.cost - avgCPS * shares_qty);
           h.saleProceeds += gross;
         }
       });
 
       const result: ShareMetrics[] = [];
       holdMap.forEach((h, shareId) => {
-        const sr    = shareMap.get(shareId);
+        const sr = shareMap.get(shareId);
         if (!sr) return;
-        const price = latestPrices.get(shareId) || 0;
-        const mv    = h.held * price;
-        const divs  = divMap.get(shareId) || 0;
-        const nmv   = mv - h.cost;
-        const tr    = (mv + h.saleProceeds + divs) - h.totalCostAll;
-        const aer   = h.cost > 0 ? ((nmv + divs) / h.cost) * 100 : 0;
-        const avgCPS = h.held > 0 ? h.cost / h.held : 0;
+        const price   = latestPrices.get(shareId) || 0;
+        const feeRate = h.feeRate / 100;
+        // Net market value (after brokerage fees) — matches ShareAnalytics & PortfolioSummary
+        const mv      = h.held * price * (1 - feeRate);
+        const divs    = divMap.get(shareId) || 0;
+        const nmv     = mv - h.cost;
+        const tr      = (mv + h.saleProceeds + divs) - h.totalCostAll;
+        const aer     = h.cost > 0 ? ((nmv + divs) / h.cost) * 100 : 0;
+        const avgCPS  = h.held > 0 ? h.cost / h.held : 0;
 
         result.push({
           shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
@@ -369,8 +413,12 @@ export function Dashboard() {
   const top5BalShares  = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.heldShares,        color: shareColor(i) }));
   const top5AER        = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.aer,               color: shareColor(i) }));
 
-  // Share portfolio table — all active shares
-  const portfolioShares = shares.filter(s => held.some(m => m.shareId === s.id) || true);
+  // Share portfolio table — active shares with holdings, then the rest (dimmed)
+  const heldIds = new Set(held.map(m => m.shareId));
+  const portfolioShares = [
+    ...shares.filter(s => heldIds.has(s.id)),
+    ...shares.filter(s => !heldIds.has(s.id)),
+  ];
 
   return (
     <div className="p-6 space-y-8">
