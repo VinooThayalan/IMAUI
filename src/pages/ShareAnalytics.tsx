@@ -509,7 +509,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
-              <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
+              <div className={clsSurplus(last.cum_surplus + last.market_value)}>Rs. {fmt(last.cum_surplus + last.market_value)}</div>
             </div>
             {groupAer !== null && (
               <div className="text-center">
