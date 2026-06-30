@@ -1,6 +1,7 @@
 import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, Download, TrendingUp, BookOpen, Layers, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ShareHolding {
   share_id: string;
@@ -151,6 +152,8 @@ interface ContributorRow {
 type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | 'dividends' | 'scrip' | 'analytics' | 'sector-wise' | 'contributors' | null;
 
 export function Reports() {
+  const { isAdmin, hasMenuAccess } = useAuth();
+  const canSeeReport = (key: string) => isAdmin || hasMenuAccess(key);
   const [activeReport, setActiveReport] = useState<ReportType>(null);
   const [shareData, setShareData] = useState<ShareHolding[]>([]);
   const [portfolioData, setPortfolioData] = useState<PortfolioHolding[]>([]);
@@ -2234,6 +2237,7 @@ export function Reports() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {canSeeReport('reports.share-holdings') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2262,7 +2266,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.portfolio') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2291,7 +2297,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.cashbook') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2344,7 +2352,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.analytics') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2371,7 +2381,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.dividends') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2415,7 +2427,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.scrip') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2459,7 +2473,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.sector-wise') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2486,7 +2502,9 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
 
+        {canSeeReport('reports.contributors') && (
         <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
           <div className="p-6">
             <div className="flex items-start justify-between mb-4">
@@ -2513,6 +2531,7 @@ export function Reports() {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
