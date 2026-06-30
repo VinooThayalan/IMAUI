@@ -1097,7 +1097,7 @@ export function Reports() {
     } else if (reportType === 'analytics') {
       filename = 'share_analytics_report.csv';
       headers = ['Entity', 'Ticker', 'Share Name', 'Share Balance', 'Purchase Cost', 'Sale Value', 'Avg Cost', 'Dividend', 'Cum Surplus', 'Market Value', 'Cash Flow', 'Total Surplus'];
-      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_cost.toFixed(4), a.dividend.toFixed(2), a.cum_surplus.toFixed(2), a.market_value.toFixed(2), a.cash_flow.toFixed(2), a.total_surplus.toFixed(2)]);
+      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_cost.toFixed(4), a.dividend.toFixed(2), (a.cum_surplus + a.market_value).toFixed(2), a.market_value.toFixed(2), a.cash_flow.toFixed(2), a.total_surplus.toFixed(2)]);
     } else if (reportType === 'share') {
       filename = 'share_holdings_report.csv';
       headers = ['Symbol', 'Company', 'Shares', 'Avg Cost', 'Total Cost', 'Current Price', 'Current Value', 'Gain/Loss', '%'];
@@ -1789,7 +1789,7 @@ export function Reports() {
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.sale_value)}</td>
                   <td className="px-3 py-2 text-xs text-right text-gray-700">{a.av_cost.toFixed(4)}</td>
                   <td className="px-3 py-2 text-xs text-right text-yellow-700">{fmt2(a.dividend)}</td>
-                  <td className={`px-3 py-2 text-xs text-right font-medium ${a.cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cum_surplus)}</td>
+                  <td className={`px-3 py-2 text-xs text-right font-medium ${(a.cum_surplus + a.market_value) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cum_surplus + a.market_value)}</td>
                   <td className="px-3 py-2 text-xs text-right text-blue-700">{fmt2(a.market_value)}</td>
                   <td className={`px-3 py-2 text-xs text-right ${a.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cash_flow)}</td>
                   <td className={`px-3 py-2 text-xs text-right font-semibold ${a.total_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.total_surplus)}</td>
@@ -1803,7 +1803,7 @@ export function Reports() {
                 <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{fmt2(totSale)}</td>
                 <td />
                 <td className="px-3 py-3 text-sm font-bold text-yellow-700 text-right">{fmt2(totDiv)}</td>
-                <td className={`px-3 py-3 text-sm font-bold text-right ${totSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(analyticsData.reduce((s, r) => s + r.cum_surplus, 0))}</td>
+                <td className={`px-3 py-3 text-sm font-bold text-right ${analyticsData.reduce((s, r) => s + r.cum_surplus + r.market_value, 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(analyticsData.reduce((s, r) => s + r.cum_surplus + r.market_value, 0))}</td>
                 <td className="px-3 py-3 text-sm font-bold text-blue-700 text-right">{fmt2(totMV)}</td>
                 <td />
                 <td className={`px-3 py-3 text-sm font-bold text-right ${totSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(totSurplus)}</td>
