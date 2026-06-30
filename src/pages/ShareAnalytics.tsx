@@ -263,7 +263,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     const today = new Date();
     const feeRateG = group.brokerage_fee_rate / 100;
     const mvAfterFeesG = group.market_price > 0
-      ? (last.share_cum_bal - last.share_cum_bal * feeRateG) * group.market_price
+      ? last.share_cum_bal * (group.market_price - group.market_price * feeRateG)
       : 0;
     const cfs = group.rows
       .filter(r => r.cash_flow !== 0 && r.trade_date)
@@ -300,7 +300,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     if (group.market_price > 0) {
       const feeRate      = group.brokerage_fee_rate / 100;
       const cumShares    = last.share_cum_bal;
-      const mvAfterFees  = (cumShares - cumShares * feeRate) * group.market_price;
+      const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
       const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
       const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
       const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
@@ -503,14 +503,14 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 </div>
                 <div className="text-center">
                   <div className="text-xs text-gray-400">MV After Fees</div>
-                  <div className="font-bold text-indigo-700">Rs. {fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</div>
+                  <div className="font-bold text-indigo-700">Rs. {fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</div>
                 </div>
               </>
             )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
               {group.market_price > 0 ? (() => {
-                const mvAfterFees = (last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price;
+                const mvAfterFees = last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100));
                 const cumSurplus = last.cum_surplus + mvAfterFees;
                 return <div className={clsSurplus(cumSurplus)}>Rs. {fmt(cumSurplus)}</div>;
               })() : (
@@ -753,7 +753,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               {group.market_price > 0 && (() => {
                 const cumShares    = last.share_cum_bal;
                 const feeRate      = group.brokerage_fee_rate / 100;
-                const mvAfterFees  = (cumShares - cumShares * feeRate) * group.market_price;
+                const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
                 const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
                 const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
                 const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
@@ -829,11 +829,11 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                   </span>
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0 ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span> : '—'}
+                  {group.market_price > 0 ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span> : '—'}
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono">
                   {group.market_price > 0
-                    ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span>
+                    ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span>
                     : <span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span>}
                 </td>
                 <td />
@@ -1001,7 +1001,7 @@ export function ShareAnalytics() {
   // Aggregate totals across filtered groups
   const totals = filtered.reduce((acc, g) => {
     const last = g.rows[g.rows.length - 1];
-    const mvAfterFees = last.market_value * (1 - g.brokerage_fee_rate / 100);
+    const mvAfterFees = last.share_cum_bal * (g.market_price - g.market_price * (g.brokerage_fee_rate / 100));
     return {
       share_cum_bal:      acc.share_cum_bal   + last.share_cum_bal,
       purchase_cost:      acc.purchase_cost   + g.rows.reduce((s, r) => s + r.purchase_cost, 0),
@@ -1044,7 +1044,7 @@ export function ShareAnalytics() {
     const headers = ['Share','Share Name','Entity','CDS Accounts','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
     const rows = filtered.map(g => {
       const last = g.rows[g.rows.length - 1];
-      const mvAfterFees = g.market_price > 0 ? (last.market_value * (1 - g.brokerage_fee_rate / 100)).toFixed(2) : '';
+      const mvAfterFees = g.market_price > 0 ? (last.share_cum_bal * (g.market_price - g.market_price * (g.brokerage_fee_rate / 100))).toFixed(2) : '';
       return [
         g.share_ticker,
         g.share_name,
