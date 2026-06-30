@@ -511,10 +511,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               <div className="text-xs text-gray-400">Cum Surplus</div>
               <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
             </div>
-            <div className="text-center">
-              <div className="text-xs text-gray-400">Total Surplus</div>
-              <div className={clsSurplus(last.total_surplus)}>Rs. {fmt(last.total_surplus)}</div>
-            </div>
             {groupAer !== null && (
               <div className="text-center">
                 <div className="text-xs text-gray-400">AER (XIRR)</div>
@@ -829,7 +825,11 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <td className="px-3 py-2.5 text-right font-mono">
                   {group.market_price > 0 ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span> : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
+                <td className="px-3 py-2.5 text-right font-mono">
+                  {group.market_price > 0
+                    ? <span className={clsSurplus((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}>{fmt((last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price)}</span>
+                    : <span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span>}
+                </td>
                 <td />
               </tr>
             </tfoot>
