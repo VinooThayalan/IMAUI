@@ -509,7 +509,13 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
             )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
-              <div className={clsSurplus(last.cum_surplus + last.market_value)}>Rs. {fmt(last.cum_surplus + last.market_value)}</div>
+              {group.market_price > 0 ? (() => {
+                const mvAfterFees = (last.share_cum_bal - last.share_cum_bal * (group.brokerage_fee_rate / 100)) * group.market_price;
+                const cumSurplus = last.cum_surplus + mvAfterFees;
+                return <div className={clsSurplus(cumSurplus)}>Rs. {fmt(cumSurplus)}</div>;
+              })() : (
+                <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
+              )}
             </div>
             {groupAer !== null && (
               <div className="text-center">
