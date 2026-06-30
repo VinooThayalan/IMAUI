@@ -825,7 +825,7 @@ export function Reports() {
 
       const [txRes, divRes, priceRes, obRes] = await Promise.all([
         supabase.from('transactions').select(`
-          entity_id, share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate,
+          entity_id, share_id, transaction_type, no_of_shares, total_amount,
           entities ( name ), shares ( ticker, share_name )
         `).order('transaction_date', { ascending: true }),
         supabase.from('dividends').select('entity_id, share_id, amount_net'),
@@ -844,12 +844,12 @@ export function Reports() {
         divMap.set(k, (divMap.get(k) || 0) + Number(d.amount_net));
       });
 
-      type Acc = { entity_name: string; ticker: string; share_name: string; share_id: string; bal: number; cost: number; purchase_cost: number; sale_value: number; brokerage_fee_rate: number; };
+      type Acc = { entity_name: string; ticker: string; share_name: string; share_id: string; bal: number; cost: number; purchase_cost: number; sale_value: number; };
       const map = new Map<string, Acc>();
 
       obRes.data?.forEach((ob: any) => {
         const k = `${ob.entity_id}||${ob.share_id}`;
-        if (!map.has(k)) map.set(k, { entity_name: '', ticker: '', share_name: '', share_id: ob.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0, brokerage_fee_rate: 0 });
+        if (!map.has(k)) map.set(k, { entity_name: '', ticker: '', share_name: '', share_id: ob.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
         const r = map.get(k)!;
         r.bal += Number(ob.opening_balance || 0);
         r.cost += Number(ob.opening_cost || 0);
@@ -859,10 +859,9 @@ export function Reports() {
       txRes.data?.forEach((tx: any) => {
         if (!tx.entities || !tx.shares) return;
         const k = `${tx.entity_id}||${tx.share_id}`;
-        if (!map.has(k)) map.set(k, { entity_name: tx.entities.name, ticker: tx.shares.ticker, share_name: tx.shares.share_name, share_id: tx.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0, brokerage_fee_rate: 0 });
+        if (!map.has(k)) map.set(k, { entity_name: tx.entities.name, ticker: tx.shares.ticker, share_name: tx.shares.share_name, share_id: tx.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
         const r = map.get(k)!;
         if (!r.entity_name) { r.entity_name = tx.entities.name; r.ticker = tx.shares.ticker; r.share_name = tx.shares.share_name; }
-        if (tx.brokerage_fee_rate != null) r.brokerage_fee_rate = Number(tx.brokerage_fee_rate);
         const shares = Number(tx.no_of_shares);
         const amt = Number(tx.total_amount);
         const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
@@ -879,8 +878,7 @@ export function Reports() {
       map.forEach((r, k) => {
         const dividend = divMap.get(k) || 0;
         const marketPrice = latestPrices.get(r.share_id) || 0;
-        const adjPrice = marketPrice * (1 - r.brokerage_fee_rate / 100);
-        const market_value = r.bal * adjPrice;
+        const market_value = r.bal * marketPrice;
         const cum_surplus = r.sale_value + dividend - r.purchase_cost;
         const cash_flow = r.sale_value - r.purchase_cost;
         rows.push({
