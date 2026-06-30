@@ -1,4 +1,4 @@
-import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, Download, TrendingUp, BookOpen } from 'lucide-react';
+import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, Download, TrendingUp, BookOpen, Layers, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -128,7 +128,27 @@ interface ShareAnalyticsReportRow {
   total_surplus: number;
 }
 
-type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | 'dividends' | 'scrip' | 'analytics' | null;
+interface SectorWiseRow {
+  sector: string;
+  total_cost: number;
+  market_value: number;
+  dividends: number;
+  total_returns: number;
+  share_count: number;
+}
+
+interface ContributorRow {
+  share_name: string;
+  ticker: string;
+  balance: number;
+  total_cost: number;
+  market_value: number;
+  dividends: number;
+  total_returns: number;
+  aer: number;
+}
+
+type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | 'dividends' | 'scrip' | 'analytics' | 'sector-wise' | 'contributors' | null;
 
 export function Reports() {
   const [activeReport, setActiveReport] = useState<ReportType>(null);
@@ -139,6 +159,8 @@ export function Reports() {
   const [dividendData, setDividendData] = useState<DividendReportRow[]>([]);
   const [scripData, setScripData] = useState<ScripEntryReportRow[]>([]);
   const [analyticsData, setAnalyticsData] = useState<ShareAnalyticsReportRow[]>([]);
+  const [sectorWiseData, setSectorWiseData] = useState<SectorWiseRow[]>([]);
+  const [contributorsData, setContributorsData] = useState<ContributorRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
@@ -877,6 +899,180 @@ export function Reports() {
     } catch (err) {
       console.error(err);
       alert('Failed to generate analytics report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateSectorWiseReport() {
+    try {
+      setLoading(true);
+
+      const [txRes, divRes, priceRes, obRes, sharesRes] = await Promise.all([
+        supabase.from('transactions')
+          .select('entity_id, share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate')
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('transaction_date', { ascending: true }),
+        supabase.from('dividends').select('share_id, amount_net'),
+        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+        supabase.from('entity_share_opening_balances').select('share_id, opening_balance, opening_cost'),
+        supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)'),
+      ]);
+
+      if (txRes.error) throw txRes.error;
+      if (sharesRes.error) throw sharesRes.error;
+
+      const latestPrices = new Map<string, number>();
+      priceRes.data?.forEach((p: any) => { if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, p.share_price); });
+
+      const shareInfo = new Map<string, { ticker: string; name: string; sector: string }>();
+      sharesRes.data?.forEach((s: any) => {
+        const sector = (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other';
+        shareInfo.set(s.id, { ticker: s.ticker, name: s.share_name, sector });
+      });
+
+      const divMap = new Map<string, number>();
+      divRes.data?.forEach((d: any) => {
+        divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + Number(d.amount_net));
+      });
+
+      type HoldAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
+      const holdMap = new Map<string, HoldAcc>();
+
+      obRes.data?.forEach((ob: any) => {
+        if (!holdMap.has(ob.share_id)) holdMap.set(ob.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
+        const h = holdMap.get(ob.share_id)!;
+        h.held += Number(ob.opening_balance || 0);
+        h.cost += Number(ob.opening_cost || 0);
+        h.totalCostAll += Number(ob.opening_cost || 0);
+      });
+
+      txRes.data?.forEach((tx: any) => {
+        if (!holdMap.has(tx.share_id)) holdMap.set(tx.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
+        const h = holdMap.get(tx.share_id)!;
+        const shares_qty = Number(tx.no_of_shares);
+        const gross = Number(tx.total_amount);
+        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        if (tx.brokerage_fee_rate != null) h.feeRate = Number(tx.brokerage_fee_rate);
+        if (isBuy) {
+          h.held += shares_qty; h.cost += gross; h.totalCostAll += gross;
+        } else {
+          const avgCPS = h.held > 0 ? h.cost / h.held : 0;
+          h.held = Math.max(0, h.held - shares_qty);
+          h.cost = Math.max(0, h.cost - avgCPS * shares_qty);
+          h.saleProceeds += gross;
+        }
+      });
+
+      const sectorMap = new Map<string, SectorWiseRow>();
+      holdMap.forEach((h, shareId) => {
+        if (h.held <= 0) return;
+        const info = shareInfo.get(shareId);
+        if (!info) return;
+        const price = latestPrices.get(shareId) || 0;
+        const feeRate = h.feeRate / 100;
+        const mv = h.held * price * (1 - feeRate);
+        const divs = divMap.get(shareId) || 0;
+        const totalReturns = (mv + h.saleProceeds + divs) - h.totalCostAll;
+
+        const sector = info.sector;
+        if (!sectorMap.has(sector)) {
+          sectorMap.set(sector, { sector, total_cost: 0, market_value: 0, dividends: 0, total_returns: 0, share_count: 0 });
+        }
+        const sr = sectorMap.get(sector)!;
+        sr.total_cost += h.cost;
+        sr.market_value += mv;
+        sr.dividends += divs;
+        sr.total_returns += totalReturns;
+        sr.share_count += 1;
+      });
+
+      const rows = Array.from(sectorMap.values()).sort((a, b) => b.market_value - a.market_value);
+      setSectorWiseData(rows);
+      setActiveReport('sector-wise');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate sector-wise report');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateContributorsReport() {
+    try {
+      setLoading(true);
+
+      const [txRes, divRes, priceRes, obRes, sharesRes] = await Promise.all([
+        supabase.from('transactions')
+          .select('share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate')
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('transaction_date', { ascending: true }),
+        supabase.from('dividends').select('share_id, amount_net'),
+        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+        supabase.from('entity_share_opening_balances').select('share_id, opening_balance, opening_cost'),
+        supabase.from('shares').select('id, ticker, share_name'),
+      ]);
+
+      if (txRes.error) throw txRes.error;
+      if (sharesRes.error) throw sharesRes.error;
+
+      const latestPrices = new Map<string, number>();
+      priceRes.data?.forEach((p: any) => { if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, p.share_price); });
+
+      const shareInfo = new Map<string, { ticker: string; name: string }>();
+      sharesRes.data?.forEach((s: any) => { shareInfo.set(s.id, { ticker: s.ticker, name: s.share_name }); });
+
+      const divMap = new Map<string, number>();
+      divRes.data?.forEach((d: any) => { divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + Number(d.amount_net)); });
+
+      type HoldAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
+      const holdMap = new Map<string, HoldAcc>();
+
+      obRes.data?.forEach((ob: any) => {
+        if (!holdMap.has(ob.share_id)) holdMap.set(ob.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
+        const h = holdMap.get(ob.share_id)!;
+        h.held += Number(ob.opening_balance || 0);
+        h.cost += Number(ob.opening_cost || 0);
+        h.totalCostAll += Number(ob.opening_cost || 0);
+      });
+
+      txRes.data?.forEach((tx: any) => {
+        if (!holdMap.has(tx.share_id)) holdMap.set(tx.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
+        const h = holdMap.get(tx.share_id)!;
+        const shares_qty = Number(tx.no_of_shares);
+        const gross = Number(tx.total_amount);
+        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        if (tx.brokerage_fee_rate != null) h.feeRate = Number(tx.brokerage_fee_rate);
+        if (isBuy) {
+          h.held += shares_qty; h.cost += gross; h.totalCostAll += gross;
+        } else {
+          const avgCPS = h.held > 0 ? h.cost / h.held : 0;
+          h.held = Math.max(0, h.held - shares_qty);
+          h.cost = Math.max(0, h.cost - avgCPS * shares_qty);
+          h.saleProceeds += gross;
+        }
+      });
+
+      const rows: ContributorRow[] = [];
+      holdMap.forEach((h, shareId) => {
+        if (h.held <= 0) return;
+        const info = shareInfo.get(shareId);
+        if (!info) return;
+        const price = latestPrices.get(shareId) || 0;
+        const feeRate = h.feeRate / 100;
+        const mv = h.held * price * (1 - feeRate);
+        const divs = divMap.get(shareId) || 0;
+        const totalReturns = (mv + h.saleProceeds + divs) - h.totalCostAll;
+        const aer = h.cost > 0 ? ((mv - h.cost + divs) / h.cost) * 100 : 0;
+        rows.push({ share_name: info.name, ticker: info.ticker, balance: h.held, total_cost: h.cost, market_value: mv, dividends: divs, total_returns: totalReturns, aer });
+      });
+
+      rows.sort((a, b) => a.share_name.localeCompare(b.share_name));
+      setContributorsData(rows);
+      setActiveReport('contributors');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to generate contributors report');
     } finally {
       setLoading(false);
     }
@@ -1830,6 +2026,194 @@ export function Reports() {
     );
   }
 
+  if (activeReport === 'sector-wise') {
+    const fmt2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const totCost = sectorWiseData.reduce((s, r) => s + r.total_cost, 0);
+    const totMV = sectorWiseData.reduce((s, r) => s + r.market_value, 0);
+    const totDiv = sectorWiseData.reduce((s, r) => s + r.dividends, 0);
+    const totReturns = sectorWiseData.reduce((s, r) => s + r.total_returns, 0);
+    return (
+      <div className="p-8">
+        <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button onClick={closeReport} className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+            <X className="w-5 h-5" /><span>Close</span>
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={handlePrint} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Printer className="w-5 h-5" /><span>Print</span>
+            </button>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Sector-wise Report</h1>
+            <p className="text-gray-600">Returns, Dividends &amp; Market Value by Sector</p>
+            <p className="text-sm text-gray-500 mt-1">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {[
+              { label: 'Total Cost', value: fmt2(totCost), color: 'text-gray-900' },
+              { label: 'Total Market Value', value: fmt2(totMV), color: 'text-blue-700' },
+              { label: 'Total Dividends', value: fmt2(totDiv), color: 'text-green-700' },
+              { label: 'Total Returns', value: fmt2(totReturns), color: totReturns >= 0 ? 'text-green-700' : 'text-red-700' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <p className="text-xs text-gray-500 mb-1">{label}</p>
+                <p className={`text-lg font-bold ${color}`}>Rs. {value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-800 text-white">
+                <tr>
+                  <th className="px-4 py-3 text-left font-bold">Sector</th>
+                  <th className="px-4 py-3 text-right font-bold">Shares</th>
+                  <th className="px-4 py-3 text-right font-bold">Total Cost (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Market Value (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Dividends (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Total Returns (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">MV % of Portfolio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {sectorWiseData.map((row, i) => (
+                  <tr key={row.sector} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-4 py-3 font-semibold text-gray-900">{row.sector}</td>
+                    <td className="px-4 py-3 text-right text-gray-700">{row.share_count}</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{fmt2(row.total_cost)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-blue-700">{fmt2(row.market_value)}</td>
+                    <td className="px-4 py-3 text-right text-green-700">{fmt2(row.dividends)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${row.total_returns >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmt2(row.total_returns)}</td>
+                    <td className="px-4 py-3 text-right text-gray-700">{totMV > 0 ? ((row.market_value / totMV) * 100).toFixed(1) : '0.0'}%</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t-2 border-gray-800 bg-gray-100">
+                <tr>
+                  <td className="px-4 py-3 font-bold text-gray-900">Grand Total</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900">{sectorWiseData.reduce((s, r) => s + r.share_count, 0)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900">{fmt2(totCost)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-blue-700">{fmt2(totMV)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-green-700">{fmt2(totDiv)}</td>
+                  <td className={`px-4 py-3 text-right font-bold ${totReturns >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmt2(totReturns)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900">100.0%</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="mt-8">
+            <h3 className="text-base font-bold text-gray-900 mb-4">Sector Allocation</h3>
+            <div className="space-y-3">
+              {sectorWiseData.map(row => (
+                <div key={row.sector} className="flex items-center gap-4">
+                  <div className="w-36 text-sm font-medium text-gray-700 truncate">{row.sector}</div>
+                  <div className="flex-1 bg-gray-200 rounded-full h-5 overflow-hidden">
+                    <div
+                      className="h-5 bg-blue-600 rounded-full"
+                      style={{ width: `${totMV > 0 ? (row.market_value / totMV) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="w-14 text-right text-sm font-semibold text-gray-900">
+                    {totMV > 0 ? ((row.market_value / totMV) * 100).toFixed(1) : '0.0'}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeReport === 'contributors') {
+    const fmt2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const totCost = contributorsData.reduce((s, r) => s + r.total_cost, 0);
+    const totMV = contributorsData.reduce((s, r) => s + r.market_value, 0);
+    const totDiv = contributorsData.reduce((s, r) => s + r.dividends, 0);
+    const totReturns = contributorsData.reduce((s, r) => s + r.total_returns, 0);
+    return (
+      <div className="p-8">
+        <style>{`@media print { .no-print { display: none !important; } body { background: white; } }`}</style>
+        <div className="no-print mb-6 flex items-center justify-between">
+          <button onClick={closeReport} className="flex items-center space-x-2 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">
+            <X className="w-5 h-5" /><span>Close</span>
+          </button>
+          <div className="flex items-center space-x-3">
+            <button onClick={handlePrint} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Printer className="w-5 h-5" /><span>Print</span>
+            </button>
+          </div>
+        </div>
+        <div className="bg-white p-8 rounded-lg border border-gray-200">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Contributors by Share</h1>
+            <p className="text-gray-600">Market Value, Dividends &amp; Returns per Share (Ascending by Share Name)</p>
+            <p className="text-sm text-gray-500 mt-1">Generated on {new Date().toLocaleDateString()}</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {[
+              { label: 'Total Cost', value: fmt2(totCost), color: 'text-gray-900' },
+              { label: 'Total Market Value', value: fmt2(totMV), color: 'text-blue-700' },
+              { label: 'Total Dividends', value: fmt2(totDiv), color: 'text-green-700' },
+              { label: 'Total Returns', value: fmt2(totReturns), color: totReturns >= 0 ? 'text-green-700' : 'text-red-700' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <p className="text-xs text-gray-500 mb-1">{label}</p>
+                <p className={`text-lg font-bold ${color}`}>Rs. {value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-800 text-white">
+                <tr>
+                  <th className="px-4 py-3 text-left font-bold">#</th>
+                  <th className="px-4 py-3 text-left font-bold">Share Name</th>
+                  <th className="px-4 py-3 text-left font-bold">Ticker</th>
+                  <th className="px-4 py-3 text-right font-bold">Balance</th>
+                  <th className="px-4 py-3 text-right font-bold">Total Cost (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Market Value (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Dividends (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">Total Returns (Rs.)</th>
+                  <th className="px-4 py-3 text-right font-bold">AER %</th>
+                  <th className="px-4 py-3 text-right font-bold">MV % of Portfolio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {contributorsData.map((row, i) => (
+                  <tr key={row.ticker} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{i + 1}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-900">{row.share_name}</td>
+                    <td className="px-4 py-3 text-blue-700 font-bold">{row.ticker}</td>
+                    <td className="px-4 py-3 text-right text-gray-700">{row.balance.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right text-gray-900">{fmt2(row.total_cost)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-blue-700">{fmt2(row.market_value)}</td>
+                    <td className="px-4 py-3 text-right text-green-700">{row.dividends > 0 ? fmt2(row.dividends) : '-'}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${row.total_returns >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmt2(row.total_returns)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${row.aer >= 0 ? 'text-green-700' : 'text-red-600'}`}>{row.aer.toFixed(2)}%</td>
+                    <td className="px-4 py-3 text-right text-gray-700">{totMV > 0 ? ((row.market_value / totMV) * 100).toFixed(1) : '0.0'}%</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="border-t-2 border-gray-800 bg-gray-100">
+                <tr>
+                  <td colSpan={4} className="px-4 py-3 font-bold text-gray-900 text-right">Grand Total</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900">{fmt2(totCost)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-blue-700">{fmt2(totMV)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-green-700">{fmt2(totDiv)}</td>
+                  <td className={`px-4 py-3 text-right font-bold ${totReturns >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmt2(totReturns)}</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -2067,6 +2451,60 @@ export function Reports() {
               <div className="text-xs text-gray-500">Updated: Today</div>
               <button
                 onClick={generateScripReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
+                <Layers className="w-6 h-6 text-indigo-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Sector-wise Report</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Aggregated returns, dividends, and market value grouped by industry sector
+            </p>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">Updated: Today</div>
+              <button
+                onClick={generateSectorWiseReport}
+                disabled={loading}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 hover:shadow-lg transition-shadow">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="w-12 h-12 bg-rose-100 rounded-lg flex items-center justify-center">
+                <Users className="w-6 h-6 text-rose-600" />
+              </div>
+              <span className="text-xs font-semibold px-2 py-1 bg-gray-100 text-gray-700 rounded">
+                Real-time
+              </span>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Contributors by Share</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              All held shares sorted alphabetically by name with market value, dividends, returns and AER
+            </p>
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <div className="text-xs text-gray-500">Updated: Today</div>
+              <button
+                onClick={generateContributorsReport}
                 disabled={loading}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
