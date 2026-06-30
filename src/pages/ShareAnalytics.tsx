@@ -504,6 +504,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <div className="text-center">
                   <div className="text-xs text-gray-400">MV After Fees</div>
                   <div className="font-bold text-indigo-700">Rs. {fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">@ Rs. {fmt(group.market_price - group.market_price * (group.brokerage_fee_rate / 100))} / share</div>
                 </div>
               </>
             )}
