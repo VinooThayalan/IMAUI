@@ -1012,7 +1012,7 @@ export function ShareAnalytics() {
       market_value:       acc.market_value    + last.market_value,
       mv_after_fees:      acc.mv_after_fees   + mvAfterFees,
       cash_flow:          acc.cash_flow       + g.rows.reduce((s, r) => s + r.cash_flow, 0),
-      total_surplus:      acc.total_surplus   + last.total_surplus,
+      total_surplus:      acc.total_surplus   + (mvAfterFees + g.rows.reduce((s, r) => s + r.sale_value, 0) + g.rows.reduce((s, r) => s + r.dividend, 0) - g.rows.reduce((s, r) => s + r.purchase_cost, 0)),
     };
   }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
