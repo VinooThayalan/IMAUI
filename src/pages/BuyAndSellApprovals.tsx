@@ -78,6 +78,7 @@ interface EntityBroker {
 }
 
 type ModalAction = 'approve' | 'reject' | null;
+type EmailModalNote = BuyAndSellNote | null;
 
 export function BuyAndSellApprovals() {
   const { user } = useAuth();
@@ -98,6 +99,8 @@ export function BuyAndSellApprovals() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sendEmail, setSendEmail] = useState(true);
   const [ccEntityEmail, setCcEntityEmail] = useState(true);
+  const [emailModalNote, setEmailModalNote] = useState<EmailModalNote>(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -546,7 +549,14 @@ const displayNotes = notes.filter(n => {
                           <button onClick={() => openModal(note, 'reject')} className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
-{note.file_url && (
+                          <button
+                            onClick={() => setEmailModalNote(note)}
+                            className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Email broker"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
+                          {note.file_url && (
                             <button
                               onClick={() => handleViewFile(note)}
                               disabled={viewingFileId === note.id}
@@ -561,6 +571,13 @@ const displayNotes = notes.filter(n => {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setEmailModalNote(note)}
+                            className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Email broker"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
                           {note.file_url && (
                             <button
                               onClick={() => handleViewFile(note)}
@@ -740,6 +757,168 @@ const displayNotes = notes.filter(n => {
           </div>
         </div>
       )}
+
+      {/* Email Comparison Modal */}
+      {emailModalNote && (() => {
+        const note = emailModalNote;
+        const { entity, share, broker } = getDetails(note);
+        const txn = transactions.find(t => t.id === note.transaction_id) ?? null;
+
+        const fmt = (n?: number | null) =>
+          n != null ? `Rs. ${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+        const fmtNum = (n?: number | null) =>
+          n != null ? Number(n).toLocaleString() : '—';
+        const fmtDate = (d?: string | null) =>
+          d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+        const rows: Array<{ label: string; txnVal: string; noteVal: string; mismatch?: boolean }> = [
+          {
+            label: 'Shares',
+            txnVal: fmtNum(txn?.no_of_shares),
+            noteVal: fmtNum(note.no_of_shares),
+            mismatch: txn != null && note.no_of_shares != null && Number(txn.no_of_shares) !== Number(note.no_of_shares),
+          },
+          {
+            label: 'Price / Share',
+            txnVal: txn?.price_per_share != null ? `Rs. ${Number(txn.price_per_share).toFixed(4)}` : '—',
+            noteVal: note.price_avg != null ? `Rs. ${Number(note.price_avg).toFixed(4)}` : '—',
+            mismatch: txn != null && note.price_avg != null && Math.abs(Number(txn.price_per_share) - Number(note.price_avg)) > 0.01,
+          },
+          {
+            label: 'Gross Amount',
+            txnVal: fmt(txn?.total_amount),
+            noteVal: fmt(note.gross_amount),
+            mismatch: txn != null && note.gross_amount != null && Math.abs(Number(txn.total_amount) - Number(note.gross_amount)) > 1,
+          },
+          { label: 'Brokerage', txnVal: '—', noteVal: fmt(note.brokerage) },
+          { label: 'SEC', txnVal: '—', noteVal: fmt(note.sec) },
+          { label: 'Exchange', txnVal: '—', noteVal: fmt(note.exchange) },
+          { label: 'CDS Fees', txnVal: '—', noteVal: fmt(note.cds) },
+          { label: 'Gov. Levy', txnVal: '—', noteVal: fmt(note.gov_cess) },
+          { label: 'Clearing Fees', txnVal: '—', noteVal: fmt(note.clearing_fees) },
+          { label: 'Net Amount', txnVal: fmt(txn?.total_amount), noteVal: fmt(note.net_amount) },
+        ];
+
+        async function handleSendEmailFromModal() {
+          if (!broker?.contact_person_email) {
+            alert('No broker email configured for this note.');
+            return;
+          }
+          setIsSendingEmail(true);
+          try {
+            await sendBrokerNotification(note, 'APPROVED', '', entity, share, broker, false, txn);
+            alert(`Email sent to ${broker.contact_person_email}`);
+            setEmailModalNote(null);
+          } catch (err: any) {
+            alert(`Failed to send email: ${err?.message || 'Unknown error'}`);
+          } finally {
+            setIsSendingEmail(false);
+          }
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center">
+                    <Mail className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-gray-900">Email Broker</h2>
+                    <p className="text-xs text-gray-500">{note.contract_no || note.note_number} · {share?.ticker || '—'} · {entity?.name || '—'}</p>
+                  </div>
+                </div>
+                <button onClick={() => setEmailModalNote(null)} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+                {/* Broker info */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-2">Recipient</p>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <p className="text-sm font-bold text-gray-900">{broker?.broker_name || note.broker || '—'}</p>
+                      {broker?.contact_person_name && (
+                        <p className="text-xs text-gray-600 mt-0.5">{broker.contact_person_name}{broker.contact_person_designation ? ` · ${broker.contact_person_designation}` : ''}</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      {broker?.contact_person_email ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-300 rounded-lg text-sm font-medium text-blue-700">
+                          <Mail className="w-3.5 h-3.5" />
+                          {broker.contact_person_email}
+                        </span>
+                      ) : (
+                        <span className="text-sm text-red-500 font-medium">No email configured</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Comparison table */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Transaction vs Note Comparison</p>
+                  <div className="rounded-xl border border-gray-200 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Field</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Transaction</th>
+                          <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Note / Upload</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {rows.map(r => (
+                          <tr key={r.label} className={r.mismatch ? 'bg-orange-50' : ''}>
+                            <td className="px-4 py-2.5 text-gray-700 font-medium">
+                              {r.label}
+                              {r.mismatch && <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-orange-600 font-semibold"><AlertTriangle className="w-3 h-3" /> Mismatch</span>}
+                            </td>
+                            <td className={`px-4 py-2.5 text-right font-mono tabular-nums ${r.mismatch ? 'text-orange-700 font-semibold' : 'text-gray-600'}`}>{r.txnVal}</td>
+                            <td className={`px-4 py-2.5 text-right font-mono tabular-nums ${r.mismatch ? 'text-orange-700 font-semibold' : 'text-gray-800 font-semibold'}`}>{r.noteVal}</td>
+                          </tr>
+                        ))}
+                        <tr className="bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-700 font-medium">Trade Date</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-gray-600">{fmtDate(txn?.transaction_date)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-gray-800 font-semibold">{fmtDate(note.trade_date)}</td>
+                        </tr>
+                        <tr className="bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-700 font-medium">Settlement Date</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-gray-600">—</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-gray-800 font-semibold">{fmtDate(note.settlement_date)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  {note.remarks && (
+                    <p className="mt-2 text-xs text-gray-500"><span className="font-semibold">Remarks:</span> {note.remarks}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">
+                <button onClick={() => setEmailModalNote(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendEmailFromModal}
+                  disabled={isSendingEmail || !broker?.contact_person_email}
+                  className="inline-flex items-center gap-2 px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  <Mail className="w-4 h-4" />
+                  {isSendingEmail ? 'Sending...' : 'Send to Broker'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Reject Modal */}
       {modalAction === 'reject' && selectedNote && (

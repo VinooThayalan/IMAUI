@@ -7,12 +7,15 @@ import { Building2 } from 'lucide-react';
 
 const SECTOR_COLORS: Record<string, string> = {
   'Banking': '#3B82F6',
+  'Finance': '#10B981',
   'Diversified Financials': '#10B981',
+  'Conglomerate': '#F59E0B',
   'Hotels': '#F59E0B',
   'Industries': '#EC4899',
   'Construction Materials': '#8B5CF6',
   'Constructions Materials': '#8B5CF6',
   'Automobile Components': '#EF4444',
+  'Telecommunications': '#06B6D4',
   'Telecommunication': '#06B6D4',
   'Manufacturing': '#F97316',
   'Technology': '#6366F1',
