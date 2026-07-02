@@ -217,7 +217,16 @@ export function CashBalance() {
     }
   }
 
+  // Per-entity total on-hold: only Buy notes pending approval commit cash outflow
+  const entityPendingHold = new Map<string, number>();
+  for (const note of pendingNotes) {
+    if (note.note_type === 'Buy') {
+      entityPendingHold.set(note.entity_id, (entityPendingHold.get(note.entity_id) ?? 0) + (note.net_amount ?? 0));
+    }
+  }
+
   const totalBalance = entities.reduce((sum, entity) => sum + entity.current_balance, 0);
+  const totalOnHold = Array.from(entityPendingHold.values()).reduce((s, v) => s + v, 0);
   const filteredTransactions = (() => {
     let filtered = transactions;
 
@@ -330,7 +339,7 @@ export function CashBalance() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -338,7 +347,7 @@ export function CashBalance() {
               <p className="text-2xl font-bold text-gray-900 mt-2">
                 Rs. {totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
-              <p className="text-sm text-gray-500 mt-2">Across all entities</p>
+              <p className="text-sm text-gray-500 mt-2">Settled across all entities</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <Wallet className="w-6 h-6 text-blue-600" />
@@ -346,12 +355,29 @@ export function CashBalance() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="bg-white rounded-xl border border-amber-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-500">Total Entities</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{entities.length}</p>
-              <p className="text-sm text-gray-500 mt-2">Active entities</p>
+              <p className="text-sm font-medium text-amber-600">Total On Hold</p>
+              <p className="text-2xl font-bold text-amber-700 mt-2">
+                Rs. {totalOnHold.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+              <p className="text-sm text-gray-500 mt-2">{pendingNotes.filter(n => n.note_type === 'Buy').length} pending buy note{pendingNotes.filter(n => n.note_type === 'Buy').length !== 1 ? 's' : ''}</p>
+            </div>
+            <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+              <TrendingDown className="w-6 h-6 text-amber-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-green-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-green-600">Net Available</p>
+              <p className={`text-2xl font-bold mt-2 ${(totalBalance - totalOnHold) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                Rs. {(totalBalance - totalOnHold).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+              <p className="text-sm text-gray-500 mt-2">Balance minus on-hold amounts</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
               <Building2 className="w-6 h-6 text-green-600" />
@@ -379,13 +405,15 @@ export function CashBalance() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Current Balance</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">OD Limit</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">On Hold</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Available Credit</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {entities.map((entity) => {
-                const availableCredit = entity.current_balance + entity.od_limit;
+                const onHold = entityPendingHold.get(entity.id) ?? 0;
+                const availableCredit = entity.current_balance + entity.od_limit - onHold;
                 return (
                   <tr
                     key={entity.id}
@@ -414,7 +442,16 @@ export function CashBalance() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-semibold text-green-600">
+                      {onHold > 0 ? (
+                        <div className="text-sm font-semibold text-amber-600">
+                          Rs. {onHold.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-400">—</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className={`text-sm font-semibold ${availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         Rs. {availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
@@ -542,7 +579,8 @@ export function CashBalance() {
                   : 0;
 
                 const onHoldAmount = transaction.on_hold_amount || 0;
-                const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount;
+                const entityHold = entity ? (entityPendingHold.get(entity.id) ?? 0) : 0;
+                const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount - entityHold;
                 const isOnHold = onHoldAmount > 0;
 
                 return (
@@ -615,9 +653,9 @@ export function CashBalance() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {onHoldAmount > 0 ? (
+                      {(onHoldAmount > 0 || entityHold > 0) ? (
                         <div className="text-sm font-semibold text-amber-600">
-                          Rs. {onHoldAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          Rs. {(onHoldAmount + entityHold).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </div>
                       ) : (
                         <div className="text-sm text-gray-400">—</div>
