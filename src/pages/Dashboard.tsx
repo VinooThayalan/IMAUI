@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { PieChart } from '../components/PieChart';
+import { Building2 } from 'lucide-react';
 
 // ── Color palettes ────────────────────────────────────────────────────────────
 
@@ -77,6 +78,8 @@ function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): nu
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface Entity { id: string; name: string; }
 
 interface ShareRow {
   id: string;
@@ -248,34 +251,47 @@ function PriceCostBarChart({ title, bars }: { title: string; bars: { label: stri
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export function Dashboard() {
-  const [loading, setLoading] = useState(true);
-  const [shares, setShares]   = useState<ShareRow[]>([]);
-  const [metrics, setMetrics] = useState<ShareMetrics[]>([]);
+  const [loading, setLoading]           = useState(true);
+  const [shares, setShares]             = useState<ShareRow[]>([]);
+  const [metrics, setMetrics]           = useState<ShareMetrics[]>([]);
+  const [entities, setEntities]         = useState<Entity[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState('');
+
+  useEffect(() => {
+    supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      let txnsQ = supabase.from('transactions')
+        .select('id, share_id, entity_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
+        .in('approval_status', ['MANUAL_APPROVED'])
+        .order('transaction_date', { ascending: true });
+      if (selectedEntityId) txnsQ = txnsQ.eq('entity_id', selectedEntityId);
+
+      let dividendsQ = supabase.from('dividends').select('share_id, entity_id, amount_net, payment_date');
+      if (selectedEntityId) dividendsQ = dividendsQ.eq('entity_id', selectedEntityId);
+
+      let openingQ = supabase.from('entity_share_opening_balances')
+        .select('share_id, entity_id, opening_shares, average_purchase_cost, effective_date');
+      if (selectedEntityId) openingQ = openingQ.eq('entity_id', selectedEntityId);
+
       const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, openingRes] = await Promise.all([
         supabase.from('shares')
           .select('id, ticker, share_name, sector, sector_types(sector_name)')
           .eq('is_active', true)
           .order('share_name'),
-        // Must include `id` so buy_sell_notes can be matched; filter to approved transactions only
-        supabase.from('transactions')
-          .select('id, share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
-          .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true }),
+        txnsQ,
         supabase.from('daily_share_prices')
           .select('share_id, share_price, effective_date')
           .order('effective_date', { ascending: false }),
-        supabase.from('dividends').select('share_id, amount_net, payment_date'),
+        dividendsQ,
         // Notes override transaction amounts with more accurate settled figures
         supabase.from('buy_sell_notes')
           .select('transaction_id, no_of_shares, gross_amount, note_type, trade_date')
           .not('transaction_id', 'is', null),
-        // Opening balances are part of the portfolio (pre-system holdings)
-        supabase.from('entity_share_opening_balances')
-          .select('share_id, opening_shares, average_purchase_cost, effective_date'),
+        openingQ,
       ]);
 
       const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
@@ -422,14 +438,47 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedEntityId]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div className="p-6 space-y-8">
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 text-slate-600">
+            <Building2 className="w-4 h-4 flex-shrink-0" />
+            <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Entity</span>
+          </div>
+          <div className="flex flex-wrap gap-2 flex-1">
+            <button
+              onClick={() => setSelectedEntityId('')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+                !selectedEntityId
+                  ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:text-slate-800'
+              }`}
+            >
+              All Entities
+            </button>
+            {entities.map(e => (
+              <button
+                key={e.id}
+                onClick={() => setSelectedEntityId(prev => prev === e.id ? '' : e.id)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+                  selectedEntityId === e.id
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+                }`}
+              >
+                {e.name}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+        </div>
       </div>
     );
   }
@@ -480,8 +529,53 @@ export function Dashboard() {
     ...shares.filter(s => !heldIds.has(s.id)),
   ];
 
+  const selectedEntityName = selectedEntityId
+    ? (entities.find(e => e.id === selectedEntityId)?.name ?? '')
+    : '';
+
   return (
     <div className="p-6 space-y-8">
+
+      {/* ── Entity Filter Bar ──────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 text-slate-600">
+          <Building2 className="w-4 h-4 flex-shrink-0" />
+          <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Entity</span>
+        </div>
+        <div className="flex flex-wrap gap-2 flex-1">
+          <button
+            onClick={() => setSelectedEntityId('')}
+            className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+              !selectedEntityId
+                ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:text-slate-800'
+            }`}
+          >
+            All Entities
+          </button>
+          {entities.map(e => (
+            <button
+              key={e.id}
+              onClick={() => setSelectedEntityId(prev => prev === e.id ? '' : e.id)}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors border ${
+                selectedEntityId === e.id
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-700'
+              }`}
+            >
+              {e.name}
+            </button>
+          ))}
+        </div>
+        {selectedEntityId && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold border border-blue-200">
+              <Building2 className="w-3 h-3" />
+              {selectedEntityName}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* ── Section 1: Share Portfolio Table + KPI cards ───────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
