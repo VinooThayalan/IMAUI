@@ -583,7 +583,9 @@ export function Dashboard() {
         {/* Share portfolio table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-700">
-            <h2 className="text-base font-bold text-white">Metrocorp Share Portfolio</h2>
+            <h2 className="text-base font-bold text-white">
+              {selectedEntityName ? `${selectedEntityName} — Share Portfolio` : 'Share Portfolio'}
+            </h2>
             <p className="text-xs text-slate-400 mt-0.5">{portfolioShares.length} listed securities</p>
           </div>
           <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
@@ -643,27 +645,76 @@ export function Dashboard() {
         <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50">
           <h2 className="text-lg font-bold text-gray-900">Portfolio by Sector</h2>
           <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectorMap.size} sectors</p>
+          {/* Sector color legend */}
+          {sectorMap.size > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {Array.from(sectorMap.keys()).map(s => (
+                <span key={s} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: sectorColor(s) }}>
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="bg-gradient-to-br from-rose-50 to-orange-50 rounded-xl p-5 border border-rose-100">
-            <p className="text-xs font-bold text-rose-600 mb-4 text-center uppercase tracking-wide">Total Returns by Sector</p>
+          <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #fff1f2 0%, #fff7ed 100%)', borderColor: '#fecdd3' }}>
+            <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#e11d48' }}>Total Returns by Sector</p>
             <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
-          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-xl p-5 border border-emerald-100">
-            <p className="text-xs font-bold text-emerald-600 mb-4 text-center uppercase tracking-wide">Total Dividends by Sector</p>
+          <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdfa 100%)', borderColor: '#a7f3d0' }}>
+            <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#059669' }}>Total Dividends by Sector</p>
             <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
-          <div className="bg-gradient-to-br from-blue-50 to-sky-50 rounded-xl p-5 border border-blue-100">
-            <p className="text-xs font-bold text-blue-600 mb-4 text-center uppercase tracking-wide">Market Value by Sector</p>
+          <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: '#bfdbfe' }}>
+            <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#2563eb' }}>Market Value by Sector</p>
             <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
           </div>
         </div>
+        {/* Sector breakdown table with color bands */}
+        {sectorMap.size > 0 && (
+          <div className="px-6 pb-6">
+            <div className="rounded-xl overflow-hidden border border-gray-100">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Sector</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Market Value</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Returns</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Dividends</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from(sectorMap.entries())
+                    .sort((a, b) => b[1].marketValue - a[1].marketValue)
+                    .map(([sector, vals]) => {
+                      const sc = sectorColor(sector);
+                      return (
+                        <tr key={sector} className="border-b border-gray-50 hover:bg-gray-50/60" style={{ borderLeftColor: sc, borderLeftWidth: 4 }}>
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: sc }} />
+                              <span className="font-semibold text-gray-800">{sector}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-blue-700 font-semibold">{fmtCur(vals.marketValue)}</td>
+                          <td className={`px-4 py-2.5 text-right font-mono font-semibold ${vals.returns >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtCur(vals.returns)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-amber-600 font-semibold">{fmtCur(vals.dividends)}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Section 3: Metrocorp's Main Contributors – pie charts ─────────── */}
+      {/* ── Section 3: Main Contributors – pie charts ─────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-800 to-blue-700">
-          <h2 className="text-xl font-extrabold text-white tracking-tight">Metrocorp's Main Contributors</h2>
+          <h2 className="text-xl font-extrabold text-white tracking-tight">
+            {selectedEntityName ? `${selectedEntityName} — Main Contributors` : "Main Contributors"}
+          </h2>
           <p className="text-xs text-sky-200 mt-0.5">Top 5 shares by net market value</p>
           {top5.length > 0 && (
             <div className="flex flex-wrap gap-3 mt-3">
@@ -696,10 +747,12 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* ── Section 4: Metrocorp's Main Contributors – bar charts ─────────── */}
+      {/* ── Section 4: Main Contributors – bar charts ─────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-sky-800 to-blue-700">
-          <h2 className="text-xl font-extrabold text-white tracking-tight">Metrocorp's Main Contributors — Detail</h2>
+          <h2 className="text-xl font-extrabold text-white tracking-tight">
+            {selectedEntityName ? `${selectedEntityName} — Detail` : "Main Contributors — Detail"}
+          </h2>
           <p className="text-xs text-sky-200 mt-0.5">Detailed metrics for top 5 contributors</p>
         </div>
         <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -755,7 +808,7 @@ export function Dashboard() {
       <Section5TotalReturnsBySector metrics={metrics} />
 
       {/* ── Section 6: Share Name Cards ───────────────────────────────────── */}
-      <Section6ShareCards metrics={metrics} />
+      <Section6ShareCards metrics={metrics} entityName={selectedEntityName} />
 
     </div>
   );
@@ -840,7 +893,7 @@ function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) 
 
 // ── Section 6 component ───────────────────────────────────────────────────────
 
-function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
+function Section6ShareCards({ metrics, entityName }: { metrics: ShareMetrics[]; entityName: string }) {
   const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
 
   // Shares ordered descending by total market value
@@ -856,7 +909,9 @@ function Section6ShareCards({ metrics }: { metrics: ShareMetrics[] }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-800 to-slate-700">
-        <h2 className="text-xl font-extrabold text-white tracking-tight">Share Portfolio Details</h2>
+        <h2 className="text-xl font-extrabold text-white tracking-tight">
+          {entityName ? `${entityName} — Portfolio Details` : 'Share Portfolio Details'}
+        </h2>
         <p className="text-xs text-slate-400 mt-0.5">Ordered by market value (highest first). Select a share to see details.</p>
       </div>
 

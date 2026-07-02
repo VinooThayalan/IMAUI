@@ -870,7 +870,7 @@ export function ShareAnalytics() {
       const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
-        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
+        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
@@ -927,6 +927,9 @@ export function ShareAnalytics() {
         .order('trade_date', { ascending: true });
       if (notesError) throw notesError;
 
+      // Track which transaction IDs have a linked note
+      const notedTxnIds = new Set<string>((notesData || []).map((n: any) => n.transaction_id).filter(Boolean));
+
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
         .map((n: any) => {
@@ -944,14 +947,40 @@ export function ShareAnalytics() {
         })
         .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
 
+      // Synthesize RawNote entries for approved transactions that have NO linked buy_sell_note
+      const txnFallbackNotes: RawNote[] = [];
+      for (const [txnId, txn] of txnMap) {
+        if (notedTxnIds.has(txnId)) continue;
+        if (selectedEntityId && txn.entity_id !== selectedEntityId) continue;
+        const txnData = (txnsRes.data || []).find((t: any) => t.id === txnId);
+        if (!txnData) continue;
+        const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
+        txnFallbackNotes.push({
+          id: txnId,
+          note_type: txnData.transaction_type === 'BUY' ? 'Buy' : 'Sell',
+          trade_date: txnData.transaction_date ?? null,
+          no_of_shares: Number(txnData.no_of_shares) || 0,
+          price_avg: txnData.price_per_share != null ? Number(txnData.price_per_share) : null,
+          gross_amount: Number(txnData.total_amount) || 0,
+          entity_id: txn.entity_id,
+          entity_name: entityMap.get(txn.entity_id) ?? '—',
+          share_id: txn.share_id,
+          share_ticker: share.ticker,
+          share_name: share.name,
+          cds_account: txn.cds_account_id ?? null,
+        });
+      }
+
+      const allRaw = [...raw, ...txnFallbackNotes];
+
       const groupKeys = new Set<string>();
-      for (const n of raw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
+      for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
       for (const [k] of openingMap) {
         if (!selectedEntityId || k.startsWith(selectedEntityId)) groupKeys.add(k);
       }
 
       const notesByGroup = new Map<string, RawNote[]>();
-      for (const n of raw) {
+      for (const n of allRaw) {
         const k = `${n.entity_id}__${n.share_id}`;
         if (!notesByGroup.has(k)) notesByGroup.set(k, []);
         notesByGroup.get(k)!.push(n);

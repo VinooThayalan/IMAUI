@@ -135,6 +135,17 @@ export function CashBalance() {
         ? lastBalance + amount
         : lastBalance - amount;
 
+      // Check the deduction does not exceed available credit (balance + facility limit)
+      if (transactionType === 'Deduction') {
+        const selectedBankObj = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
+        const facilityLimit = Number(selectedBankObj?.facility_limit ?? entity.od_limit ?? 0);
+        const maxDeductible = lastBalance + facilityLimit;
+        if (amount > maxDeductible) {
+          alert(`Amount exceeds available credit. Maximum deductible: Rs. ${maxDeductible.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from('cash_balance_ledger')
         .insert({
@@ -419,8 +430,10 @@ export function CashBalance() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Opening Balance</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">On Hold</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Current]</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Available]</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Created By</th>
               </tr>
             </thead>
@@ -429,16 +442,18 @@ export function CashBalance() {
                 const entity = entities.find(e => e.id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id || null);
 
-                const sortedTransactions = [...filteredTransactions].sort((a, b) =>
-                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                );
-                const currentIndex = sortedTransactions.findIndex(t => t.id === transaction.id);
+                // Opening balance: previous entry for the SAME entity, sorted by time
+                const entitySortedTxns = [...transactions]
+                  .filter(t => t.entity_id === transaction.entity_id)
+                  .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                const currentIndex = entitySortedTxns.findIndex(t => t.id === transaction.id);
                 const openingBalance = currentIndex > 0
-                  ? sortedTransactions[currentIndex - 1].running_balance
+                  ? entitySortedTxns[currentIndex - 1].running_balance
                   : 0;
 
                 const onHoldAmount = transaction.on_hold_amount || 0;
                 const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount;
+                const isOnHold = onHoldAmount > 0;
 
                 return (
                   <tr key={transaction.id} className="hover:bg-gray-50">
@@ -510,6 +525,15 @@ export function CashBalance() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
+                      {onHoldAmount > 0 ? (
+                        <div className="text-sm font-semibold text-amber-600">
+                          Rs. {onHoldAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-400">—</div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
                         Rs. {transaction.running_balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
@@ -518,6 +542,16 @@ export function CashBalance() {
                       <div className={`text-sm font-bold ${availableBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         Rs. {availableBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        isOnHold
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-green-100 text-green-800'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isOnHold ? 'bg-amber-500' : 'bg-green-500'}`} />
+                        {isOnHold ? 'Pending' : 'Approved'}
+                      </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{transaction.created_by}</div>
