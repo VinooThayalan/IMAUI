@@ -54,25 +54,27 @@ interface ApprovalNotificationData {
   txn_total_amount?: string;
 }
 
-async function sendViaResend(to: string, cc: string[] | undefined, subject: string, html: string): Promise<boolean> {
-  const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-  if (!RESEND_API_KEY) {
-    console.log("RESEND_API_KEY not set — email not sent (logged only)");
+async function sendViaBrevo(to: string, cc: string[] | undefined, subject: string, html: string): Promise<boolean> {
+  const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
+  if (!BREVO_API_KEY) {
+    console.log("BREVO_API_KEY not set — email not sent (logged only)");
     return false;
   }
 
   const payload: Record<string, unknown> = {
-    from: "Portfolio Manager <noreply@resend.dev>",
-    to: [to],
+    sender: { name: "Portfolio Manager", email: "noreply@imametrocorp.com" },
+    to: [{ email: to }],
     subject,
-    html,
+    htmlContent: html,
   };
-  if (cc && cc.length > 0) payload.cc = cc;
+  if (cc && cc.length > 0) {
+    payload.cc = cc.map(email => ({ email }));
+  }
 
-  const res = await fetch("https://api.resend.com/emails", {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "api-key": BREVO_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
@@ -80,7 +82,7 @@ async function sendViaResend(to: string, cc: string[] | undefined, subject: stri
 
   if (!res.ok) {
     const err = await res.text();
-    console.error("Resend error:", err);
+    console.error("Brevo error:", err);
     return false;
   }
   return true;
@@ -327,7 +329,7 @@ Deno.serve(async (req: Request) => {
       const subject = `Contract Note ${actionLabel}: ${notification.contract_no} — ${notification.note_type} ${notification.ticker}`;
       const html = buildApprovalHtml(notification);
 
-      const sent = await sendViaResend(to, cc, subject, html);
+      const sent = await sendViaBrevo(to, cc, subject, html);
 
       console.log(`Approval notification (${notification.action}) for ${notification.contract_no} → ${to}`);
 
@@ -349,7 +351,7 @@ Deno.serve(async (req: Request) => {
 
     const subject = `Transaction Details — ${transaction.transaction_type} ${transaction.ticker}`;
     const html = buildTransactionHtml(transaction);
-    const sent = await sendViaResend(to, cc, subject, html);
+    const sent = await sendViaBrevo(to, cc, subject, html);
 
     console.log(`Transaction email to: ${to}${cc?.length ? ` CC: ${cc.join(", ")}` : ""}`);
 
