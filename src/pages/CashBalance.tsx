@@ -25,6 +25,17 @@ interface Bank {
 
 type FilterView = 'all' | 'entity' | 'entity-bank';
 
+interface PendingNote {
+  id: string;
+  note_type: 'Buy' | 'Sell';
+  contract_no?: string;
+  note_number?: string;
+  net_amount?: number;
+  trade_date?: string;
+  entity_id: string;
+  status: string;
+}
+
 export function CashBalance() {
   const { appUser, user } = useAuth();
   const [showModal, setShowModal] = useState(false);
@@ -36,6 +47,7 @@ export function CashBalance() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
+  const [pendingNotes, setPendingNotes] = useState<PendingNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
     entityId: '',
@@ -81,6 +93,11 @@ export function CashBalance() {
 
       if (transactionsError) throw transactionsError;
 
+      const { data: pendingNotesData } = await supabase
+        .from('buy_sell_notes')
+        .select('id, note_type, contract_no, note_number, net_amount, trade_date, status, transaction_id, transactions!inner(entity_id)')
+        .eq('status', 'PENDING_APPROVAL');
+
       const parsedEntities = (entitiesData || []).map(entity => ({
         ...entity,
         current_balance: Number(entity.current_balance) || 0,
@@ -98,9 +115,21 @@ export function CashBalance() {
         running_balance: Number(txn.running_balance) || 0
       }));
 
+      const parsedPending: PendingNote[] = (pendingNotesData || []).map((n: any) => ({
+        id: n.id,
+        note_type: n.note_type,
+        contract_no: n.contract_no,
+        note_number: n.note_number,
+        net_amount: n.net_amount != null ? Number(n.net_amount) : undefined,
+        trade_date: n.trade_date,
+        entity_id: n.transactions?.entity_id ?? '',
+        status: n.status,
+      })).filter((n: PendingNote) => n.entity_id);
+
       setEntities(parsedEntities);
       setBanks(parsedBanks);
       setTransactions(parsedTransactions);
+      setPendingNotes(parsedPending);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -202,6 +231,12 @@ export function CashBalance() {
 
     return filtered;
   })();
+
+  const filteredPendingNotes = pendingNotes.filter(n => {
+    if (selectedEntity && n.entity_id !== selectedEntity.id) return false;
+    if (selectedBank) return false; // pending notes have no bank
+    return true;
+  });
 
   function handleEntityClick(entity: Entity) {
     setSelectedEntity(entity);
@@ -411,7 +446,12 @@ export function CashBalance() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-900">Transaction Ledger</h2>
             <div className="text-sm text-gray-500">
-              {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
+              {filteredTransactions.length + filteredPendingNotes.length} transaction{(filteredTransactions.length + filteredPendingNotes.length) !== 1 ? 's' : ''}
+              {filteredPendingNotes.length > 0 && (
+                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                  {filteredPendingNotes.length} pending
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -438,6 +478,56 @@ export function CashBalance() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
+              {filteredPendingNotes.map((note) => {
+                const entity = entities.find(e => e.id === note.entity_id);
+                const amount = note.net_amount ?? 0;
+                const noteType = note.note_type === 'Buy' ? 'Deduction' : 'Addition';
+                const code = note.contract_no || note.note_number || '-';
+                return (
+                  <tr key={`pending-${note.id}`} className="bg-amber-50 hover:bg-amber-100/60">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {note.trade_date ? new Date(note.trade_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-bold text-blue-600">{entity?.entity_id || '-'}</div>
+                      <div className="text-xs text-gray-500">{entity?.name || 'N/A'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${noteType === 'Addition' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        {noteType === 'Addition' ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
+                        {noteType}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{code}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{note.note_type} Note — Awaiting Approval</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className={`text-sm font-semibold ${noteType === 'Addition' ? 'text-green-600' : 'text-red-600'}`}>
+                        {noteType === 'Addition' ? '+' : '-'}Rs. {amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-semibold text-amber-600">
+                        Rs. {amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        Pending
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">—</td>
+                  </tr>
+                );
+              })}
               {filteredTransactions.map((transaction) => {
                 const entity = entities.find(e => e.id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id || null);
@@ -563,7 +653,7 @@ export function CashBalance() {
           </table>
         </div>
 
-        {filteredTransactions.length === 0 && (
+        {filteredTransactions.length === 0 && filteredPendingNotes.length === 0 && (
           <div className="p-12 text-center">
             <BookOpen className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No transactions found</p>
