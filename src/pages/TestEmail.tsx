@@ -51,7 +51,7 @@ export function TestEmail() {
         setMessage(`Test email sent successfully to ${email.trim()}`);
       } else {
         setStatus('error');
-        setMessage('Email function responded but the email was not sent. Check that the RESEND_API_KEY is valid.');
+        setMessage('Email function responded but the email was not sent. Check that the BREVO_API_KEY secret is set correctly in Supabase.');
       }
     } catch (err: unknown) {
       setStatus('error');
