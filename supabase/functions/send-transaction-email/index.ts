@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import nodemailer from "npm:nodemailer@6.9.13";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,44 +49,41 @@ interface ApprovalNotificationData {
   approval_notes?: string;
   reviewed_by: string;
   reviewed_at: string;
-  // System transaction values (for rejection comparison)
   txn_no_of_shares?: string;
   txn_price_per_share?: string;
   txn_total_amount?: string;
 }
 
-async function sendViaBrevo(to: string, cc: string[] | undefined, subject: string, html: string): Promise<boolean> {
+function createTransport() {
   const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
-  if (!BREVO_API_KEY) {
-    console.log("BREVO_API_KEY not set — email not sent (logged only)");
-    return false;
-  }
+  if (!BREVO_API_KEY) throw new Error("BREVO_API_KEY not set");
 
-  const payload: Record<string, unknown> = {
-    sender: { name: "Portfolio Manager", email: "noreply@imametrocorp.com" },
-    to: [{ email: to }],
-    subject,
-    htmlContent: html,
-  };
-  if (cc && cc.length > 0) {
-    payload.cc = cc.map(email => ({ email }));
-  }
-
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "api-key": BREVO_API_KEY,
-      "Content-Type": "application/json",
+  return nodemailer.createTransport({
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false,
+    auth: {
+      user: "af3070001@smtp-brevo.com",
+      pass: BREVO_API_KEY,
     },
-    body: JSON.stringify(payload),
   });
+}
 
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("Brevo error:", err);
+async function sendEmail(to: string, cc: string[] | undefined, subject: string, html: string): Promise<boolean> {
+  try {
+    const transporter = createTransport();
+    await transporter.sendMail({
+      from: '"Portfolio Manager" <noreply@imametrocorp.com>',
+      to,
+      cc: cc && cc.length > 0 ? cc.join(", ") : undefined,
+      subject,
+      html,
+    });
+    return true;
+  } catch (err) {
+    console.error("SMTP error:", err);
     return false;
   }
-  return true;
 }
 
 function buildApprovalHtml(data: ApprovalNotificationData): string {
@@ -329,7 +327,7 @@ Deno.serve(async (req: Request) => {
       const subject = `Contract Note ${actionLabel}: ${notification.contract_no} — ${notification.note_type} ${notification.ticker}`;
       const html = buildApprovalHtml(notification);
 
-      const sent = await sendViaBrevo(to, cc, subject, html);
+      const sent = await sendEmail(to, cc, subject, html);
 
       console.log(`Approval notification (${notification.action}) for ${notification.contract_no} → ${to}`);
 
@@ -351,7 +349,7 @@ Deno.serve(async (req: Request) => {
 
     const subject = `Transaction Details — ${transaction.transaction_type} ${transaction.ticker}`;
     const html = buildTransactionHtml(transaction);
-    const sent = await sendViaBrevo(to, cc, subject, html);
+    const sent = await sendEmail(to, cc, subject, html);
 
     console.log(`Transaction email to: ${to}${cc?.length ? ` CC: ${cc.join(", ")}` : ""}`);
 
