@@ -76,8 +76,8 @@ pipeline {
             if [ -w /var/www ] 2>/dev/null; then
               mkdir -p "${DEPLOY_DIR}"
             else
-              sudo mkdir -p "${DEPLOY_DIR}"
-              sudo chown -R "$(whoami)":"$(id -gn)" "${DEPLOY_DIR}"
+              sudo -n mkdir -p "${DEPLOY_DIR}"
+              sudo -n chown -R "$(whoami)":"$(id -gn)" "${DEPLOY_DIR}"
             fi
             cp docker-compose.yml "${DEPLOY_DIR}/docker-compose.yml"
             cat > "${DEPLOY_DIR}/.env" <<EOF
