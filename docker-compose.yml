@@ -1,0 +1,17 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+    image: imaui:latest
+    container_name: imaui-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
