@@ -3,7 +3,6 @@ pipeline {
 
   environment {
     IMAGE_NAME = 'imaui'
-    REGISTRY = 'localhost/imaui'
     DEPLOY_DIR = '/var/www/imaui'
   }
 
@@ -52,12 +51,13 @@ pipeline {
             docker buildx use imaui-builder
             docker buildx build \
               --pull \
+              --load \
               --cache-from=type=local,src=/tmp/.buildx-cache \
               --cache-to=type=local,dest=/tmp/.buildx-cache-new,mode=max \
               --build-arg VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-}" \
               --build-arg VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}" \
-              -t ${REGISTRY}:${IMAGE_TAG} \
-              -t ${REGISTRY}:latest \
+              -t ${IMAGE_NAME}:${IMAGE_TAG} \
+              -t ${IMAGE_NAME}:latest \
               .
           '''
         }
@@ -73,12 +73,10 @@ pipeline {
           sh '''
             set -euo pipefail
             IMAGE_TAG="${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
-            if [ -w /var/www ] 2>/dev/null; then
-              mkdir -p "${DEPLOY_DIR}"
-            else
-              sudo -n mkdir -p "${DEPLOY_DIR}"
-              sudo -n chown -R "$(whoami)":"$(id -gn)" "${DEPLOY_DIR}"
-            fi
+            # DEPLOY_DIR must be owned/writable by the jenkins user.
+            # One-time host setup: sudo chown -R jenkins:jenkins /var/www/imaui
+            # mkdir -p is a no-op when the directory already exists.
+            mkdir -p "${DEPLOY_DIR}"
             cp docker-compose.yml "${DEPLOY_DIR}/docker-compose.yml"
             cat > "${DEPLOY_DIR}/.env" <<EOF
 VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
@@ -89,7 +87,9 @@ EOF
             export IMAGE_TAG="${IMAGE_TAG}"
             export VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-}"
             export VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}"
-            docker compose up -d --build --force-recreate --remove-orphans web
+            # Image was already built and --load-ed into Docker in the previous
+            # stage; the deploy dir has no source, so do NOT pass --build here.
+            docker compose up -d --force-recreate --remove-orphans web
             docker compose ps
           '''
         }
