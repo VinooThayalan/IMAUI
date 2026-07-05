@@ -73,7 +73,12 @@ pipeline {
           sh '''
             set -euo pipefail
             IMAGE_TAG="${GIT_COMMIT:-$(git rev-parse --short HEAD)}"
-            mkdir -p "${DEPLOY_DIR}"
+            if [ -w /var/www ] 2>/dev/null; then
+              mkdir -p "${DEPLOY_DIR}"
+            else
+              sudo mkdir -p "${DEPLOY_DIR}"
+              sudo chown -R "$(whoami)":"$(id -gn)" "${DEPLOY_DIR}"
+            fi
             cp docker-compose.yml "${DEPLOY_DIR}/docker-compose.yml"
             cat > "${DEPLOY_DIR}/.env" <<EOF
 VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
