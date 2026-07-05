@@ -8,9 +8,9 @@ services:
     image: ${IMAGE_NAME:-imaui}:${IMAGE_TAG:-latest}
     container_name: imaui-web
     restart: unless-stopped
-    # Bound to localhost; the VM's global nginx reverse-proxies to it.
+    # Exposed on all interfaces so the app is reachable at <VM-IP>:3000.
     ports:
-      - "127.0.0.1:3000:8080"
+      - "3000:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
