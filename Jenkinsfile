@@ -19,25 +19,6 @@ pipeline {
       }
     }
 
-    stage('Build Frontend') {
-      steps {
-        withCredentials([
-          string(credentialsId: 'vite-supabase-url', variable: 'VITE_SUPABASE_URL'),
-          string(credentialsId: 'vite-supabase-anon-key', variable: 'VITE_SUPABASE_ANON_KEY')
-        ]) {
-          sh '''
-            set -euo pipefail
-            docker run --rm \
-              -e VITE_SUPABASE_URL="${VITE_SUPABASE_URL:-}" \
-              -e VITE_SUPABASE_ANON_KEY="${VITE_SUPABASE_ANON_KEY:-}" \
-              -v "$PWD:/app" \
-              -w /app \
-              node:20-alpine sh -lc "npm ci && npm run build"
-          '''
-        }
-      }
-    }
-
     stage('Build Docker Image') {
       steps {
         withCredentials([
