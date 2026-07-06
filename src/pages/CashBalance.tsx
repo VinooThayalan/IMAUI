@@ -89,6 +89,7 @@ export function CashBalance() {
       const { data: transactionsData, error: transactionsError } = await supabase
         .from('cash_balance_ledger')
         .select('*')
+        .order('date', { ascending: false })
         .order('timestamp', { ascending: false });
 
       if (transactionsError) throw transactionsError;
@@ -185,6 +186,7 @@ export function CashBalance() {
           date: formData.date,
           running_balance: newBalance,
           on_hold_amount: 0,
+          source: 'Manual',
           entity_id: formData.entityId,
           bank_id: formData.bankId || null,
           created_by: createdBy
@@ -498,6 +500,7 @@ export function CashBalance() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Source</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Number</th>
@@ -526,6 +529,9 @@ export function CashBalance() {
                       <div className="text-sm text-gray-900">
                         {note.trade_date ? new Date(note.trade_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Trade</span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-blue-600">{entity?.entity_id || '-'}</div>
@@ -569,10 +575,13 @@ export function CashBalance() {
                 const entity = entities.find(e => e.id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id || null);
 
-                // Opening balance: previous entry for the SAME entity, sorted by time
+                // Opening balance: previous entry for the SAME entity, sorted by date then timestamp
                 const entitySortedTxns = [...transactions]
                   .filter(t => t.entity_id === transaction.entity_id)
-                  .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  .sort((a, b) => {
+                    const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+                    return dateDiff !== 0 ? dateDiff : new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+                  });
                 const currentIndex = entitySortedTxns.findIndex(t => t.id === transaction.id);
                 const openingBalance = currentIndex > 0
                   ? entitySortedTxns[currentIndex - 1].running_balance
@@ -587,7 +596,9 @@ export function CashBalance() {
                   <tr key={transaction.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {new Date(transaction.timestamp).toLocaleString('en-US', {
+                        {transaction.date
+                          ? new Date(transaction.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          : new Date(transaction.timestamp).toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric',
@@ -595,6 +606,21 @@ export function CashBalance() {
                           minute: '2-digit'
                         })}
                       </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {(() => {
+                        const src = transaction.source || 'Manual';
+                        const styles: Record<string, string> = {
+                          Dividend: 'bg-green-100 text-green-800',
+                          Trade: 'bg-purple-100 text-purple-800',
+                          Manual: 'bg-blue-100 text-blue-800',
+                        };
+                        return (
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${styles[src] || 'bg-gray-100 text-gray-700'}`}>
+                            {src}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button

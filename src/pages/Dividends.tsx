@@ -195,6 +195,7 @@ export function Dividends() {
       date: new Date().toISOString().split('T')[0],
       running_balance: newBalance,
       on_hold_amount: 0,
+      source: 'Dividend',
       entity_id: entityId,
       created_by: performedBy,
     });

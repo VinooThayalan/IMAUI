@@ -24,6 +24,7 @@ export interface CashTransaction {
   reference_id?: string;
   created_by: string;
   notes?: string;
+  source?: string;
   created_at: string;
   updated_at: string;
 }
