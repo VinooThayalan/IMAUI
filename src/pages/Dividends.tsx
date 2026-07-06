@@ -31,8 +31,6 @@ interface Dividend {
 interface Entity {
   id: string;
   name: string;
-  current_balance: number;
-  od_limit: number;
 }
 
 interface Share {
@@ -109,7 +107,7 @@ export function Dividends() {
       setLoading(true);
       const [dividendsRes, entitiesRes, sharesRes, banksRes, entityBrokersRes] = await Promise.all([
         supabase.from('dividends').select('*').order('created_at', { ascending: false }),
-        supabase.from('entities').select('id, name, current_balance, od_limit').order('name'),
+        supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('ticker'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
         supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number'),
@@ -118,11 +116,7 @@ export function Dividends() {
       if (entitiesRes.error) throw entitiesRes.error;
       if (sharesRes.error) throw sharesRes.error;
       setDividends(dividendsRes.data || []);
-      setEntities((entitiesRes.data || []).map(e => ({
-        ...e,
-        current_balance: Number(e.current_balance) || 0,
-        od_limit: Number(e.od_limit) || 0,
-      })));
+      setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBanks(banksRes.data || []);
       setEntityBrokers(entityBrokersRes.data || []);
