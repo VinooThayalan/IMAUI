@@ -1,0 +1,1 @@
+ALTER TABLE dividends ALTER COLUMN payment_date DROP NOT NULL;
