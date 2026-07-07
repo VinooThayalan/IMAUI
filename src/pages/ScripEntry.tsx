@@ -11,9 +11,11 @@ interface ScripEntry {
   entry_date: string;
   announcement_date: string | null;
   effective_date: string | null;
+  xd_date: string | null;
   status: string;
   no_of_shares: number;
   script_dividend_ratio: string | null;
+  cds_account: string | null;
   notes: string | null;
   created_at: string;
 }
@@ -50,8 +52,10 @@ const EMPTY_FORM = {
   entry_date: new Date().toISOString().split('T')[0],
   announcement_date: '',
   effective_date: '',
+  xd_date: '',
   no_of_shares: '',
   script_dividend_ratio: '',
+  cds_account: '',
   status: 'AWAITING',
   notes: '',
 };
@@ -116,8 +120,10 @@ export function ScripEntry() {
       entry_date: entry.entry_date,
       announcement_date: entry.announcement_date || '',
       effective_date: entry.effective_date || '',
+      xd_date: entry.xd_date || '',
       no_of_shares: String(entry.no_of_shares ?? ''),
       script_dividend_ratio: entry.script_dividend_ratio || '',
+      cds_account: entry.cds_account || '',
       status: entry.status,
       notes: entry.notes || '',
     });
@@ -138,8 +144,10 @@ export function ScripEntry() {
       entry_date: formData.entry_date,
       announcement_date: formData.announcement_date || null,
       effective_date: formData.effective_date || null,
+      xd_date: formData.xd_date || null,
       no_of_shares: Number(formData.no_of_shares),
       script_dividend_ratio: formData.script_dividend_ratio || null,
+      cds_account: formData.cds_account || null,
       status: formData.status,
       notes: formData.notes || null,
     };
@@ -260,6 +268,7 @@ export function ScripEntry() {
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">No. of Shares</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Script Ratio</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">CDS Account</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Notes</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -268,7 +277,7 @@ export function ScripEntry() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center">
+                  <td colSpan={9} className="px-6 py-12 text-center">
                     <div className="flex items-center justify-center">
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
                     </div>
@@ -276,7 +285,7 @@ export function ScripEntry() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                     {search ? 'No entries match your search.' : 'No scrip entries found. Add your first entry to get started.'}
                   </td>
                 </tr>
@@ -290,10 +299,12 @@ export function ScripEntry() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-xs space-y-0.5 text-gray-500">
                         {entry.announcement_date && <div>Ann: {entry.announcement_date}</div>}
+                        {entry.xd_date && <div className="text-purple-600 font-medium">XD: {entry.xd_date}</div>}
                         {entry.effective_date && <div>Eff: {entry.effective_date}</div>}
                         <div>Entry: {entry.entry_date}</div>
                       </div>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{entry.cds_account || '—'}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusColor(entry.status)}`}>
                         {statusLabel(entry.status)}
@@ -394,6 +405,28 @@ export function ScripEntry() {
                     value={formData.effective_date}
                     onChange={e => setFormData({ ...formData, effective_date: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-purple-700 mb-1.5">XD Date</label>
+                  <input
+                    type="date"
+                    value={formData.xd_date}
+                    onChange={e => setFormData({ ...formData, xd_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Ex-dividend date</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">CDS Account</label>
+                  <input
+                    type="text"
+                    value={formData.cds_account}
+                    onChange={e => setFormData({ ...formData, cds_account: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    placeholder="e.g., CMB / SBL"
                   />
                 </div>
 
