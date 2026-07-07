@@ -18,6 +18,7 @@ interface Dividend {
   amount_net: number;
   announcement_date: string | null;
   payment_date: string | null;
+  payment_date_cse: string | null;
   effective_date: string | null;
   bank_name: string | null;
   bank_account_no: string | null;
@@ -64,6 +65,7 @@ const EMPTY_FORM = {
   net_dividend_per_share: '',
   announcement_date: '',
   payment_date: '',
+  payment_date_cse: '',
   effective_date: '',
   selected_bank_id: '',
   bank_name: '',
@@ -159,6 +161,7 @@ export function Dividends() {
       net_dividend_per_share: String(d.net_dividend_per_share ?? ''),
       announcement_date: d.announcement_date || '',
       payment_date: d.payment_date || '',
+      payment_date_cse: d.payment_date_cse || '',
       effective_date: d.effective_date || '',
       selected_bank_id: matchingBank?.id || '',
       bank_name: d.bank_name || '',
@@ -241,6 +244,7 @@ export function Dividends() {
         amount_net: net * qty,
         announcement_date: formData.announcement_date || null,
         payment_date: formData.payment_date || null,
+        payment_date_cse: formData.payment_date_cse || null,
         effective_date: formData.effective_date || null,
         bank_name: selectedBank?.name || null,
         bank_account_no: selectedBank?.account_number || null,
@@ -449,14 +453,13 @@ export function Dividends() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ticker</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dividend Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross/Share</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">WHT %</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net/Share</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Gross</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Net</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Key Dates</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
@@ -482,21 +485,22 @@ export function Dividends() {
                 <tr key={d.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-4 text-sm font-semibold text-gray-900 whitespace-nowrap">{getEntityName(d.entity_id)}</td>
                   <td className="px-4 py-4 text-sm font-bold text-blue-600 whitespace-nowrap">{getShareTicker(d.share_id)}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap">{formatDate(d.dividend_date)}</td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="text-xs space-y-0.5">
+                      {d.dividend_date && <div className="text-purple-600 font-medium">XD: {formatDate(d.dividend_date)}</div>}
+                      {d.announcement_date && <div className="text-gray-500">Ann: {formatDate(d.announcement_date)}</div>}
+                      {d.effective_date && <div className="text-emerald-600 font-medium">Eff: {formatDate(d.effective_date)}</div>}
+                      {d.payment_date && <div className="text-gray-500">Pay: {formatDate(d.payment_date)}</div>}
+                      {d.payment_date_cse && <div className="text-blue-600 font-medium">CSE: {formatDate(d.payment_date_cse)}</div>}
+                      {!d.dividend_date && !d.announcement_date && !d.effective_date && !d.payment_date && !d.payment_date_cse && <span className="text-gray-400">—</span>}
+                    </div>
+                  </td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.quantity || 0).toLocaleString()}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.gross_dividend_per_share || 0).toFixed(4)}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.withholding_tax_rate || 0).toFixed(1)}%</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.net_dividend_per_share || 0).toFixed(4)}</td>
                   <td className="px-4 py-4 text-sm text-gray-700 text-right whitespace-nowrap">{fmtRs(d.amount_gross || 0)}</td>
                   <td className="px-4 py-4 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">{fmtRs(d.amount_net || 0)}</td>
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <div className="text-xs space-y-0.5 text-gray-500">
-                      {d.announcement_date && <div>Ann: {formatDate(d.announcement_date)}</div>}
-                      {d.effective_date && <div className="text-emerald-600 font-medium">Eff: {formatDate(d.effective_date)}</div>}
-                      {d.payment_date && <div>Pay: {formatDate(d.payment_date)}</div>}
-                      {!d.announcement_date && !d.effective_date && !d.payment_date && <span className="text-gray-400">—</span>}
-                    </div>
-                  </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="text-xs space-y-0.5">
                       {d.bank_name && <div className="text-gray-900 font-medium">{d.bank_name}</div>}
@@ -698,12 +702,12 @@ export function Dividends() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Dividend Date</label>
+                    <label className="block text-sm font-semibold text-purple-700 mb-1.5">XD Date</label>
                     <input
                       type="date"
                       value={formData.dividend_date}
                       onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm"
                     />
                   </div>
                 </div>
@@ -727,6 +731,19 @@ export function Dividends() {
                       onChange={e => setFormData({ ...formData, payment_date: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-blue-700 mb-1.5">Payment Date as per CSE</label>
+                    <input
+                      type="date"
+                      value={formData.payment_date_cse}
+                      onChange={e => setFormData({ ...formData, payment_date_cse: e.target.value })}
+                      className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Official payment date per CSE</p>
                   </div>
                 </div>
 
