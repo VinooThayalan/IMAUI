@@ -611,6 +611,36 @@ export function TransactionApprovals() {
         </div>
       </div>
 
+      {/* Status count cards */}
+      {(() => {
+        const countConfig = [
+          { status: 'PENDING_APPROVAL', label: 'Pending',  bg: 'bg-amber-50',  border: 'border-amber-200',  text: 'text-amber-700'  },
+          { status: 'MANUAL_APPROVED',  label: 'Approved', bg: 'bg-green-50',  border: 'border-green-200',  text: 'text-green-700'  },
+          { status: 'ON_HOLD',          label: 'On Hold',  bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
+          { status: 'REJECTED',         label: 'Rejected', bg: 'bg-red-50',    border: 'border-red-200',    text: 'text-red-700'    },
+          { status: 'EXPIRED',          label: 'Expired',  bg: 'bg-gray-50',   border: 'border-gray-200',   text: 'text-gray-600'   },
+          { status: 'CANCELLED',        label: 'Cancelled',bg: 'bg-rose-50',   border: 'border-rose-200',   text: 'text-rose-700'   },
+        ];
+        return (
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+            {countConfig.map(({ status, label, bg, border, text }) => {
+              const count = transactions.filter(t => t.approval_status === status).length;
+              const isActive = filterStatus === status;
+              return (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(isActive ? '' : status)}
+                  className={`${bg} ${border} border rounded-xl p-4 text-left transition-all hover:shadow-sm ${isActive ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}
+                >
+                  <p className={`text-2xl font-bold ${text}`}>{count}</p>
+                  <p className="text-xs font-medium text-gray-500 mt-1">{label}</p>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
         <div className="flex flex-wrap gap-3 items-end">

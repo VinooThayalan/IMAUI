@@ -1384,7 +1384,10 @@ export function Transactions() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Transactions</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{transactions.length}</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{filteredTransactions.length}</p>
+              {filteredTransactions.length !== transactions.length && (
+                <p className="text-xs text-gray-400 mt-1">{transactions.length} total</p>
+              )}
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-blue-600" />
@@ -1397,7 +1400,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Buy Transactions</p>
               <p className="text-2xl font-bold text-green-600 mt-2">
-                {transactions.filter(t => t.transaction_type === 'BUY').length}
+                {filteredTransactions.filter(t => t.transaction_type === 'BUY').length}
               </p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -1411,7 +1414,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Sell Transactions</p>
               <p className="text-2xl font-bold text-red-600 mt-2">
-                {transactions.filter(t => t.transaction_type === 'SELL').length}
+                {filteredTransactions.filter(t => t.transaction_type === 'SELL').length}
               </p>
             </div>
             <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
@@ -1425,7 +1428,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Total Volume</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
-                LKR {transactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                LKR {filteredTransactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
           </div>
