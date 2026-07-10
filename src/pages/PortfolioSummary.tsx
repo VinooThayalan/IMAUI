@@ -300,7 +300,8 @@ export function PortfolioSummary() {
 
         const note = noteByTxn.get(tx.id);
         const shares = note ? note.shares : Number(tx.no_of_shares) || 0;
-        const amount = note ? note.gross : Number(tx.total_amount) || 0;
+        // Always use the stored total_amount from the transaction (net of fees) for accurate cost basis
+        const amount = Number(tx.total_amount) || 0;
         const txType = note?.note_type || tx.transaction_type;
         const isBuy = (txType || '').toUpperCase() === 'BUY';
         const txDate = note?.trade_date || tx.transaction_date;

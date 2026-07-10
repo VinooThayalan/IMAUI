@@ -1881,18 +1881,30 @@ export function BuyAndSellNotes() {
   }
 
   function getExpectedFees(txn: Transaction) {
-    const computedGross =
-      (Number(txn.no_of_shares) || 0) * (Number(txn.price_per_share) || 0);
-    const gross =
-      computedGross > 0
-        ? computedGross
-        : Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    // Use the total fees stored on the transaction — no recalculation needed.
+    // Per-component breakdown is not stored individually on the transaction, so we
+    // distribute proportionally based on fee type breakdown rates when available,
+    // otherwise fall back to using the total fees as brokerage only.
+    const totalFees = Number(txn.fees) || 0;
+    if (totalFees === 0) {
+      return { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+    }
+
     const feeType = brokerageFeeTypes.find(
       (ft) => ft.id === txn.brokerage_fee_type_id,
     );
     const rawItems = feeType?.fee_breakdown_items;
     const items: { name: string; rate: number }[] =
       typeof rawItems === "string" ? JSON.parse(rawItems) : rawItems || [];
+
+    if (items.length === 0) {
+      return { brokerage: totalFees, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+    }
+
+    const totalRate = items.reduce((s, it) => s + (Number(it.rate) || 0), 0);
+    if (totalRate === 0) {
+      return { brokerage: totalFees, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+    }
 
     const findRate = (patterns: string[], excludes: string[] = []) => {
       const item = items.find((it) => {
@@ -1903,31 +1915,16 @@ export function BuyAndSellNotes() {
       return item ? Number(item.rate) || 0 : 0;
     };
 
-    const brokerageRate = findRate(
-      ["brokerage"],
-      ["sec", "cse", "cds", "clearing", "levy", "cess"],
-    );
-    const secRate = findRate(
-      ["sec cess", "sec fees", "sec fee"],
-      ["share transaction", "levy"],
-    );
-    const exchangeRate = findRate(["cse fees", "cse fee", "cse", "exchange"]);
-    const cdsRate = findRate(["cds fees", "cds fee", "cds"]);
-    const govRate = findRate([
-      "share transaction levy",
-      "share transaction",
-      "stl",
-      "levy",
-    ]);
-    const clearingRate = findRate(["clearing"]);
+    // Distribute the stored total fees proportionally by component rate
+    const proportion = (rate: number) => totalRate > 0 ? (totalFees * rate) / totalRate : 0;
 
     return {
-      brokerage: (gross * brokerageRate) / 100,
-      sec: (gross * secRate) / 100,
-      exchange: (gross * exchangeRate) / 100,
-      cds: (gross * cdsRate) / 100,
-      gov_cess: (gross * govRate) / 100,
-      clearing_fees: (gross * clearingRate) / 100,
+      brokerage: proportion(findRate(["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"])),
+      sec: proportion(findRate(["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
+      exchange: proportion(findRate(["cse fees", "cse fee", "cse", "exchange"])),
+      cds: proportion(findRate(["cds fees", "cds fee", "cds"])),
+      gov_cess: proportion(findRate(["share transaction levy", "share transaction", "stl", "levy"])),
+      clearing_fees: proportion(findRate(["clearing"])),
     };
   }
 

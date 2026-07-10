@@ -294,7 +294,18 @@ export function TransactionApprovals() {
         updates.no_of_shares = parseFloat(editFormData.no_of_shares);
         updates.price_per_share = parseFloat(editFormData.price_per_share);
         updates.total_amount_gross = updates.no_of_shares * updates.price_per_share;
-        updates.total_amount = updates.total_amount_gross - (selectedTransaction.fees || 0);
+        // Recalculate fees using the stored blended rate so fee stays proportional to new gross
+        const storedRate = selectedTransaction.brokerage_fee_rate != null ? Number(selectedTransaction.brokerage_fee_rate) : 0;
+        const recalcFees = (updates.total_amount_gross * storedRate) / 100;
+        updates.fees = recalcFees;
+        updates.net_price_per_share = updates.no_of_shares > 0
+          ? (selectedTransaction.transaction_type === 'BUY'
+              ? (updates.total_amount_gross + recalcFees) / updates.no_of_shares
+              : (updates.total_amount_gross - recalcFees) / updates.no_of_shares)
+          : 0;
+        updates.total_amount = selectedTransaction.transaction_type === 'BUY'
+          ? updates.total_amount_gross + recalcFees
+          : updates.total_amount_gross - recalcFees;
       }
       const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(updates).eq('id', selectedTransaction.id);

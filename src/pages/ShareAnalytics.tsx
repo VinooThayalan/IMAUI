@@ -916,11 +916,11 @@ export function ShareAnalytics() {
       const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
 
       // Build txn map; collect all distinct CDS accounts per entity+share; latest brokerage fee rate
-      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null }>();
+      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null; total_amount: number }>();
       const cdsSetMap     = new Map<string, Set<string>>(); // key: entity_id__share_id -> set of CDS accounts
-      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate
+      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate (blended, stored on txn)
       for (const t of (txnsRes.data || [])) {
-        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null });
+        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null, total_amount: Number(t.total_amount) || 0 });
         const k = `${t.entity_id}__${t.share_id}`;
         if (t.cds_account_id) {
           if (!cdsSetMap.has(k)) cdsSetMap.set(k, new Set());
@@ -979,11 +979,13 @@ export function ShareAnalytics() {
         .map((n: any) => {
           const txn   = txnMap.get(n.transaction_id)!;
           const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
+          // Use the stored total_amount from the transaction (net of fees) for cost/proceeds tracking
+          const netAmount = txn.total_amount > 0 ? txn.total_amount : (Number(n.gross_amount) || 0);
           return {
             id: n.id, note_type: n.note_type, trade_date: n.trade_date,
             no_of_shares: Number(n.no_of_shares) || 0,
             price_avg: n.price_avg != null ? Number(n.price_avg) : null,
-            gross_amount: Number(n.gross_amount) || 0,
+            gross_amount: netAmount,
             entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
             cds_account: txn.cds_account_id ?? null,
