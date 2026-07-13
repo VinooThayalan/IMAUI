@@ -777,11 +777,7 @@ export function Transactions() {
       const updates: Record<string, unknown> = {
         approval_document_url: documentUrl,
         approval_document_name: uploadFile.name,
-        approval_document_uploaded
-      }
-    }
-  }
-}_at: new Date().toISOString()
+        approval_document_uploaded_at: new Date().toISOString()
       };
 
       if (selectedTransaction.approval_status === 'PENDING_APPROVAL') {
