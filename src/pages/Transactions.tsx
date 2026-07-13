@@ -2135,7 +2135,16 @@ export function Transactions() {
                     {!formData.use_negotiated_fee ? (
                       formData.brokerage_fee_type_id ? (
                         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
-                          <span className="text-xs font-semibold text-blue-800">{brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id)?.name ?? 'Auto-detected'}</span>
+                          {(() => {
+                            const grossAmt = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
+                            const st = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+                            const thr = st[0]?.max_price ?? null;
+                            const isTiered = thr !== null && grossAmt > thr && aboveTierItems.length > 0;
+                            if (isTiered) {
+                              return <span className="text-xs font-semibold text-blue-800">Tiered: {st[0]?.name} + {st[1]?.name}</span>;
+                            }
+                            return <span className="text-xs font-semibold text-blue-800">{brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id)?.name ?? 'Auto-detected'}</span>;
+                          })()}
                           <span className="text-xs text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded-full">Auto-detected</span>
                         </div>
                       ) : (
