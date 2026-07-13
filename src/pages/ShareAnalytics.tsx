@@ -902,7 +902,7 @@ export function ShareAnalytics() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes, scripsRes] = await Promise.all([
+      const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes, scripsRes, feeTypesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
         supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
@@ -910,7 +910,13 @@ export function ShareAnalytics() {
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('scrip_entries').select('entity_id, share_id, no_of_shares, effective_date, entry_date').eq('status', 'RECEIVED'),
+        supabase.from('brokerage_fee_types').select('rate, min_price').eq('is_active', true).order('min_price', { ascending: true, nullsFirst: true }),
       ]);
+
+      // Default fee rate = lowest tier's rate (used when a group has no transaction-level rate stored)
+      const defaultFeeRate = feeTypesRes.data && feeTypesRes.data.length > 0
+        ? Number(feeTypesRes.data[0].rate)
+        : 0;
 
       const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
       const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
@@ -1046,7 +1052,7 @@ export function ShareAnalytics() {
         const marketPrice      = priceMap.get(shareId) ?? 0;
         const marketPriceDate  = priceDateMap.get(shareId) ?? null;
         const cdsAccounts      = cdsSetMap.has(key) ? Array.from(cdsSetMap.get(key)!) : [];
-        const brokerageFeeRate = feeRateMap.get(key) ?? 0;
+        const brokerageFeeRate = feeRateMap.get(key) ?? defaultFeeRate;
 
         const scrips   = scripMap.get(key) ?? [];
         const computed = computeRows(notes, opening, divs, marketPrice, scrips);
