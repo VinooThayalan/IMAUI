@@ -838,8 +838,6 @@ export function Transactions() {
   }
 
   function addBulkRow() {
-  }
-}
     setBulkRows(prev => [...prev, emptyBulkRow()]);
   }
 
