@@ -228,9 +228,10 @@ export function Transactions() {
       const grossAmount = parseFloat(formData.no_of_shares) * parseFloat(formData.price_per_share);
 
       if (!formData.use_negotiated_fee) {
-        // Identify the two canonical tiers: "below" has a max_price cap, "above" has only a min_price floor
-        const belowTier = brokerageFeeTypes.find(ft => ft.max_price !== null && ft.min_price === null);
-        const aboveTier = brokerageFeeTypes.find(ft => ft.min_price !== null && ft.max_price === null);
+        // Sort active tiers by min_price to identify the lower and upper tiers
+        const sortedTiers = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+        const belowTier = sortedTiers[0] ?? null;
+        const aboveTier = sortedTiers[1] ?? null;
         const threshold = belowTier?.max_price ?? null;
 
         if (belowTier && aboveTier && threshold !== null && grossAmount > threshold) {
@@ -409,8 +410,8 @@ export function Transactions() {
     const price = parseFloat(formData.price_per_share) || 0;
     const grossAmount = shares * price;
 
-    const belowTier = brokerageFeeTypes.find(ft => ft.max_price !== null && ft.min_price === null);
-    const threshold = belowTier?.max_price ?? null;
+    const sortedTiers = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+    const threshold = sortedTiers[0]?.max_price ?? null;
     const currentAboveItems = aboveItems ?? aboveTierItems;
 
     let fees: number;
@@ -2187,8 +2188,8 @@ export function Transactions() {
                 {/* Fee breakdown table (compact) */}
                 {feeBreakdownItems.length > 0 && (() => {
                   const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
-                  const belowTier = brokerageFeeTypes.find(ft => ft.max_price !== null && ft.min_price === null);
-                  const threshold = belowTier?.max_price ?? null;
+                  const sortedTiersUI = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+                  const threshold = sortedTiersUI[0]?.max_price ?? null;
                   const isSplit = threshold !== null && grossAmount > threshold && aboveTierItems.length > 0;
                   const belowBase = isSplit ? threshold! : grossAmount;
                   const excessBase = isSplit ? grossAmount - threshold! : 0;
