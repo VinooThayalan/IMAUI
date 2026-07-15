@@ -702,16 +702,17 @@ export function BuyAndSellNotes() {
   function parseTradeConfirmationRows(rawText: string): ExtractedRow[] {
     const out: ExtractedRow[] = [];
     const NUM = "[\\d,]+(?:\\.\\d+)?";
-    // Row pattern: date  contractNo  qty  price  gross  brokerage  sec  exchange  cds  govcess  netAmount  settlementDate  foreignBrokerage  clearingFees
     const DATE = "\\d{2}/\\d{2}/\\d{4}";
-    const rowPattern = new RegExp(
+
+    // Pattern A: date + contract number (7+ digits) + fields
+    const rowPatternWithContract = new RegExp(
       `(${DATE})\\s+(\\d{7,})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${DATE})\\s+(${NUM})(?:\\s+(${NUM}))?`,
       "g",
     );
     let m: RegExpExecArray | null;
-    while ((m = rowPattern.exec(rawText)) !== null) {
+    while ((m = rowPatternWithContract.exec(rawText)) !== null) {
       out.push({
         contract_no: m[2],
         qty: parseNumber(m[3]),
@@ -723,12 +724,41 @@ export function BuyAndSellNotes() {
         cds_fees: parseNumber(m[9]),
         stl: parseNumber(m[10]),
         amount: parseNumber(m[11]),
-        // m[12] = settlement date (per-row), m[13] = foreign brokerage, m[14] = clearing fee
         foreign_br: parseNumber(m[13] ?? "0"),
         clearing_fee: parseNumber(m[14] ?? "0"),
-        // Derive security from context (populated in extractFromPdf after header parsing)
         security: "",
         _settlement_date: m[12],
+      });
+    }
+    if (out.length > 0) return out;
+
+    // Pattern B: date + NO contract number (some brokers leave it blank)
+    // date  qty  price  gross  brokerage  sec  exchange  cds  govcess  netAmount  settlementDate  foreignBrokerage  [clearingFees]
+    const rowPatternNoContract = new RegExp(
+      `(${DATE})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+        `(${NUM})\\s+(${DATE})\\s+(${NUM})(?:\\s+(${NUM}))?`,
+      "g",
+    );
+    while ((m = rowPatternNoContract.exec(rawText)) !== null) {
+      // Skip header/total rows
+      const snippet = rawText.slice(Math.max(0, m.index - 80), m.index).toLowerCase();
+      if (/total|header|purchase total|sales total/i.test(snippet.slice(-40))) continue;
+      out.push({
+        contract_no: "",
+        qty: parseNumber(m[2]),
+        rate: parseNumber(m[3]),
+        gross_value: parseNumber(m[4]),
+        brokerage: parseNumber(m[5]),
+        sec: parseNumber(m[6]),
+        cse_fees: parseNumber(m[7]),
+        cds_fees: parseNumber(m[8]),
+        stl: parseNumber(m[9]),
+        amount: parseNumber(m[10]),
+        foreign_br: parseNumber(m[12] ?? "0"),
+        clearing_fee: parseNumber(m[13] ?? "0"),
+        security: "",
+        _settlement_date: m[11],
       });
     }
     return out;
@@ -1397,8 +1427,10 @@ export function BuyAndSellNotes() {
       if (row[0].page < headerPage) continue;
       if (row[0].page === headerPage && row[0].y >= headerY) continue;
       const joined = row.map((i) => i.str).join(" ");
-      // Accept rows that contain a 7+ digit contract number anywhere (Trade Confirmation rows start with a date)
-      if (!/\b\d{7,}\b/.test(joined)) continue;
+      // Accept rows that contain a 7+ digit contract number anywhere OR start with a date
+      // (some Trade Confirmation PDFs leave the contract number column blank)
+      const startsWithDate = /^\s*\d{2}\/\d{2}\/\d{4}\s/.test(joined);
+      if (!/\b\d{7,}\b/.test(joined) && !startsWithDate) continue;
       // Skip total/summary rows
       if (
         /^\s*(total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total)/i.test(
@@ -1410,7 +1442,9 @@ export function BuyAndSellNotes() {
       if (/^[\s\-=]+$/.test(joined)) continue;
 
       const contract = voronoiGet(row, "contract") || nearest(row, colX.contract ?? row[0].x, 80);
-      if (!CONTRACT_TOKEN.test(contract)) continue;
+      // Skip only if we have neither a valid contract number NOR a leading date
+      // (Trade Confirmation PDFs sometimes leave the contract column blank)
+      if (!CONTRACT_TOKEN.test(contract) && !startsWithDate) continue;
 
       const settlementStr = colX.settlement !== undefined ? voronoiGet(row, "settlement") : "";
 
