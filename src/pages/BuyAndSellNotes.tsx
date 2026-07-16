@@ -2979,7 +2979,7 @@ export function BuyAndSellNotes() {
   }
 
   const filteredNotes = notes.filter((note) => {
-    const txn = transactions.find((t) => t.id === note.transaction_id);
+    const txn = allTransactions.find((t) => t.id === note.transaction_id);
     const noteEntity = txn
       ? entities.find((e) => e.id === txn.entity_id)
       : undefined;
@@ -2993,7 +2993,8 @@ export function BuyAndSellNotes() {
       note.dealer_name?.toLowerCase().includes(searchLower) ||
       note.contract_no?.toLowerCase().includes(searchLower) ||
       noteEntity?.name?.toLowerCase().includes(searchLower) ||
-      noteShare?.ticker?.toLowerCase().includes(searchLower);
+      noteShare?.ticker?.toLowerCase().includes(searchLower) ||
+      noteShare?.share_name?.toLowerCase().includes(searchLower);
     const matchesDateFrom =
       !filterDateFrom ||
       (note.trade_date || note.settlement_date) >= filterDateFrom;
