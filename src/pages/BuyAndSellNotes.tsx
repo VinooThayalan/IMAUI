@@ -357,19 +357,16 @@ export function BuyAndSellNotes() {
 
       const allNotes = notesRes.data || [];
       const allTxns = transactionsRes.data || [];
-      // Exclude transactions that already have any note linked (any status)
+      // Exclude transactions that already have a PROCESSED note linked
       const linkedTxnIds = new Set(
         allNotes
+          .filter((n: any) => n.status === "PROCESSED")
           .map((n: any) => n.transaction_id)
           .filter(Boolean),
       );
       setNotes(allNotes);
       setAllTransactions(allTxns);
-      setTransactions(
-        allTxns.filter(
-          (t: any) => !linkedTxnIds.has(t.id) && !t.note_not_required,
-        ),
-      );
+      setTransactions(allTxns.filter((t: any) => !linkedTxnIds.has(t.id)));
       setEntities(entitiesRes.data || []);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);

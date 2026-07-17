@@ -974,11 +974,9 @@ export function ShareAnalytics() {
       const { data: notesData, error: notesError } = await supabase
         .from('buy_sell_notes')
         .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, transaction_id')
+        .eq('status', 'PROCESSED')
         .order('trade_date', { ascending: true });
       if (notesError) throw notesError;
-
-      // Track which transaction IDs have a linked note
-      const notedTxnIds = new Set<string>((notesData || []).map((n: any) => n.transaction_id).filter(Boolean));
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
@@ -999,31 +997,7 @@ export function ShareAnalytics() {
         })
         .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
 
-      // Synthesize RawNote entries for approved transactions that have NO linked buy_sell_note
-      const txnFallbackNotes: RawNote[] = [];
-      for (const [txnId, txn] of txnMap) {
-        if (notedTxnIds.has(txnId)) continue;
-        if (selectedEntityId && txn.entity_id !== selectedEntityId) continue;
-        const txnData = (txnsRes.data || []).find((t: any) => t.id === txnId);
-        if (!txnData) continue;
-        const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
-        txnFallbackNotes.push({
-          id: txnId,
-          note_type: txnData.transaction_type === 'BUY' ? 'Buy' : 'Sell',
-          trade_date: txnData.transaction_date ?? null,
-          no_of_shares: Number(txnData.no_of_shares) || 0,
-          price_avg: txnData.price_per_share != null ? Number(txnData.price_per_share) : null,
-          gross_amount: Number(txnData.total_amount) || 0,
-          entity_id: txn.entity_id,
-          entity_name: entityMap.get(txn.entity_id) ?? '—',
-          share_id: txn.share_id,
-          share_ticker: share.ticker,
-          share_name: share.name,
-          cds_account: txn.cds_account_id ?? null,
-        });
-      }
-
-      const allRaw = [...raw, ...txnFallbackNotes];
+      const allRaw = raw;
 
       const groupKeys = new Set<string>();
       for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
