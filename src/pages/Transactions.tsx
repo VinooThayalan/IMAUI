@@ -1,4 +1,4 @@
-import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, Pencil } from 'lucide-react';
+import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, Pencil, FileCheck } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +46,7 @@ interface Transaction {
   approval_document_uploaded_by: string | null;
   offline_approval: boolean | null;
   day_trade: boolean | null;
+  note_not_required: boolean | null;
   created_at: string;
 }
 
@@ -843,6 +844,22 @@ export function Transactions() {
 
   function removeBulkRow(idx: number) {
     setBulkRows(prev => prev.length === 1 ? [emptyBulkRow()] : prev.filter((_, i) => i !== idx));
+  }
+
+  async function handleToggleNoteRequired(transaction: Transaction) {
+    const newValue = !transaction.note_not_required;
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({ note_not_required: newValue })
+        .eq('id', transaction.id);
+      if (error) throw error;
+      setTransactionsData(prev =>
+        prev.map(t => t.id === transaction.id ? { ...t, note_not_required: newValue } : t),
+      );
+    } catch (err: any) {
+      alert(`Failed to update: ${err?.message || err}`);
+    }
   }
 
   async function handleSaveBulk() {
@@ -1685,6 +1702,9 @@ export function Transactions() {
                       {transaction.offline_approval && (
                         <span className="text-xs text-blue-600 font-medium">Offline</span>
                       )}
+                      {transaction.note_not_required && (
+                        <span className="text-xs text-blue-600 font-medium">No note needed</span>
+                      )}
                       {transaction.approval_status === 'PENDING_APPROVAL' && getTimeRemaining(transaction) && (
                         <span className={`text-xs font-medium ${
                           getTimeRemaining(transaction) === 'Expired' ? 'text-red-600' : 'text-orange-600'
@@ -1738,6 +1758,19 @@ export function Transactions() {
                           title="Send cancellation notice to broker"
                         >
                           <Mail className="w-5 h-5" />
+                        </button>
+                      )}
+                      {transaction.approval_status === 'MANUAL_APPROVED' && (
+                        <button
+                          onClick={() => handleToggleNoteRequired(transaction)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            transaction.note_not_required
+                              ? 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                              : 'text-gray-400 hover:bg-gray-50'
+                          }`}
+                          title={transaction.note_not_required ? 'Note marked as not required (click to undo)' : 'Mark as note not required'}
+                        >
+                          <FileCheck className="w-5 h-5" />
                         </button>
                       )}
                       {transaction.approval_status === 'PENDING_APPROVAL' && (
@@ -2476,7 +2509,20 @@ export function Transactions() {
                 )}
               </div>
             </div>
-            <div className="p-6 border-t border-gray-200 flex justify-end">
+            <div className="p-6 border-t border-gray-200 flex justify-between items-center">
+              {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
+                <button
+                  onClick={() => handleToggleNoteRequired(selectedTransaction)}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+                    selectedTransaction.note_not_required
+                      ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <FileCheck className="w-4 h-4" />
+                  {selectedTransaction.note_not_required ? 'Note not required (undo)' : 'Mark as note not required'}
+                </button>
+              )}
               <button
                 onClick={() => {
                   setShowViewModal(false);
