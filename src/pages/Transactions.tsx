@@ -502,9 +502,7 @@ export function Transactions() {
     const netSalePrice = calculateNetPricePerShare();
     const numShares = parseFloat(formData.no_of_shares) || 0;
     const pnlPerShare = netSalePrice - balance.avg_cost;
-    const totalPnl = p
-  }
-}nlPerShare * numShares;
+    const totalPnl = pnlPerShare * numShares;
     return { avgCost: balance.avg_cost, pnlPerShare, totalPnl };
   }
 
