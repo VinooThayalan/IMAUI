@@ -2097,7 +2097,11 @@ export function BuyAndSellNotes() {
 
     if (!bestPerm) return rows;
     const improvement = (identityCost - bestCost) / identityCost;
-    if (!Number.isFinite(improvement) || improvement < 0.35) return rows;
+    // Only remap when the identity mapping is clearly broken (very high cost)
+    // AND a permutation is dramatically better. This prevents swapping columns
+    // based on small mismatches between the PDF's actual fees and the
+    // proportionally-estimated "expected" fees from the broker's fee type.
+    if (!Number.isFinite(improvement) || identityCost < 2 || improvement < 0.7) return rows;
 
     return rows.map((row) => {
       const source: Record<(typeof feeKeys)[number], number> = {
