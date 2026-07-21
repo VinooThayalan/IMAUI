@@ -618,9 +618,10 @@ export function BuyAndSellNotes() {
       }
 
       // Extract fees: after gross, pick the remaining values as fees
+      // LOLC Bought/Sold Note column order: Brokerage, CDS Fees, CSE Fees, SEC, STL, Clearing, Foreign
       let brokerage = numeric[2] ?? 0;
-      const cse_fees = numeric[3] ?? 0;
-      const cds_fees = numeric[4] ?? 0;
+      const cds_fees = numeric[3] ?? 0;
+      const cse_fees = numeric[4] ?? 0;
       const sec = numeric[5] ?? 0;
       const stl = numeric[6] ?? 0;
       const clearing_fee = numeric[7] ?? 0;
