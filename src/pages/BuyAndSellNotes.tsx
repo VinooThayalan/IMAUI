@@ -103,6 +103,9 @@ interface Transaction {
 interface BrokerageFeeType {
   id: string;
   name: string;
+  rate: number;
+  min_price: number | null;
+  max_price: number | null;
   fee_breakdown_items: { name: string; rate: number }[];
 }
 
@@ -342,7 +345,7 @@ export function BuyAndSellNotes() {
         supabase.from("entity_brokers").select("*"),
         supabase
           .from("brokerage_fee_types")
-          .select("id, name, fee_breakdown_items"),
+          .select("id, name, rate, min_price, max_price, fee_breakdown_items"),
         supabase
           .from("banks")
           .select("id, entity_id, name, account_number")
@@ -1927,9 +1930,8 @@ export function BuyAndSellNotes() {
 
   function getExpectedFees(txn: Transaction) {
     const totalFees = Number(txn.fees) || 0;
-    if (totalFees === 0) {
-      return { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
-    }
+    const zero = { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+    if (totalFees === 0) return zero;
 
     const feeType = brokerageFeeTypes.find(
       (ft) => ft.id === txn.brokerage_fee_type_id,
@@ -1938,8 +1940,12 @@ export function BuyAndSellNotes() {
     const items: { name: string; rate: number }[] =
       typeof rawItems === "string" ? JSON.parse(rawItems) : rawItems || [];
 
-    const findRate = (patterns: string[], excludes: string[] = []) => {
-      const item = items.find((it) => {
+    const findRate = (
+      source: { name: string; rate: number }[],
+      patterns: string[],
+      excludes: string[] = [],
+    ) => {
+      const item = source.find((it) => {
         const name = (it.name || "").toLowerCase();
         if (excludes.some((e) => name.includes(e))) return false;
         return patterns.some((p) => name.includes(p));
@@ -1953,48 +1959,95 @@ export function BuyAndSellNotes() {
         ? Number(txn.total_amount_gross)
         : expectedShares * (Number(txn.price_per_share) || 0);
 
-    // For negotiated fee transactions: txn.fees stores ONLY the negotiated
-    // brokerage (gross × rate / 100). Other fees (SEC, CSE, CDS, STL, clearing)
-    // are not stored on the transaction — compute them from the fee type's
-    // standard rates applied to gross.
+    if (expectedGross <= 0 || items.length === 0) {
+      return { ...zero, brokerage: totalFees };
+    }
+
+    // --- Tiered transaction ---
+    // When gross exceeds the below-tier max_price, Transactions.tsx splits
+    // the calculation across two tiers (below at lower rates, excess at higher
+    // rates) and stores a blended rate in brokerage_fee_rate. We must
+    // reconstruct each component from both tiers to get correct values.
+    const sortedTiers = [...brokerageFeeTypes].sort(
+      (a, b) => (a.min_price ?? 0) - (b.min_price ?? 0),
+    );
+    const belowTier = sortedTiers[0] ?? null;
+    const aboveTier = sortedTiers[1] ?? null;
+    const threshold = belowTier?.max_price ?? null;
+
+    if (
+      belowTier &&
+      aboveTier &&
+      threshold !== null &&
+      expectedGross > threshold
+    ) {
+      const belowItems: { name: string; rate: number }[] =
+        typeof belowTier.fee_breakdown_items === "string"
+          ? JSON.parse(belowTier.fee_breakdown_items)
+          : belowTier.fee_breakdown_items || [];
+      const aboveItems: { name: string; rate: number }[] =
+        typeof aboveTier.fee_breakdown_items === "string"
+          ? JSON.parse(aboveTier.fee_breakdown_items)
+          : aboveTier.fee_breakdown_items || [];
+
+      const excess = expectedGross - threshold;
+      const component = (
+        patterns: string[],
+        excludes: string[] = [],
+      ) => {
+        const belowRate = findRate(belowItems, patterns, excludes);
+        const aboveRate = findRate(aboveItems, patterns, excludes);
+        return (threshold * belowRate + excess * aboveRate) / 100;
+      };
+
+      return {
+        brokerage: component(["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]),
+        sec: component(["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"]),
+        exchange: component(["cse fees", "cse fee", "cse", "exchange"]),
+        cds: component(["cds fees", "cds fee", "cds"]),
+        gov_cess: component(["share transaction levy", "share transaction", "stl", "levy"]),
+        clearing_fees: component(["clearing"]),
+      };
+    }
+
+    // --- Negotiated fee (single tier) ---
+    // When use_negotiated_fee is true, Transactions.tsx stores ONLY the
+    // negotiated brokerage in txn.fees (gross × rate / 100). Other fees
+    // are not stored — compute them from the fee type's standard rates.
     const negotiatedRate = Number(txn.brokerage_fee_rate) || 0;
-    if (items.length > 0 && negotiatedRate > 0 && expectedGross > 0) {
-      const brokerageRate = findRate(["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]);
-      const standardBrokerageRate = Number(feeType?.rate) || brokerageRate;
-      const isNegotiated = Math.abs(negotiatedRate - standardBrokerageRate) > 0.0001;
+    const brokerageRate = findRate(items, ["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]);
+    const standardRate = Number(feeType?.rate) || brokerageRate;
+    const isNegotiated = Math.abs(negotiatedRate - standardRate) > 0.0001;
 
-      if (isNegotiated) {
-        const fromGross = (r: number) => (expectedGross * r) / 100;
-        return {
-          brokerage: totalFees,
-          sec: fromGross(findRate(["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
-          exchange: fromGross(findRate(["cse fees", "cse fee", "cse", "exchange"])),
-          cds: fromGross(findRate(["cds fees", "cds fee", "cds"])),
-          gov_cess: fromGross(findRate(["share transaction levy", "share transaction", "stl", "levy"])),
-          clearing_fees: fromGross(findRate(["clearing"])),
-        };
-      }
+    if (isNegotiated && negotiatedRate > 0) {
+      const fromGross = (r: number) => (expectedGross * r) / 100;
+      return {
+        brokerage: totalFees,
+        sec: fromGross(findRate(items, ["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
+        exchange: fromGross(findRate(items, ["cse fees", "cse fee", "cse", "exchange"])),
+        cds: fromGross(findRate(items, ["cds fees", "cds fee", "cds"])),
+        gov_cess: fromGross(findRate(items, ["share transaction levy", "share transaction", "stl", "levy"])),
+        clearing_fees: fromGross(findRate(items, ["clearing"])),
+      };
     }
 
-    // Standard path: distribute total fees proportionally by fee type breakdown rates
-    if (items.length === 0) {
-      return { brokerage: totalFees, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
-    }
-
+    // --- Standard (single tier, non-negotiated) ---
+    // Distribute total fees proportionally by fee type breakdown rates.
     const totalRate = items.reduce((s, it) => s + (Number(it.rate) || 0), 0);
     if (totalRate === 0) {
-      return { brokerage: totalFees, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+      return { ...zero, brokerage: totalFees };
     }
 
-    const proportion = (rate: number) => totalRate > 0 ? (totalFees * rate) / totalRate : 0;
+    const proportion = (rate: number) =>
+      totalRate > 0 ? (totalFees * rate) / totalRate : 0;
 
     return {
-      brokerage: proportion(findRate(["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"])),
-      sec: proportion(findRate(["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
-      exchange: proportion(findRate(["cse fees", "cse fee", "cse", "exchange"])),
-      cds: proportion(findRate(["cds fees", "cds fee", "cds"])),
-      gov_cess: proportion(findRate(["share transaction levy", "share transaction", "stl", "levy"])),
-      clearing_fees: proportion(findRate(["clearing"])),
+      brokerage: proportion(findRate(items, ["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"])),
+      sec: proportion(findRate(items, ["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
+      exchange: proportion(findRate(items, ["cse fees", "cse fee", "cse", "exchange"])),
+      cds: proportion(findRate(items, ["cds fees", "cds fee", "cds"])),
+      gov_cess: proportion(findRate(items, ["share transaction levy", "share transaction", "stl", "levy"])),
+      clearing_fees: proportion(findRate(items, ["clearing"])),
     };
   }
 
