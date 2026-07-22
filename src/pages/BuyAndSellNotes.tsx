@@ -1616,9 +1616,12 @@ export function BuyAndSellNotes() {
       rawText.match(/\bTotal\b\s*([\d,]+\.\d+)\s*$/i) ||
       rawText.match(/\bTotal\b\s+([\d,]+\.\d+)(?!\S)/i);
 
-    const noteType: "Buy" | "Sell" = /\bSOLD\s*Note\b/i.test(rawText)
-      ? "Sell"
-      : "Buy";
+    const noteType: "Buy" | "Sell" =
+      /SOLD\s*Note/i.test(rawText) ||
+      /Name\s*&\s*Address\s*of\s*Seller/i.test(rawText) ||
+      /Sold\s+by\s+order\s+and\s+for\s+account/i.test(rawText)
+        ? "Sell"
+        : "Buy";
 
     const firstPageRows = rows.slice(0, 12);
     const brokerRow = firstPageRows.find((r) =>
@@ -1771,7 +1774,10 @@ export function BuyAndSellNotes() {
       }
 
       const inferredNoteType: "Buy" | "Sell" =
-        /\bSOLD\s*Note\b|\bSale\s+of\b|\bSold\b/i.test(rawText)
+        /SOLD\s*Note/i.test(rawText) ||
+        /Name\s*&\s*Address\s*of\s*Seller/i.test(rawText) ||
+        /Sold\s+by\s+order\s+and\s+for\s+account/i.test(rawText) ||
+        /\bSale\s+of\b/i.test(rawText)
           ? "Sell"
           : "Buy";
       rows = normalizeRowGrossAndNet(rows);
@@ -2110,8 +2116,14 @@ export function BuyAndSellNotes() {
 
   function detectPdfTemplate(rawText: string): "bought_sold_note" | "trade_confirmation" | null {
     // Template 1 & 2: Bought/Sold Note (CMB-style, using Custodian Account)
-    // Identified by "BOUGHT NOTE" or "SOLD NOTE" heading
-    if (/\bBOUGHT\s*Note\b/i.test(rawText) || /\bSOLD\s*Note\b/i.test(rawText)) {
+    // Primary: "BOUGHT Note" / "SOLD Note" heading (top-right badge in the PDF)
+    // Fallback: body text markers present in every bought/sold note layout
+    const isBoughtSoldNote =
+      /BOUGHT\s*Note/i.test(rawText) ||
+      /SOLD\s*Note/i.test(rawText) ||
+      /Name\s*&\s*Address\s*of\s*(Buyer|Seller)/i.test(rawText) ||
+      /(?:Bought|Sold)\s+by\s+order\s+and\s+for\s+account/i.test(rawText);
+    if (isBoughtSoldNote) {
       return "bought_sold_note";
     }
     // Template 3 & 4: Trade Confirmation (DSA/IFL-style, using Broker Account)
