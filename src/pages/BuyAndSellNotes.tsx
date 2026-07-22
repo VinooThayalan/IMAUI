@@ -1523,8 +1523,8 @@ export function BuyAndSellNotes() {
       );
       const buyer_name = toMatch?.[1]?.trim().replace(/\s+/g, " ") || "";
 
-      // Note type: "Purchase of" = Buy, "Sale of" / "Sold" = Sell
-      const noteType: "Buy" | "Sell" = /\bSale\s+of\b|\bSold\b/i.test(rawText)
+      // Note type: "Purchase of" = Buy, "Sale of" = Sell
+      const noteType: "Buy" | "Sell" = /\bSale\s+of\b/i.test(rawText)
         ? "Sell"
         : "Buy";
 
