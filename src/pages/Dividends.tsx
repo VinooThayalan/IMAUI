@@ -53,6 +53,7 @@ interface EntityBroker {
   relationship_type: string;
   custodian_account_number: string | null;
   broker_account_number: string | null;
+  bank_id: string | null;
 }
 
 const EMPTY_FORM = {
@@ -112,7 +113,7 @@ export function Dividends() {
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('ticker'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
-        supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number'),
+        supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number, bank_id'),
       ]);
       if (dividendsRes.error) throw dividendsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
@@ -224,7 +225,9 @@ export function Dividends() {
       const entityCdsEntries = formData.entity_id
         ? entityBrokers.filter(eb => eb.entity_id === formData.entity_id)
         : [];
-      const firstCds = entityCdsEntries[0];
+      const firstCds = formData.selected_bank_id
+        ? entityCdsEntries.find(eb => eb.bank_id === formData.selected_bank_id)
+        : entityCdsEntries[0];
       const resolvedCdsAccount = firstCds
         ? (firstCds.relationship_type === 'Custodian'
             ? firstCds.custodian_account_number
@@ -757,7 +760,9 @@ export function Dividends() {
                   const entityCdsEntries = formData.entity_id
                     ? entityBrokers.filter(eb => eb.entity_id === formData.entity_id)
                     : [];
-                  const firstCds = entityCdsEntries[0];
+                  const firstCds = formData.selected_bank_id
+                    ? entityCdsEntries.find(eb => eb.bank_id === formData.selected_bank_id)
+                    : entityCdsEntries[0];
                   const cdsDisplayValue = firstCds
                     ? (firstCds.relationship_type === 'Custodian'
                         ? firstCds.custodian_account_number
