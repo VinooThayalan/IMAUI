@@ -1,0 +1,1 @@
+ALTER TABLE dividends ADD COLUMN IF NOT EXISTS payment_date_cse date;

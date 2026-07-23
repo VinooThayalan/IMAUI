@@ -103,6 +103,9 @@ interface Transaction {
 interface BrokerageFeeType {
   id: string;
   name: string;
+  rate: number;
+  min_price: number | null;
+  max_price: number | null;
   fee_breakdown_items: { name: string; rate: number }[];
 }
 
@@ -342,7 +345,7 @@ export function BuyAndSellNotes() {
         supabase.from("entity_brokers").select("*"),
         supabase
           .from("brokerage_fee_types")
-          .select("id, name, fee_breakdown_items"),
+          .select("id, name, rate, min_price, max_price, fee_breakdown_items"),
         supabase
           .from("banks")
           .select("id, entity_id, name, account_number")
@@ -618,9 +621,10 @@ export function BuyAndSellNotes() {
       }
 
       // Extract fees: after gross, pick the remaining values as fees
+      // LOLC Bought/Sold Note column order: Brokerage, CDS Fees, CSE Fees, SEC, STL, Clearing, Foreign
       let brokerage = numeric[2] ?? 0;
-      const cse_fees = numeric[3] ?? 0;
-      const cds_fees = numeric[4] ?? 0;
+      const cds_fees = numeric[3] ?? 0;
+      const cse_fees = numeric[4] ?? 0;
       const sec = numeric[5] ?? 0;
       const stl = numeric[6] ?? 0;
       const clearing_fee = numeric[7] ?? 0;
@@ -702,16 +706,17 @@ export function BuyAndSellNotes() {
   function parseTradeConfirmationRows(rawText: string): ExtractedRow[] {
     const out: ExtractedRow[] = [];
     const NUM = "[\\d,]+(?:\\.\\d+)?";
-    // Row pattern: date  contractNo  qty  price  gross  brokerage  sec  exchange  cds  govcess  netAmount  settlementDate  foreignBrokerage  clearingFees
     const DATE = "\\d{2}/\\d{2}/\\d{4}";
-    const rowPattern = new RegExp(
+
+    // Pattern A: date + contract number (7+ digits) + fields
+    const rowPatternWithContract = new RegExp(
       `(${DATE})\\s+(\\d{7,})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
         `(${NUM})\\s+(${DATE})\\s+(${NUM})(?:\\s+(${NUM}))?`,
       "g",
     );
     let m: RegExpExecArray | null;
-    while ((m = rowPattern.exec(rawText)) !== null) {
+    while ((m = rowPatternWithContract.exec(rawText)) !== null) {
       out.push({
         contract_no: m[2],
         qty: parseNumber(m[3]),
@@ -723,12 +728,41 @@ export function BuyAndSellNotes() {
         cds_fees: parseNumber(m[9]),
         stl: parseNumber(m[10]),
         amount: parseNumber(m[11]),
-        // m[12] = settlement date (per-row), m[13] = foreign brokerage, m[14] = clearing fee
         foreign_br: parseNumber(m[13] ?? "0"),
         clearing_fee: parseNumber(m[14] ?? "0"),
-        // Derive security from context (populated in extractFromPdf after header parsing)
         security: "",
         _settlement_date: m[12],
+      });
+    }
+    if (out.length > 0) return out;
+
+    // Pattern B: date + NO contract number (some brokers leave it blank)
+    // date  qty  price  gross  brokerage  sec  exchange  cds  govcess  netAmount  settlementDate  foreignBrokerage  [clearingFees]
+    const rowPatternNoContract = new RegExp(
+      `(${DATE})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+        `(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+` +
+        `(${NUM})\\s+(${DATE})\\s+(${NUM})(?:\\s+(${NUM}))?`,
+      "g",
+    );
+    while ((m = rowPatternNoContract.exec(rawText)) !== null) {
+      // Skip header/total rows
+      const snippet = rawText.slice(Math.max(0, m.index - 80), m.index).toLowerCase();
+      if (/total|header|purchase total|sales total/i.test(snippet.slice(-40))) continue;
+      out.push({
+        contract_no: "",
+        qty: parseNumber(m[2]),
+        rate: parseNumber(m[3]),
+        gross_value: parseNumber(m[4]),
+        brokerage: parseNumber(m[5]),
+        sec: parseNumber(m[6]),
+        cse_fees: parseNumber(m[7]),
+        cds_fees: parseNumber(m[8]),
+        stl: parseNumber(m[9]),
+        amount: parseNumber(m[10]),
+        foreign_br: parseNumber(m[12] ?? "0"),
+        clearing_fee: parseNumber(m[13] ?? "0"),
+        security: "",
+        _settlement_date: m[11],
       });
     }
     return out;
@@ -1397,8 +1431,10 @@ export function BuyAndSellNotes() {
       if (row[0].page < headerPage) continue;
       if (row[0].page === headerPage && row[0].y >= headerY) continue;
       const joined = row.map((i) => i.str).join(" ");
-      // Accept rows that contain a 7+ digit contract number anywhere (Trade Confirmation rows start with a date)
-      if (!/\b\d{7,}\b/.test(joined)) continue;
+      // Accept rows that contain a 7+ digit contract number anywhere OR start with a date
+      // (some Trade Confirmation PDFs leave the contract number column blank)
+      const startsWithDate = /^\s*\d{2}\/\d{2}\/\d{4}\s/.test(joined);
+      if (!/\b\d{7,}\b/.test(joined) && !startsWithDate) continue;
       // Skip total/summary rows
       if (
         /^\s*(total|page\s*total|net\s*settlement|purchase\s*total|sales\s*total)/i.test(
@@ -1410,7 +1446,9 @@ export function BuyAndSellNotes() {
       if (/^[\s\-=]+$/.test(joined)) continue;
 
       const contract = voronoiGet(row, "contract") || nearest(row, colX.contract ?? row[0].x, 80);
-      if (!CONTRACT_TOKEN.test(contract)) continue;
+      // Skip only if we have neither a valid contract number NOR a leading date
+      // (Trade Confirmation PDFs sometimes leave the contract column blank)
+      if (!CONTRACT_TOKEN.test(contract) && !startsWithDate) continue;
 
       const settlementStr = colX.settlement !== undefined ? voronoiGet(row, "settlement") : "";
 
@@ -1485,8 +1523,8 @@ export function BuyAndSellNotes() {
       );
       const buyer_name = toMatch?.[1]?.trim().replace(/\s+/g, " ") || "";
 
-      // Note type: "Purchase of" = Buy, "Sale of" / "Sold" = Sell
-      const noteType: "Buy" | "Sell" = /\bSale\s+of\b|\bSold\b/i.test(rawText)
+      // Note type: "Purchase of" = Buy, "Sale of" = Sell
+      const noteType: "Buy" | "Sell" = /\bSale\s+of\b/i.test(rawText)
         ? "Sell"
         : "Buy";
 
@@ -1676,6 +1714,21 @@ export function BuyAndSellNotes() {
         30000,
         "PDF extraction timed out after 30 seconds",
       );
+
+      // Validate PDF matches one of the 4 supported templates (2 buy + 2 sell)
+      const template = detectPdfTemplate(rawText);
+      if (!template) {
+        setExtractionError(
+          "PDF format not matching. The uploaded PDF does not match any of the supported Buy/Sell note or Trade Confirmation templates. Please use one of the 4 standard broker templates.",
+        );
+        setExtractedRows([]);
+        setDebugRawText(rawText);
+        setParserTrace("");
+        alert("PDF format not matching. Please upload a PDF that matches one of the 4 supported broker templates (Bought Note, Sold Note, or Trade Confirmation).",
+        );
+        return;
+      }
+
       const grouped = groupIntoRows(items);
 
       // Extract security hint early for Trade Confirmation (security is in doc header, not per-row)
@@ -1726,7 +1779,6 @@ export function BuyAndSellNotes() {
         rows,
         inferredNoteType,
       );
-      rows = remapShiftedFeeColumns(rows, selectedTxn);
 
       if (rows.length > 0) {
         const r = rows[0];
@@ -1806,10 +1858,6 @@ export function BuyAndSellNotes() {
         }
       }
 
-      // Second-pass correction: once we know the best mapped transaction,
-      // remap shifted fee columns and recompute totals.
-      rows = remapShiftedFeeColumns(rows, bestCandidate || null);
-
       // Backfill security ticker into Trade Confirmation rows (it's in the doc header, not per-row)
       if (header.security || securityHint) {
         const sec = header.security || securityHint;
@@ -1881,12 +1929,10 @@ export function BuyAndSellNotes() {
   }
 
   function getExpectedFees(txn: Transaction) {
-    const computedGross =
-      (Number(txn.no_of_shares) || 0) * (Number(txn.price_per_share) || 0);
-    const gross =
-      computedGross > 0
-        ? computedGross
-        : Number(txn.total_amount_gross ?? txn.total_amount ?? 0);
+    const totalFees = Number(txn.fees) || 0;
+    const zero = { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
+    if (totalFees === 0) return zero;
+
     const feeType = brokerageFeeTypes.find(
       (ft) => ft.id === txn.brokerage_fee_type_id,
     );
@@ -1894,8 +1940,12 @@ export function BuyAndSellNotes() {
     const items: { name: string; rate: number }[] =
       typeof rawItems === "string" ? JSON.parse(rawItems) : rawItems || [];
 
-    const findRate = (patterns: string[], excludes: string[] = []) => {
-      const item = items.find((it) => {
+    const findRate = (
+      source: { name: string; rate: number }[],
+      patterns: string[],
+      excludes: string[] = [],
+    ) => {
+      const item = source.find((it) => {
         const name = (it.name || "").toLowerCase();
         if (excludes.some((e) => name.includes(e))) return false;
         return patterns.some((p) => name.includes(p));
@@ -1903,31 +1953,101 @@ export function BuyAndSellNotes() {
       return item ? Number(item.rate) || 0 : 0;
     };
 
-    const brokerageRate = findRate(
-      ["brokerage"],
-      ["sec", "cse", "cds", "clearing", "levy", "cess"],
+    const expectedShares = Number(txn.no_of_shares) || 0;
+    const expectedGross =
+      Number(txn.total_amount_gross) > 0
+        ? Number(txn.total_amount_gross)
+        : expectedShares * (Number(txn.price_per_share) || 0);
+
+    if (expectedGross <= 0 || items.length === 0) {
+      return { ...zero, brokerage: totalFees };
+    }
+
+    // --- Tiered transaction ---
+    // When gross exceeds the below-tier max_price, Transactions.tsx splits
+    // the calculation across two tiers (below at lower rates, excess at higher
+    // rates) and stores a blended rate in brokerage_fee_rate. We must
+    // reconstruct each component from both tiers to get correct values.
+    const sortedTiers = [...brokerageFeeTypes].sort(
+      (a, b) => (a.min_price ?? 0) - (b.min_price ?? 0),
     );
-    const secRate = findRate(
-      ["sec cess", "sec fees", "sec fee"],
-      ["share transaction", "levy"],
-    );
-    const exchangeRate = findRate(["cse fees", "cse fee", "cse", "exchange"]);
-    const cdsRate = findRate(["cds fees", "cds fee", "cds"]);
-    const govRate = findRate([
-      "share transaction levy",
-      "share transaction",
-      "stl",
-      "levy",
-    ]);
-    const clearingRate = findRate(["clearing"]);
+    const belowTier = sortedTiers[0] ?? null;
+    const aboveTier = sortedTiers[1] ?? null;
+    const threshold = belowTier?.max_price ?? null;
+
+    if (
+      belowTier &&
+      aboveTier &&
+      threshold !== null &&
+      expectedGross > threshold
+    ) {
+      const belowItems: { name: string; rate: number }[] =
+        typeof belowTier.fee_breakdown_items === "string"
+          ? JSON.parse(belowTier.fee_breakdown_items)
+          : belowTier.fee_breakdown_items || [];
+      const aboveItems: { name: string; rate: number }[] =
+        typeof aboveTier.fee_breakdown_items === "string"
+          ? JSON.parse(aboveTier.fee_breakdown_items)
+          : aboveTier.fee_breakdown_items || [];
+
+      const excess = expectedGross - threshold;
+      const component = (
+        patterns: string[],
+        excludes: string[] = [],
+      ) => {
+        const belowRate = findRate(belowItems, patterns, excludes);
+        const aboveRate = findRate(aboveItems, patterns, excludes);
+        return (threshold * belowRate + excess * aboveRate) / 100;
+      };
+
+      return {
+        brokerage: component(["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]),
+        sec: component(["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"]),
+        exchange: component(["cse fees", "cse fee", "cse", "exchange"]),
+        cds: component(["cds fees", "cds fee", "cds"]),
+        gov_cess: component(["share transaction levy", "share transaction", "stl", "levy"]),
+        clearing_fees: component(["clearing"]),
+      };
+    }
+
+    // --- Negotiated fee (single tier) ---
+    // When use_negotiated_fee is true, Transactions.tsx stores ONLY the
+    // negotiated brokerage in txn.fees (gross × rate / 100). Other fees
+    // are not stored — compute them from the fee type's standard rates.
+    const negotiatedRate = Number(txn.brokerage_fee_rate) || 0;
+    const brokerageRate = findRate(items, ["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]);
+    const standardRate = Number(feeType?.rate) || brokerageRate;
+    const isNegotiated = Math.abs(negotiatedRate - standardRate) > 0.0001;
+
+    if (isNegotiated && negotiatedRate > 0) {
+      const fromGross = (r: number) => (expectedGross * r) / 100;
+      return {
+        brokerage: totalFees,
+        sec: fromGross(findRate(items, ["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
+        exchange: fromGross(findRate(items, ["cse fees", "cse fee", "cse", "exchange"])),
+        cds: fromGross(findRate(items, ["cds fees", "cds fee", "cds"])),
+        gov_cess: fromGross(findRate(items, ["share transaction levy", "share transaction", "stl", "levy"])),
+        clearing_fees: fromGross(findRate(items, ["clearing"])),
+      };
+    }
+
+    // --- Standard (single tier, non-negotiated) ---
+    // Distribute total fees proportionally by fee type breakdown rates.
+    const totalRate = items.reduce((s, it) => s + (Number(it.rate) || 0), 0);
+    if (totalRate === 0) {
+      return { ...zero, brokerage: totalFees };
+    }
+
+    const proportion = (rate: number) =>
+      totalRate > 0 ? (totalFees * rate) / totalRate : 0;
 
     return {
-      brokerage: (gross * brokerageRate) / 100,
-      sec: (gross * secRate) / 100,
-      exchange: (gross * exchangeRate) / 100,
-      cds: (gross * cdsRate) / 100,
-      gov_cess: (gross * govRate) / 100,
-      clearing_fees: (gross * clearingRate) / 100,
+      brokerage: proportion(findRate(items, ["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"])),
+      sec: proportion(findRate(items, ["sec cess", "sec fees", "sec fee"], ["share transaction", "levy"])),
+      exchange: proportion(findRate(items, ["cse fees", "cse fee", "cse", "exchange"])),
+      cds: proportion(findRate(items, ["cds fees", "cds fee", "cds"])),
+      gov_cess: proportion(findRate(items, ["share transaction levy", "share transaction", "stl", "levy"])),
+      clearing_fees: proportion(findRate(items, ["clearing"])),
     };
   }
 
@@ -1988,116 +2108,18 @@ export function BuyAndSellNotes() {
     return pdfShares <= 0 || pdfGross <= 0;
   }
 
-  function remapShiftedFeeColumns(
-    rows: ExtractedRow[],
-    txn: Transaction | null,
-  ): ExtractedRow[] {
-    if (!txn || rows.length === 0) return rows;
-
-    const expectedShares = Number(txn.no_of_shares) || 0;
-    const expectedGross = expectedShares * (Number(txn.price_per_share) || 0);
-    if (expectedGross <= 0) return rows;
-
-    const expectedFees = getExpectedFees(txn);
-    const feeKeys: Array<
-      "brokerage" | "sec" | "cse_fees" | "cds_fees" | "stl" | "clearing_fee"
-    > = ["brokerage", "sec", "cse_fees", "cds_fees", "stl", "clearing_fee"];
-
-    const expectedByKey: Record<(typeof feeKeys)[number], number> = {
-      brokerage: expectedFees.brokerage,
-      sec: expectedFees.sec,
-      cse_fees: expectedFees.exchange,
-      cds_fees: expectedFees.cds,
-      stl: expectedFees.gov_cess,
-      clearing_fee: expectedFees.clearing_fees,
-    };
-    const actualByKey: Record<(typeof feeKeys)[number], number> = {
-      brokerage: rows.reduce((s, r) => s + (r.brokerage || 0), 0),
-      sec: rows.reduce((s, r) => s + (r.sec || 0), 0),
-      cse_fees: rows.reduce((s, r) => s + (r.cse_fees || 0), 0),
-      cds_fees: rows.reduce((s, r) => s + (r.cds_fees || 0), 0),
-      stl: rows.reduce((s, r) => s + (r.stl || 0), 0),
-      clearing_fee: rows.reduce((s, r) => s + (r.clearing_fee || 0), 0),
-    };
-
-    const relErr = (a: number, e: number) => {
-      if (e === 0) return Math.abs(a);
-      return Math.abs(a - e) / Math.max(1, Math.abs(e));
-    };
-
-    const identityCost = feeKeys.reduce(
-      (sum, k) => sum + relErr(actualByKey[k], expectedByKey[k]),
-      0,
-    );
-    if (!Number.isFinite(identityCost) || identityCost <= 0) return rows;
-
-    const permutations: (typeof feeKeys)[] = [];
-    const build = (
-      prefix: (typeof feeKeys)[number][],
-      rest: (typeof feeKeys)[number][],
-    ) => {
-      if (rest.length === 0) {
-        permutations.push(prefix as typeof feeKeys);
-        return;
-      }
-      for (let i = 0; i < rest.length; i += 1) {
-        build(
-          [...prefix, rest[i]],
-          [...rest.slice(0, i), ...rest.slice(i + 1)],
-        );
-      }
-    };
-    build([], [...feeKeys]);
-
-    let bestPerm: (typeof feeKeys) | null = null;
-    let bestCost = identityCost;
-    for (const perm of permutations) {
-      let cost = 0;
-      for (let i = 0; i < feeKeys.length; i += 1) {
-        const target = feeKeys[i];
-        const source = perm[i];
-        cost += relErr(actualByKey[source], expectedByKey[target]);
-      }
-      if (cost < bestCost) {
-        bestCost = cost;
-        bestPerm = perm;
-      }
+  function detectPdfTemplate(rawText: string): "bought_sold_note" | "trade_confirmation" | null {
+    // Template 1 & 2: Bought/Sold Note (CMB-style, using Custodian Account)
+    // Identified by "BOUGHT NOTE" or "SOLD NOTE" heading
+    if (/\bBOUGHT\s*Note\b/i.test(rawText) || /\bSOLD\s*Note\b/i.test(rawText)) {
+      return "bought_sold_note";
     }
-
-    if (!bestPerm) return rows;
-    const improvement = (identityCost - bestCost) / identityCost;
-    if (!Number.isFinite(improvement) || improvement < 0.35) return rows;
-
-    return rows.map((row) => {
-      const source: Record<(typeof feeKeys)[number], number> = {
-        brokerage: row.brokerage || 0,
-        sec: row.sec || 0,
-        cse_fees: row.cse_fees || 0,
-        cds_fees: row.cds_fees || 0,
-        stl: row.stl || 0,
-        clearing_fee: row.clearing_fee || 0,
-      };
-      const mapped: Record<(typeof feeKeys)[number], number> = {
-        brokerage: 0,
-        sec: 0,
-        cse_fees: 0,
-        cds_fees: 0,
-        stl: 0,
-        clearing_fee: 0,
-      };
-      for (let i = 0; i < feeKeys.length; i += 1) {
-        mapped[feeKeys[i]] = source[bestPerm[i]];
-      }
-      return {
-        ...row,
-        brokerage: mapped.brokerage,
-        sec: mapped.sec,
-        cse_fees: mapped.cse_fees,
-        cds_fees: mapped.cds_fees,
-        stl: mapped.stl,
-        clearing_fee: mapped.clearing_fee,
-      };
-    });
+    // Template 3 & 4: Trade Confirmation (DSA/IFL-style, using Broker Account)
+    // Identified by "TRADE CONFIRMATION" heading
+    if (/TRADE\s+CONFIRMATION/i.test(rawText)) {
+      return "trade_confirmation";
+    }
+    return null;
   }
 
   function validateExtractedData() {
@@ -2113,12 +2135,9 @@ export function BuyAndSellNotes() {
 
     const txn = transactions.find((t) => t.id === formData.transaction_id);
     const rowsForValidation = txn
-      ? remapShiftedFeeColumns(
-          backfillBrokerageFromNet(
-            normalizeRowGrossAndNet(extractedRows),
-            (extractedData.note_type || "Buy") as "Buy" | "Sell",
-          ),
-          txn,
+      ? backfillBrokerageFromNet(
+          normalizeRowGrossAndNet(extractedRows),
+          (extractedData.note_type || "Buy") as "Buy" | "Sell",
         )
       : extractedRows;
 
@@ -2205,12 +2224,9 @@ export function BuyAndSellNotes() {
     }
     const txn = transactions.find((t) => t.id === formData.transaction_id);
     if (txn) {
-      const repairedRows = remapShiftedFeeColumns(
-        backfillBrokerageFromNet(
-          normalizeRowGrossAndNet(extractedRows),
-          (extractedData.note_type || "Buy") as "Buy" | "Sell",
-        ),
-        txn,
+      const repairedRows = backfillBrokerageFromNet(
+        normalizeRowGrossAndNet(extractedRows),
+        (extractedData.note_type || "Buy") as "Buy" | "Sell",
       );
       const totalShares = repairedRows.reduce((s, r) => s + r.qty, 0);
       const totalGross = repairedRows.reduce((s, r) => s + r.gross_value, 0);
@@ -2948,7 +2964,7 @@ export function BuyAndSellNotes() {
   }
 
   const filteredNotes = notes.filter((note) => {
-    const txn = transactions.find((t) => t.id === note.transaction_id);
+    const txn = allTransactions.find((t) => t.id === note.transaction_id);
     const noteEntity = txn
       ? entities.find((e) => e.id === txn.entity_id)
       : undefined;
@@ -2962,7 +2978,8 @@ export function BuyAndSellNotes() {
       note.dealer_name?.toLowerCase().includes(searchLower) ||
       note.contract_no?.toLowerCase().includes(searchLower) ||
       noteEntity?.name?.toLowerCase().includes(searchLower) ||
-      noteShare?.ticker?.toLowerCase().includes(searchLower);
+      noteShare?.ticker?.toLowerCase().includes(searchLower) ||
+      noteShare?.share_name?.toLowerCase().includes(searchLower);
     const matchesDateFrom =
       !filterDateFrom ||
       (note.trade_date || note.settlement_date) >= filterDateFrom;

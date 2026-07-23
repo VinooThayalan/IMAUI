@@ -199,7 +199,6 @@ export function Reports() {
           share_id,
           transaction_type,
           no_of_shares,
-          price_per_share,
           total_amount,
           transaction_date,
           shares (
@@ -207,7 +206,8 @@ export function Reports() {
             ticker,
             share_name
           )
-        `);
+        `)
+        .in('approval_status', ['MANUAL_APPROVED']);
 
       if (fromDate) {
         query = query.gte('transaction_date', fromDate);
@@ -269,7 +269,7 @@ export function Reports() {
       const shareHoldings: ShareHolding[] = Array.from(shareMap.entries())
         .map(([shareId, data]) => {
           const avgCost = data.total_shares > 0 ? data.total_cost / data.total_shares : 0;
-          const currentPrice = latestPrices.get(data.ticker) || avgCost;
+          const currentPrice = latestPrices.get(shareId) || avgCost;
           const currentValue = data.total_shares * currentPrice;
           const gainLoss = currentValue - data.total_cost;
           const gainLossPercent = data.total_cost > 0 ? (gainLoss / data.total_cost) * 100 : 0;
@@ -312,7 +312,6 @@ export function Reports() {
           transaction_type,
           transaction_date,
           no_of_shares,
-          price_per_share,
           total_amount,
           entities (
             id,
@@ -326,6 +325,7 @@ export function Reports() {
             sector
           )
         `)
+        .in('approval_status', ['MANUAL_APPROVED'])
         .order('transaction_date', { ascending: true });
 
       if (fromDate) {
@@ -513,6 +513,7 @@ export function Reports() {
           price_per_share,
           total_amount,
           fees,
+          brokerage_fee_rate,
           entities (
             id,
             name,
@@ -524,6 +525,7 @@ export function Reports() {
             share_name
           )
         `)
+        .in('approval_status', ['MANUAL_APPROVED'])
         .order('transaction_date', { ascending: true });
 
       if (fromDate) {
@@ -598,10 +600,11 @@ export function Reports() {
 
         const avgCost = newBalance > 0 ? newCost / newBalance : 0;
         const marketPrice = latestPrices.get(tx.share_id) || price;
-        const brokerageRate = 0.003;
+        // Use stored blended brokerage_fee_rate from the transaction (not a hardcoded rate)
+        const storedFeeRate = tx.brokerage_fee_rate != null ? Number(tx.brokerage_fee_rate) / 100 : 0;
         const marketPriceAfterBrokerage = isBuy
-          ? marketPrice * (1 + brokerageRate)
-          : marketPrice * (1 - brokerageRate);
+          ? marketPrice * (1 + storedFeeRate)
+          : marketPrice * (1 - storedFeeRate);
 
         const marketValue = newBalance * marketPrice;
         const cashFlow = isBuy ? -totalAmount : totalAmount;
@@ -827,7 +830,7 @@ export function Reports() {
         supabase.from('transactions').select(`
           entity_id, share_id, transaction_type, no_of_shares, total_amount,
           entities ( name ), shares ( ticker, share_name )
-        `).order('transaction_date', { ascending: true }),
+        `).in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: true }),
         supabase.from('dividends').select('entity_id, share_id, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_balance, opening_cost'),

@@ -34,6 +34,14 @@ interface DividendRecord {
   amount_net: number;
 }
 
+interface ScripRecord {
+  entity_id: string;
+  share_id: string;
+  no_of_shares: number;
+  effective_date: string | null;
+  entry_date: string;
+}
+
 interface RawNote {
   id: string;
   note_type: string;
@@ -50,7 +58,7 @@ interface RawNote {
 }
 
 interface ComputedRow extends RawNote {
-  row_type: 'opening' | 'buy' | 'sell' | 'dividend';
+  row_type: 'opening' | 'buy' | 'sell' | 'dividend' | 'scrip';
   purchase_cost: number;
   sale_value: number;
   dividend: number;
@@ -112,17 +120,25 @@ function computeRows(
   opening: OpeningBalance | null,
   dividends: DividendRecord[],
   marketPrice: number,
+  scrips: ScripRecord[] = [],
 ): ComputedRow[] {
   const sorted     = [...notes].sort((a, b) => (a.trade_date ?? '') < (b.trade_date ?? '') ? -1 : 1);
   const sortedDivs = [...dividends].sort((a, b) => (a.payment_date ?? '') < (b.payment_date ?? '') ? -1 : 1);
+  const sortedScrips = [...scrips].sort((a, b) => {
+    const da = a.effective_date ?? a.entry_date;
+    const db = b.effective_date ?? b.entry_date;
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
 
   type Ev = { date: string } & (
     | { kind: 'note'; note: RawNote }
     | { kind: 'dividend'; div: DividendRecord }
+    | { kind: 'scrip'; scrip: ScripRecord }
   );
   const events: Ev[] = [
     ...sorted.map(n => ({ date: n.trade_date ?? '', kind: 'note' as const, note: n })),
     ...sortedDivs.map(d => ({ date: d.payment_date ?? '', kind: 'dividend' as const, div: d })),
+    ...sortedScrips.map(s => ({ date: s.effective_date ?? s.entry_date, kind: 'scrip' as const, scrip: s })),
   ].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 
   let heldShares  = opening ? opening.opening_shares : 0;
@@ -180,7 +196,7 @@ function computeRows(
       }
       const s = snap();
       rows.push({ ...n, row_type: isBuy ? 'buy' : 'sell', purchase_cost, sale_value, dividend: 0, cash_flow: sale_value - purchase_cost, ...s });
-    } else {
+    } else if (ev.kind === 'dividend') {
       const d = ev.div;
       cumDividend += d.amount_net;
       const s = snap();
@@ -193,6 +209,22 @@ function computeRows(
         row_type: 'dividend',
         purchase_cost: 0, sale_value: 0, dividend: d.amount_net,
         cash_flow: d.amount_net, ...s,
+      });
+    } else {
+      const sc = ev.scrip;
+      const qty = sc.no_of_shares;
+      heldShares += qty; // cost stays the same — scrip shares are free
+      const s = snap();
+      const date = sc.effective_date ?? sc.entry_date;
+      rows.push({
+        id: `scrip-${sc.entity_id}-${sc.share_id}-${date}`,
+        note_type: 'Scrip', trade_date: date,
+        no_of_shares: qty, price_avg: 0, gross_amount: 0,
+        entity_id: sc.entity_id, entity_name: '', share_id: sc.share_id,
+        share_ticker: '', share_name: '', cds_account: null,
+        row_type: 'scrip',
+        purchase_cost: 0, sale_value: 0, dividend: 0,
+        cash_flow: 0, ...s,
       });
     }
   }
@@ -317,7 +349,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       ]);
       // Cost per share row
       const totalSharesBought = group.rows
-        .filter(r => r.row_type === 'buy' || r.row_type === 'opening')
+        .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
         .reduce((s, r) => s + r.no_of_shares, 0);
       const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
       rows.push([
@@ -449,6 +481,8 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">Opening</span>;
     if (type === 'Dividend')
       return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">Dividend</span>;
+    if (type === 'Scrip')
+      return <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Scrip</span>;
     const isBuy = type === 'Buy' || type === 'BUY';
     return (
       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${isBuy ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -551,8 +585,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               {group.rows.map((row, idx) => {
                 const isOp    = row.row_type === 'opening';
                 const isDiv   = row.row_type === 'dividend';
+                const isScrip = row.row_type === 'scrip';
                 const isNote  = row.row_type === 'buy' || row.row_type === 'sell';
-                const bg      = isOp ? 'bg-blue-50/70' : isDiv ? 'bg-yellow-50/60' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50';
+                const bg      = isOp ? 'bg-blue-50/70' : isDiv ? 'bg-yellow-50/60' : isScrip ? 'bg-purple-50/60' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50';
                 const isExpanded = expandedNoteId === row.id;
                 const detail     = noteDetails.get(row.id);
                 const isLoading  = noteLoading === row.id;
@@ -763,7 +798,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
 
                 // Cost per share: unit price = totalPC / totalSharesBought (SUMIF positive)
                 const totalSharesBought = group.rows
-                  .filter(r => r.row_type === 'buy' || r.row_type === 'opening')
+                  .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
                   .reduce((s, r) => s + r.no_of_shares, 0);
                 const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
 
@@ -867,24 +902,31 @@ export function ShareAnalytics() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes] = await Promise.all([
+      const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes, scripsRes, feeTypesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
         supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
         supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
         supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
+        supabase.from('scrip_entries').select('entity_id, share_id, no_of_shares, effective_date, entry_date').eq('status', 'RECEIVED'),
+        supabase.from('brokerage_fee_types').select('rate, min_price').eq('is_active', true).order('min_price', { ascending: true, nullsFirst: true }),
       ]);
+
+      // Default fee rate = lowest tier's rate (used when a group has no transaction-level rate stored)
+      const defaultFeeRate = feeTypesRes.data && feeTypesRes.data.length > 0
+        ? Number(feeTypesRes.data[0].rate)
+        : 0;
 
       const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
       const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
 
       // Build txn map; collect all distinct CDS accounts per entity+share; latest brokerage fee rate
-      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null }>();
+      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null; total_amount: number }>();
       const cdsSetMap     = new Map<string, Set<string>>(); // key: entity_id__share_id -> set of CDS accounts
-      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate
+      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate (blended, stored on txn)
       for (const t of (txnsRes.data || [])) {
-        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null });
+        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null, total_amount: Number(t.total_amount) || 0 });
         const k = `${t.entity_id}__${t.share_id}`;
         if (t.cds_account_id) {
           if (!cdsSetMap.has(k)) cdsSetMap.set(k, new Set());
@@ -912,6 +954,14 @@ export function ShareAnalytics() {
         dividendMap.get(k)!.push({ entity_id: d.entity_id, share_id: d.share_id, payment_date: d.payment_date, amount_net: Number(d.amount_net) || 0 });
       }
 
+      const scripMap = new Map<string, ScripRecord[]>();
+      for (const s of (scripsRes.data || [])) {
+        if (selectedEntityId && s.entity_id !== selectedEntityId) continue;
+        const k = `${s.entity_id}__${s.share_id}`;
+        if (!scripMap.has(k)) scripMap.set(k, []);
+        scripMap.get(k)!.push({ entity_id: s.entity_id, share_id: s.share_id, no_of_shares: Number(s.no_of_shares) || 0, effective_date: s.effective_date ?? null, entry_date: s.entry_date });
+      }
+
       const priceMap     = new Map<string, number>();
       const priceDateMap = new Map<string, string>();
       for (const p of (pricesRes.data || [])) {
@@ -924,22 +974,22 @@ export function ShareAnalytics() {
       const { data: notesData, error: notesError } = await supabase
         .from('buy_sell_notes')
         .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, transaction_id')
+        .eq('status', 'PROCESSED')
         .order('trade_date', { ascending: true });
       if (notesError) throw notesError;
-
-      // Track which transaction IDs have a linked note
-      const notedTxnIds = new Set<string>((notesData || []).map((n: any) => n.transaction_id).filter(Boolean));
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
         .map((n: any) => {
           const txn   = txnMap.get(n.transaction_id)!;
           const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
+          // Use the stored total_amount from the transaction (net of fees) for cost/proceeds tracking
+          const netAmount = txn.total_amount > 0 ? txn.total_amount : (Number(n.gross_amount) || 0);
           return {
             id: n.id, note_type: n.note_type, trade_date: n.trade_date,
             no_of_shares: Number(n.no_of_shares) || 0,
             price_avg: n.price_avg != null ? Number(n.price_avg) : null,
-            gross_amount: Number(n.gross_amount) || 0,
+            gross_amount: netAmount,
             entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
             cds_account: txn.cds_account_id ?? null,
@@ -947,37 +997,14 @@ export function ShareAnalytics() {
         })
         .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
 
-      // Synthesize RawNote entries for approved transactions that have NO linked buy_sell_note
-      const txnFallbackNotes: RawNote[] = [];
-      for (const [txnId, txn] of txnMap) {
-        if (notedTxnIds.has(txnId)) continue;
-        if (selectedEntityId && txn.entity_id !== selectedEntityId) continue;
-        const txnData = (txnsRes.data || []).find((t: any) => t.id === txnId);
-        if (!txnData) continue;
-        const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
-        txnFallbackNotes.push({
-          id: txnId,
-          note_type: txnData.transaction_type === 'BUY' ? 'Buy' : 'Sell',
-          trade_date: txnData.transaction_date ?? null,
-          no_of_shares: Number(txnData.no_of_shares) || 0,
-          price_avg: txnData.price_per_share != null ? Number(txnData.price_per_share) : null,
-          gross_amount: Number(txnData.total_amount) || 0,
-          entity_id: txn.entity_id,
-          entity_name: entityMap.get(txn.entity_id) ?? '—',
-          share_id: txn.share_id,
-          share_ticker: share.ticker,
-          share_name: share.name,
-          cds_account: txn.cds_account_id ?? null,
-        });
-      }
-
-      const allRaw = [...raw, ...txnFallbackNotes];
+      const allRaw = raw;
 
       const groupKeys = new Set<string>();
       for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
       for (const [k] of openingMap) {
         if (!selectedEntityId || k.startsWith(selectedEntityId)) groupKeys.add(k);
       }
+      for (const [k] of scripMap) groupKeys.add(k);
 
       const notesByGroup = new Map<string, RawNote[]>();
       for (const n of allRaw) {
@@ -999,9 +1026,10 @@ export function ShareAnalytics() {
         const marketPrice      = priceMap.get(shareId) ?? 0;
         const marketPriceDate  = priceDateMap.get(shareId) ?? null;
         const cdsAccounts      = cdsSetMap.has(key) ? Array.from(cdsSetMap.get(key)!) : [];
-        const brokerageFeeRate = feeRateMap.get(key) ?? 0;
+        const brokerageFeeRate = feeRateMap.get(key) ?? defaultFeeRate;
 
-        const computed = computeRows(notes, opening, divs, marketPrice);
+        const scrips   = scripMap.get(key) ?? [];
+        const computed = computeRows(notes, opening, divs, marketPrice, scrips);
         for (const row of computed) {
           if (!row.entity_name) row.entity_name = entityName;
           if (!row.share_ticker) row.share_ticker = share.ticker;
@@ -1211,7 +1239,7 @@ export function ShareAnalytics() {
                   const totalSV  = group.rows.reduce((s, r) => s + r.sale_value, 0);
                   const totalDiv = group.rows.reduce((s, r) => s + r.dividend, 0);
                   const totalCF  = group.rows.reduce((s, r) => s + r.cash_flow, 0);
-                  const txnCount = group.rows.filter(r => r.row_type === 'buy' || r.row_type === 'sell').length;
+                  const txnCount = group.rows.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length;
 
                   return (
                     <tr

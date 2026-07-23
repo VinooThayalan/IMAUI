@@ -175,6 +175,8 @@ export function Transactions() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
   const [feeBreakdownItems, setFeeBreakdownItems] = useState<FeeBreakdownItem[]>([]);
+  // When amount straddles the 100M threshold, aboveTierItems holds the above-tier breakdown
+  const [aboveTierItems, setAboveTierItems] = useState<FeeBreakdownItem[]>([]);
   const [sharesInputFocused, setSharesInputFocused] = useState(false);
   const [latestSharePrice, setLatestSharePrice] = useState<{ price: number; date: string } | null>(null);
 
@@ -223,26 +225,62 @@ export function Transactions() {
 
   useEffect(() => {
     if (formData.no_of_shares && formData.price_per_share) {
-      const totalAmount = parseFloat(formData.no_of_shares) * parseFloat(formData.price_per_share);
+      const grossAmount = parseFloat(formData.no_of_shares) * parseFloat(formData.price_per_share);
 
       if (!formData.use_negotiated_fee) {
-        const matchingFeeType = brokerageFeeTypes.find(ft => {
-          const minOk = ft.min_price === null || totalAmount >= ft.min_price;
-          const maxOk = ft.max_price === null || totalAmount <= ft.max_price;
-          return minOk && maxOk;
-        });
+        // Sort active tiers by min_price to identify the lower and upper tiers
+        const sortedTiers = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+        const belowTier = sortedTiers[0] ?? null;
+        const aboveTier = sortedTiers[1] ?? null;
+        const threshold = belowTier?.max_price ?? null;
 
-        if (matchingFeeType) {
-          const breakdown = Array.isArray(matchingFeeType.fee_breakdown_items)
-            ? matchingFeeType.fee_breakdown_items.map(i => ({ ...i }))
+        if (belowTier && aboveTier && threshold !== null && grossAmount > threshold) {
+          // Split: compute fees on the threshold amount at below-tier rates, rest at above-tier rates
+          const belowBreakdown = Array.isArray(belowTier.fee_breakdown_items)
+            ? belowTier.fee_breakdown_items.map(i => ({ ...i }))
             : [];
-          setFeeBreakdownItems(breakdown);
+          const aboveBreakdown = Array.isArray(aboveTier.fee_breakdown_items)
+            ? aboveTier.fee_breakdown_items.map(i => ({ ...i }))
+            : [];
+
+          setFeeBreakdownItems(belowBreakdown);
+          setAboveTierItems(aboveBreakdown);
+
+          const belowFees = belowBreakdown.reduce((sum, item) => sum + (threshold * item.rate) / 100, 0);
+          const excess = grossAmount - threshold;
+          const aboveFees = aboveBreakdown.reduce((sum, item) => sum + (excess * item.rate) / 100, 0);
+          const totalFees = belowFees + aboveFees;
+          const blendedRate = grossAmount > 0 ? (totalFees / grossAmount) * 100 : 0;
+
           setFormData(prev => ({
             ...prev,
-            brokerage_fee_type_id: matchingFeeType.id,
-            brokerage_fee_rate: matchingFeeType.rate.toString()
+            brokerage_fee_type_id: belowTier.id,
+            brokerage_fee_rate: blendedRate.toFixed(6),
+            fees: totalFees.toFixed(2),
           }));
-          calculateFeesFromBreakdown(breakdown);
+        } else {
+          // Single tier: find whichever tier matches the full gross amount
+          const matchingFeeType = brokerageFeeTypes.find(ft => {
+            const minOk = ft.min_price === null || grossAmount >= ft.min_price;
+            const maxOk = ft.max_price === null || grossAmount <= ft.max_price;
+            return minOk && maxOk;
+          });
+
+          if (matchingFeeType) {
+            const breakdown = Array.isArray(matchingFeeType.fee_breakdown_items)
+              ? matchingFeeType.fee_breakdown_items.map(i => ({ ...i }))
+              : [];
+            setFeeBreakdownItems(breakdown);
+            setAboveTierItems([]);
+
+            const fees = breakdown.reduce((sum, item) => sum + (grossAmount * item.rate) / 100, 0);
+            setFormData(prev => ({
+              ...prev,
+              brokerage_fee_type_id: matchingFeeType.id,
+              brokerage_fee_rate: matchingFeeType.rate.toString(),
+              fees: fees.toFixed(2),
+            }));
+          }
         }
       } else if (formData.brokerage_fee_rate) {
         calculateFees(parseFloat(formData.brokerage_fee_rate));
@@ -367,12 +405,25 @@ export function Transactions() {
     }
   }
 
-  function calculateFeesFromBreakdown(items: FeeBreakdownItem[]) {
+  function calculateFeesFromBreakdown(items: FeeBreakdownItem[], aboveItems?: FeeBreakdownItem[]) {
     const shares = parseFloat(formData.no_of_shares) || 0;
     const price = parseFloat(formData.price_per_share) || 0;
     const grossAmount = shares * price;
-    const totalRate = items.reduce((sum, item) => sum + (item.rate || 0), 0);
-    const fees = (grossAmount * totalRate) / 100;
+
+    const sortedTiers = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+    const threshold = sortedTiers[0]?.max_price ?? null;
+    const currentAboveItems = aboveItems ?? aboveTierItems;
+
+    let fees: number;
+    if (threshold !== null && grossAmount > threshold && currentAboveItems.length > 0) {
+      const belowFees = items.reduce((sum, item) => sum + (threshold * item.rate) / 100, 0);
+      const excess = grossAmount - threshold;
+      const aboveFees = currentAboveItems.reduce((sum, item) => sum + (excess * item.rate) / 100, 0);
+      fees = belowFees + aboveFees;
+    } else {
+      fees = items.reduce((sum, item) => sum + (grossAmount * item.rate) / 100, 0);
+    }
+
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
@@ -387,12 +438,17 @@ export function Transactions() {
   function handleDayTradeChange(checked: boolean) {
     setFormData(prev => ({ ...prev, day_trade: checked }));
     if (checked && feeBreakdownItems.length > 0) {
-      const updated = feeBreakdownItems.map(item => ({
+      const updatedBelow = feeBreakdownItems.map(item => ({
         ...item,
         rate: item.name.toLowerCase().includes('levy') ? item.rate : 0
       }));
-      setFeeBreakdownItems(updated);
-      calculateFeesFromBreakdown(updated);
+      const updatedAbove = aboveTierItems.map(item => ({
+        ...item,
+        rate: item.name.toLowerCase().includes('levy') ? item.rate : 0
+      }));
+      setFeeBreakdownItems(updatedBelow);
+      setAboveTierItems(updatedAbove);
+      calculateFeesFromBreakdown(updatedBelow, updatedAbove);
     }
   }
 
@@ -500,6 +556,7 @@ export function Transactions() {
       day_trade: false
     });
     setFeeBreakdownItems([]);
+    setAboveTierItems([]);
     setEditingDraftId(null);
     setLatestSharePrice(null);
   }
@@ -1384,7 +1441,10 @@ export function Transactions() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Transactions</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{transactions.length}</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{filteredTransactions.length}</p>
+              {filteredTransactions.length !== transactions.length && (
+                <p className="text-xs text-gray-400 mt-1">{transactions.length} total</p>
+              )}
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-blue-600" />
@@ -1397,7 +1457,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Buy Transactions</p>
               <p className="text-2xl font-bold text-green-600 mt-2">
-                {transactions.filter(t => t.transaction_type === 'BUY').length}
+                {filteredTransactions.filter(t => t.transaction_type === 'BUY').length}
               </p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -1411,7 +1471,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Sell Transactions</p>
               <p className="text-2xl font-bold text-red-600 mt-2">
-                {transactions.filter(t => t.transaction_type === 'SELL').length}
+                {filteredTransactions.filter(t => t.transaction_type === 'SELL').length}
               </p>
             </div>
             <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
@@ -1425,7 +1485,7 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Total Volume</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
-                LKR {transactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                LKR {filteredTransactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
           </div>
@@ -2075,7 +2135,16 @@ export function Transactions() {
                     {!formData.use_negotiated_fee ? (
                       formData.brokerage_fee_type_id ? (
                         <div className="flex items-center gap-2 px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
-                          <span className="text-xs font-semibold text-blue-800">{brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id)?.name ?? 'Auto-detected'}</span>
+                          {(() => {
+                            const grossAmt = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
+                            const st = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+                            const thr = st[0]?.max_price ?? null;
+                            const isTiered = thr !== null && grossAmt > thr && aboveTierItems.length > 0;
+                            if (isTiered) {
+                              return <span className="text-xs font-semibold text-blue-800">Tiered: {st[0]?.name} + {st[1]?.name}</span>;
+                            }
+                            return <span className="text-xs font-semibold text-blue-800">{brokerageFeeTypes.find(ft => ft.id === formData.brokerage_fee_type_id)?.name ?? 'Auto-detected'}</span>;
+                          })()}
                           <span className="text-xs text-blue-500 bg-blue-100 px-1.5 py-0.5 rounded-full">Auto-detected</span>
                         </div>
                       ) : (
@@ -2126,63 +2195,113 @@ export function Transactions() {
                 </div>
 
                 {/* Fee breakdown table (compact) */}
-                {feeBreakdownItems.length > 0 && (
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Fee Breakdown <span className="font-normal text-gray-400">(rates editable for this transaction)</span>
-                    </label>
-                    <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="px-3 py-1.5 text-left font-semibold text-gray-600">Component</th>
-                            <th className="px-3 py-1.5 text-right font-semibold text-gray-600 w-28">Rate (%)</th>
-                            <th className="px-3 py-1.5 text-right font-semibold text-gray-600 w-36">Amount (LKR)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {feeBreakdownItems.map((item, idx) => {
-                            const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
-                            const itemAmount = (grossAmount * item.rate) / 100;
-                            return (
-                              <tr key={idx} className="hover:bg-gray-50">
-                                <td className="px-3 py-1 text-gray-700">{item.name}</td>
-                                <td className="px-3 py-1">
-                                  <input
-                                    type="number" step="0.0001" min="0"
-                                    value={item.rate}
-                                    onChange={(e) => {
-                                      const updated = feeBreakdownItems.map((it, i) =>
-                                        i === idx ? { ...it, rate: parseFloat(e.target.value) || 0 } : it
-                                      );
-                                      setFeeBreakdownItems(updated);
-                                      calculateFeesFromBreakdown(updated);
-                                    }}
-                                    className="w-full px-2 py-0.5 border border-gray-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                  />
-                                </td>
-                                <td className="px-3 py-1 text-right font-medium text-gray-700">
-                                  {itemAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {feeBreakdownItems.length > 0 && (() => {
+                  const grossAmount = (parseFloat(formData.no_of_shares) || 0) * (parseFloat(formData.price_per_share) || 0);
+                  const sortedTiersUI = [...brokerageFeeTypes].sort((a, b) => (a.min_price ?? 0) - (b.min_price ?? 0));
+                  const threshold = sortedTiersUI[0]?.max_price ?? null;
+                  const isSplit = threshold !== null && grossAmount > threshold && aboveTierItems.length > 0;
+                  const belowBase = isSplit ? threshold! : grossAmount;
+                  const excessBase = isSplit ? grossAmount - threshold! : 0;
+
+                  return (
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">
+                        Fee Breakdown <span className="font-normal text-gray-400">(rates editable for this transaction)</span>
+                        {isSplit && <span className="ml-2 text-orange-600 font-semibold">(Tiered: first {(threshold!/1e6).toFixed(0)}M + excess)</span>}
+                      </label>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-3 py-1.5 text-left font-semibold text-gray-600">Component</th>
+                              <th className="px-3 py-1.5 text-right font-semibold text-gray-600 w-28">Rate (%)</th>
+                              <th className="px-3 py-1.5 text-right font-semibold text-gray-600 w-36">Amount (LKR)</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {isSplit && (
+                              <tr className="bg-blue-50">
+                                <td colSpan={3} className="px-3 py-1 text-blue-700 font-semibold">
+                                  On LKR {belowBase.toLocaleString(undefined, { maximumFractionDigits: 0 })} (up to threshold)
                                 </td>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                        <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                          <tr>
-                            <td className="px-3 py-1.5 font-bold text-gray-900 text-xs">Total</td>
-                            <td className="px-3 py-1.5 text-right font-bold text-blue-700 text-xs">
-                              {feeBreakdownItems.reduce((s, i) => s + i.rate, 0).toFixed(4)}%
-                            </td>
-                            <td className="px-3 py-1.5 text-right font-bold text-blue-700 text-xs">
-                              {(parseFloat(formData.fees) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
+                            )}
+                            {feeBreakdownItems.map((item, idx) => {
+                              const itemAmount = (belowBase * item.rate) / 100;
+                              return (
+                                <tr key={`below-${idx}`} className="hover:bg-gray-50">
+                                  <td className="px-3 py-1 text-gray-700">{item.name}</td>
+                                  <td className="px-3 py-1">
+                                    <input
+                                      type="number" step="0.0001" min="0"
+                                      value={item.rate}
+                                      onChange={(e) => {
+                                        const updated = feeBreakdownItems.map((it, i) =>
+                                          i === idx ? { ...it, rate: parseFloat(e.target.value) || 0 } : it
+                                        );
+                                        setFeeBreakdownItems(updated);
+                                        calculateFeesFromBreakdown(updated);
+                                      }}
+                                      className="w-full px-2 py-0.5 border border-gray-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-1 text-right font-medium text-gray-700">
+                                    {itemAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {isSplit && (
+                              <>
+                                <tr className="bg-orange-50">
+                                  <td colSpan={3} className="px-3 py-1 text-orange-700 font-semibold">
+                                    On LKR {excessBase.toLocaleString(undefined, { maximumFractionDigits: 0 })} (excess above threshold)
+                                  </td>
+                                </tr>
+                                {aboveTierItems.map((item, idx) => {
+                                  const itemAmount = (excessBase * item.rate) / 100;
+                                  return (
+                                    <tr key={`above-${idx}`} className="hover:bg-gray-50">
+                                      <td className="px-3 py-1 text-gray-700">{item.name}</td>
+                                      <td className="px-3 py-1">
+                                        <input
+                                          type="number" step="0.0001" min="0"
+                                          value={item.rate}
+                                          onChange={(e) => {
+                                            const updated = aboveTierItems.map((it, i) =>
+                                              i === idx ? { ...it, rate: parseFloat(e.target.value) || 0 } : it
+                                            );
+                                            setAboveTierItems(updated);
+                                            calculateFeesFromBreakdown(feeBreakdownItems, updated);
+                                          }}
+                                          className="w-full px-2 py-0.5 border border-gray-200 rounded text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        />
+                                      </td>
+                                      <td className="px-3 py-1 text-right font-medium text-gray-700">
+                                        {itemAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </tbody>
+                          <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                            <tr>
+                              <td className="px-3 py-1.5 font-bold text-gray-900 text-xs">Total</td>
+                              <td className="px-3 py-1.5 text-right font-bold text-blue-700 text-xs">
+                                {isSplit ? '(tiered)' : `${feeBreakdownItems.reduce((s, i) => s + i.rate, 0).toFixed(4)}%`}
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-bold text-blue-700 text-xs">
+                                {(parseFloat(formData.fees) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Row 7: Fee totals + net */}
                 <div className={`grid grid-cols-3 gap-3 rounded-xl border p-3 ${

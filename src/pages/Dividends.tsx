@@ -1,4 +1,4 @@
-import { Plus, Search, Filter, Wallet, TrendingUp, Calendar, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Search, Wallet, TrendingUp, Calendar, Clock, Pencil, Trash2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,6 +18,7 @@ interface Dividend {
   amount_net: number;
   announcement_date: string | null;
   payment_date: string | null;
+  payment_date_cse: string | null;
   effective_date: string | null;
   bank_name: string | null;
   bank_account_no: string | null;
@@ -52,6 +53,7 @@ interface EntityBroker {
   relationship_type: string;
   custodian_account_number: string | null;
   broker_account_number: string | null;
+  bank_id: string | null;
 }
 
 const EMPTY_FORM = {
@@ -64,6 +66,7 @@ const EMPTY_FORM = {
   net_dividend_per_share: '',
   announcement_date: '',
   payment_date: '',
+  payment_date_cse: '',
   effective_date: '',
   selected_bank_id: '',
   bank_name: '',
@@ -86,6 +89,8 @@ export function Dividends() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
   const [search, setSearch] = useState('');
+  const [filterEntity, setFilterEntity] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
   useEffect(() => { loadData(); }, []);
@@ -108,7 +113,7 @@ export function Dividends() {
         supabase.from('entities').select('id, name').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('ticker'),
         supabase.from('banks').select('id, name, account_number, entity_id').order('name'),
-        supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number'),
+        supabase.from('entity_brokers').select('id, entity_id, relationship_type, custodian_account_number, broker_account_number, bank_id'),
       ]);
       if (dividendsRes.error) throw dividendsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
@@ -146,9 +151,7 @@ export function Dividends() {
 
   function openEdit(d: Dividend) {
     setEditingId(d.id);
-    const matchingBank = banks.find(
-      b => b.entity_id === d.entity_id && b.name === d.bank_name,
-    );
+    const matchingBank = banks.find(b => b.entity_id === d.entity_id && b.name === d.bank_name);
     setFormData({
       entity_id: d.entity_id,
       share_id: d.share_id,
@@ -159,6 +162,7 @@ export function Dividends() {
       net_dividend_per_share: String(d.net_dividend_per_share ?? ''),
       announcement_date: d.announcement_date || '',
       payment_date: d.payment_date || '',
+      payment_date_cse: d.payment_date_cse || '',
       effective_date: d.effective_date || '',
       selected_bank_id: matchingBank?.id || '',
       bank_name: d.bank_name || '',
@@ -177,6 +181,37 @@ export function Dividends() {
     setFormData({ ...EMPTY_FORM });
   }
 
+  async function updateCashLedgerOnFinalize(entityId: string, amountNet: number, ticker: string, performedBy: string) {
+    const { data: ledgerRows } = await supabase
+      .from('cash_balance_ledger')
+      .select('running_balance')
+      .eq('entity_id', entityId)
+      .order('timestamp', { ascending: false })
+      .limit(1);
+
+    const lastBalance = ledgerRows && ledgerRows.length > 0 ? Number(ledgerRows[0].running_balance) : 0;
+    const newBalance = lastBalance + amountNet;
+
+    const { error: ledgerError } = await supabase.from('cash_balance_ledger').insert({
+      type: 'Addition',
+      description: `Dividend — ${ticker}`,
+      amount: amountNet,
+      date: new Date().toISOString().split('T')[0],
+      running_balance: newBalance,
+      on_hold_amount: 0,
+      source: 'Dividend',
+      entity_id: entityId,
+      created_by: performedBy,
+    });
+
+    if (ledgerError) {
+      console.error('Failed to write cash ledger entry:', ledgerError);
+      return;
+    }
+
+    await supabase.from('entities').update({ current_balance: newBalance }).eq('id', entityId);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -185,6 +220,19 @@ export function Dividends() {
       const net = gross * (1 - rate / 100);
       const qty = parseFloat(formData.quantity) || 0;
       const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
+
+      // Resolve CDS: prefer entity_brokers auto-fill, fall back to manual input
+      const entityCdsEntries = formData.entity_id
+        ? entityBrokers.filter(eb => eb.entity_id === formData.entity_id)
+        : [];
+      const firstCds = formData.selected_bank_id
+        ? entityCdsEntries.find(eb => eb.bank_id === formData.selected_bank_id)
+        : entityCdsEntries[0];
+      const resolvedCdsAccount = firstCds
+        ? (firstCds.relationship_type === 'Custodian'
+            ? firstCds.custodian_account_number
+            : firstCds.broker_account_number) || null
+        : formData.cds_account || null;
 
       const payload = {
         entity_id: formData.entity_id,
@@ -199,25 +247,41 @@ export function Dividends() {
         amount_net: net * qty,
         announcement_date: formData.announcement_date || null,
         payment_date: formData.payment_date || null,
+        payment_date_cse: formData.payment_date_cse || null,
         effective_date: formData.effective_date || null,
         bank_name: selectedBank?.name || null,
         bank_account_no: selectedBank?.account_number || null,
         payment_method: formData.payment_method || null,
-        cds_account: formData.cds_account || null,
+        cds_account: resolvedCdsAccount,
         notes: formData.notes || null,
         status: formData.status,
       };
 
+      const performedBy = user?.email || 'system';
+      const ticker = getShareTicker(formData.share_id);
+      const becomingFinalized = formData.status === 'Finalized';
+
       if (editingId) {
         const oldRecord = await fetchRecordForAudit('dividends', editingId);
+        const wasFinalized = oldRecord?.status === 'Finalized';
         const { error } = await supabase.from('dividends').update(payload).eq('id', editingId);
         if (error) throw error;
-        logAudit({ tableName: 'dividends', recordId: editingId, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...payload }, entityId: payload.entity_id });
+        logAudit({ tableName: 'dividends', recordId: editingId, action: 'UPDATE', performedBy, oldValues: oldRecord, newValues: { ...oldRecord, ...payload }, entityId: payload.entity_id });
+
+        // Only write cashflow when transitioning into Finalized (not already there)
+        if (!wasFinalized && becomingFinalized) {
+          await updateCashLedgerOnFinalize(payload.entity_id, payload.amount_net, ticker, performedBy);
+        }
       } else {
         const { data: inserted, error } = await supabase.from('dividends').insert(payload).select('id').maybeSingle();
         if (error) throw error;
-        logAudit({ tableName: 'dividends', recordId: inserted?.id || 'new', action: 'CREATE', performedBy: user?.email || 'system', newValues: payload, entityId: payload.entity_id });
+        logAudit({ tableName: 'dividends', recordId: inserted?.id || 'new', action: 'CREATE', performedBy, newValues: payload, entityId: payload.entity_id });
+
+        if (becomingFinalized) {
+          await updateCashLedgerOnFinalize(payload.entity_id, payload.amount_net, ticker, performedBy);
+        }
       }
+
       closeModal();
       loadData();
     } catch (error) {
@@ -245,16 +309,23 @@ export function Dividends() {
 
   const finalized = dividends.filter(d => d.status === 'Finalized');
   const totalNet = finalized.reduce((s, d) => s + (d.amount_net || 0), 0);
-  const pendingCount = dividends.filter(d => d.status === 'Awaiting dividend' || d.status === 'Received').length;
+  const awaitingCount = dividends.filter(d => d.status === 'Awaiting dividend').length;
+  const receivedCount = dividends.filter(d => d.status === 'Received').length;
+
+  const hasFilters = !!(filterEntity || filterStatus || search);
 
   const filtered = dividends.filter(d => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      getEntityName(d.entity_id).toLowerCase().includes(q) ||
-      getShareTicker(d.share_id).toLowerCase().includes(q) ||
-      d.status.toLowerCase().includes(q)
-    );
+    if (filterEntity && d.entity_id !== filterEntity) return false;
+    if (filterStatus && d.status !== filterStatus) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        getEntityName(d.entity_id).toLowerCase().includes(q) ||
+        getShareTicker(d.share_id).toLowerCase().includes(q) ||
+        d.status.toLowerCase().includes(q)
+      );
+    }
+    return true;
   });
 
   const statusStyle = (s: string) => {
@@ -285,7 +356,7 @@ export function Dividends() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -293,7 +364,7 @@ export function Dividends() {
               <p className="text-2xl font-bold text-gray-900 mt-2">{fmtRs(totalNet)}</p>
               <div className="flex items-center mt-2">
                 <TrendingUp className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-gray-500 ml-1">{finalized.length} finalized dividend(s)</span>
+                <span className="text-sm text-gray-500 ml-1">{finalized.length} finalized dividend{finalized.length !== 1 ? 's' : ''}</span>
               </div>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -302,15 +373,28 @@ export function Dividends() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="bg-white rounded-xl border border-amber-200 p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-500">Pending Dividends</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">{pendingCount}</p>
-              <p className="text-sm text-gray-500 mt-2">Awaiting or received</p>
+              <p className="text-sm font-medium text-amber-600">Awaiting Dividend</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{awaitingCount}</p>
+              <p className="text-sm text-gray-500 mt-2">Not yet received</p>
+            </div>
+            <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+              <Calendar className="w-6 h-6 text-amber-600" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-blue-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-blue-600">Received — Pending Finalization</p>
+              <p className="text-2xl font-bold text-gray-900 mt-2">{receivedCount}</p>
+              <p className="text-sm text-gray-500 mt-2">Cash received, awaiting finalization</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Calendar className="w-6 h-6 text-blue-600" />
+              <Clock className="w-6 h-6 text-blue-600" />
             </div>
           </div>
         </div>
@@ -318,22 +402,51 @@ export function Dividends() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-4">
-            <div className="flex-1 relative">
+        <div className="p-6 border-b border-gray-200 space-y-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex-1 min-w-48 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search by entity, ticker or status..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
-            <button className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              <Filter className="w-5 h-5 text-gray-500" />
-              <span className="font-medium text-gray-700">Filter</span>
-            </button>
+            <select
+              value={filterEntity}
+              onChange={e => setFilterEntity(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="">All Entities</option>
+              {entities.map(en => (
+                <option key={en.id} value={en.id}>{en.name}</option>
+              ))}
+            </select>
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="Awaiting dividend">Awaiting dividend</option>
+              <option value="Received">Received</option>
+              <option value="Finalized">Finalized</option>
+            </select>
+            {hasFilters && (
+              <button
+                onClick={() => { setSearch(''); setFilterEntity(''); setFilterStatus(''); }}
+                className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <X className="w-4 h-4" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
+          <div className="text-sm text-gray-500">
+            {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+            {hasFilters && <span className="ml-1 text-blue-600">— filtered</span>}
           </div>
         </div>
 
@@ -343,14 +456,13 @@ export function Dividends() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Ticker</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Gross/Share</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">WHT %</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net/Share</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Gross</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Net</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Dates</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
@@ -369,31 +481,29 @@ export function Dividends() {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={14} className="px-4 py-12 text-center text-gray-500">
-                    {search ? 'No dividends match your search.' : 'No dividends found. Add your first dividend to get started.'}
+                    {hasFilters ? 'No dividends match your filters.' : 'No dividends found. Add your first dividend to get started.'}
                   </td>
                 </tr>
               ) : filtered.map(d => (
                 <tr key={d.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-4 text-sm font-semibold text-gray-900 whitespace-nowrap">{getEntityName(d.entity_id)}</td>
                   <td className="px-4 py-4 text-sm font-bold text-blue-600 whitespace-nowrap">{getShareTicker(d.share_id)}</td>
-                  <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap">{formatDate(d.dividend_date)}</td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="text-xs space-y-0.5">
+                      {d.dividend_date && <div className="text-purple-600 font-medium">XD: {formatDate(d.dividend_date)}</div>}
+                      {d.announcement_date && <div className="text-gray-500">Ann: {formatDate(d.announcement_date)}</div>}
+                      {d.effective_date && <div className="text-emerald-600 font-medium">Eff: {formatDate(d.effective_date)}</div>}
+                      {d.payment_date && <div className="text-gray-500">Pay: {formatDate(d.payment_date)}</div>}
+                      {d.payment_date_cse && <div className="text-blue-600 font-medium">CSE: {formatDate(d.payment_date_cse)}</div>}
+                      {!d.dividend_date && !d.announcement_date && !d.effective_date && !d.payment_date && !d.payment_date_cse && <span className="text-gray-400">—</span>}
+                    </div>
+                  </td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.quantity || 0).toLocaleString()}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.gross_dividend_per_share || 0).toFixed(4)}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.withholding_tax_rate || 0).toFixed(1)}%</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.net_dividend_per_share || 0).toFixed(4)}</td>
-                  <td className="px-4 py-4 text-sm text-gray-700 text-right whitespace-nowrap">
-                    {fmtRs(d.amount_gross || 0)}
-                  </td>
-                  <td className="px-4 py-4 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
-                    {fmtRs(d.amount_net || 0)}
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <div className="text-xs space-y-0.5 text-gray-500">
-                      {d.announcement_date && <div>Ann: {formatDate(d.announcement_date)}</div>}
-                      {d.effective_date && <div className="text-emerald-600 font-medium">Eff: {formatDate(d.effective_date)}</div>}
-                      {d.payment_date && <div>Pay: {formatDate(d.payment_date)}</div>}
-                    </div>
-                  </td>
+                  <td className="px-4 py-4 text-sm text-gray-700 text-right whitespace-nowrap">{fmtRs(d.amount_gross || 0)}</td>
+                  <td className="px-4 py-4 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">{fmtRs(d.amount_net || 0)}</td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="text-xs space-y-0.5">
                       {d.bank_name && <div className="text-gray-900 font-medium">{d.bank_name}</div>}
@@ -449,46 +559,46 @@ export function Dividends() {
                   {editingId ? 'Edit Dividend' : 'Add Dividend'}
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Fields in <span className="text-red-500 font-medium">red</span> are required.
-                  Fields in <span className="text-emerald-600 font-medium">green</span> affect reports and cashflow.
+                  Fields marked <span className="text-red-500 font-medium">*</span> are required.
+                  <span className="text-emerald-600 font-medium ml-1">Green fields</span> affect reports and cashflow.
                 </p>
               </div>
 
               <div className="p-6 space-y-5">
-                {/* Entity */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                    Entity <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.entity_id}
-                    onChange={e => setFormData({ ...formData, entity_id: e.target.value, selected_bank_id: '', cds_account: '' })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  >
-                    <option value="">Select entity...</option>
-                    {entities.map(en => (
-                      <option key={en.id} value={en.id}>{en.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Ticker */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                    Ticker (Share) <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    required
-                    value={formData.share_id}
-                    onChange={e => setFormData({ ...formData, share_id: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  >
-                    <option value="">Select ticker...</option>
-                    {shares.map(s => (
-                      <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>
-                    ))}
-                  </select>
+                {/* Entity + Ticker */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Entity <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={formData.entity_id}
+                      onChange={e => setFormData({ ...formData, entity_id: e.target.value, selected_bank_id: '', cds_account: '' })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">Select entity...</option>
+                      {entities.map(en => (
+                        <option key={en.id} value={en.id}>{en.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                      Ticker (Share) <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={formData.share_id}
+                      onChange={e => setFormData({ ...formData, share_id: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">Select ticker...</option>
+                      {shares.map(s => (
+                        <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="border-t border-gray-100 pt-1">
@@ -529,7 +639,7 @@ export function Dividends() {
                   </div>
                 </div>
 
-                {/* WHT + Net + Totals preview */}
+                {/* WHT + Net */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-red-600 mb-1.5">
@@ -551,7 +661,7 @@ export function Dividends() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">Net Dividend per Share</label>
+                    <label className="block text-sm font-semibold text-gray-500 mb-1.5">Net Dividend per Share (auto)</label>
                     <input
                       type="number"
                       readOnly
@@ -573,7 +683,7 @@ export function Dividends() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Total Net</p>
-                      <p className="text-sm font-semibold text-gray-900 mt-0.5">
+                      <p className="text-sm font-semibold text-emerald-700 mt-0.5">
                         {fmtRs((parseFloat(formData.quantity) || 0) * (parseFloat(formData.net_dividend_per_share) || 0))}
                       </p>
                     </div>
@@ -586,24 +696,21 @@ export function Dividends() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">
-                      Announcement Date <span className="text-red-500">*</span>
-                    </label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Announcement Date</label>
                     <input
                       type="date"
-                      required
                       value={formData.announcement_date}
                       onChange={e => setFormData({ ...formData, announcement_date: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Payment Date</label>
+                    <label className="block text-sm font-semibold text-purple-700 mb-1.5">XD Date</label>
                     <input
                       type="date"
-                      value={formData.payment_date}
-                      onChange={e => setFormData({ ...formData, payment_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      value={formData.dividend_date}
+                      onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
+                      className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm"
                     />
                   </div>
                 </div>
@@ -620,13 +727,26 @@ export function Dividends() {
                     <p className="text-xs text-gray-400 mt-1">Used in reports and cashflow</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Dividend Date</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Payment Date</label>
                     <input
                       type="date"
-                      value={formData.dividend_date}
-                      onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
+                      value={formData.payment_date}
+                      onChange={e => setFormData({ ...formData, payment_date: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                     />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-blue-700 mb-1.5">Payment Date as per CSE</label>
+                    <input
+                      type="date"
+                      value={formData.payment_date_cse}
+                      onChange={e => setFormData({ ...formData, payment_date_cse: e.target.value })}
+                      className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Official payment date per CSE</p>
                   </div>
                 </div>
 
@@ -637,11 +757,13 @@ export function Dividends() {
                 {(() => {
                   const entityBanks = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
                   const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
-                  const entityCdsAccounts = formData.entity_id
+                  const entityCdsEntries = formData.entity_id
                     ? entityBrokers.filter(eb => eb.entity_id === formData.entity_id)
                     : [];
-                  const firstCds = entityCdsAccounts[0];
-                  const cdsValue = firstCds
+                  const firstCds = formData.selected_bank_id
+                    ? entityCdsEntries.find(eb => eb.bank_id === formData.selected_bank_id)
+                    : entityCdsEntries[0];
+                  const cdsDisplayValue = firstCds
                     ? (firstCds.relationship_type === 'Custodian'
                         ? firstCds.custodian_account_number
                         : firstCds.broker_account_number) || ''
@@ -680,7 +802,7 @@ export function Dividends() {
                           <label className="block text-sm font-semibold text-emerald-600 mb-1.5">CDS Account</label>
                           <input
                             type="text"
-                            value={cdsValue || ''}
+                            value={cdsDisplayValue || ''}
                             readOnly={!!firstCds}
                             onChange={e => !firstCds && setFormData({ ...formData, cds_account: e.target.value })}
                             className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${firstCds ? 'border-gray-200 bg-gray-50 text-gray-700' : 'border-emerald-200'}`}
@@ -736,7 +858,9 @@ export function Dividends() {
                       <option value="Received">Received</option>
                       <option value="Finalized">Finalized</option>
                     </select>
-                    <p className="text-xs text-gray-400 mt-1">Setting to Finalized updates cashflow</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Setting to <strong>Finalized</strong> adds the net amount to Cash Balance
+                    </p>
                   </div>
                 </div>
               </div>
