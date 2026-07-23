@@ -439,6 +439,8 @@ export function TransactionApprovals() {
             },
             body: JSON.stringify({
               to: broker.contact_person_email,
+              triggered_by: user?.email || null,
+              source: 'transaction-approvals',
               transaction: buildEmailData(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
@@ -487,6 +489,8 @@ export function TransactionApprovals() {
             },
             body: JSON.stringify({
               to: broker.contact_person_email,
+              triggered_by: user?.email || null,
+              source: 'transaction-approvals',
               transaction: buildEmailData(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
@@ -555,6 +559,8 @@ export function TransactionApprovals() {
         body: JSON.stringify({
           to: emailAddress.trim(),
           cc: ccAddresses.filter(e => e.trim()),
+          triggered_by: user?.email || null,
+          source: 'transaction-approvals',
           transaction: buildEmailData(selectedTransaction, emailNote.trim() || undefined),
         }),
       });

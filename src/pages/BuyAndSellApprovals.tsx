@@ -212,6 +212,8 @@ export function BuyAndSellApprovals() {
         type: 'approval_notification',
         to: brokerEmail,
         cc: ccEmails.length > 0 ? ccEmails : undefined,
+        triggered_by: user?.email || null,
+        source: 'buy-sell-approvals',
         notification: {
           action,
           contract_no: note.contract_no || note.note_number || '-',

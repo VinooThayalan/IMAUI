@@ -41,6 +41,7 @@ const BankMaster = lazy(() => import('./pages/BankMaster').then(m => ({ default:
 const OpeningBalances = lazy(() => import('./pages/OpeningBalances').then(m => ({ default: m.OpeningBalances })));
 const BankTransactionHistory = lazy(() => import('./pages/BankTransactionHistory').then(m => ({ default: m.BankTransactionHistory })));
 const TestEmail = lazy(() => import('./pages/TestEmail').then(m => ({ default: m.TestEmail })));
+const EmailDeliveries = lazy(() => import('./pages/EmailDeliveries').then(m => ({ default: m.EmailDeliveries })));
 
 function PageFallback() {
   return (
@@ -65,7 +66,7 @@ function AccessDenied() {
   );
 }
 
-const adminPages = new Set(['user-management', 'menu-access', 'entity-access', 'test-email']);
+const adminPages = new Set(['user-management', 'menu-access', 'entity-access', 'test-email', 'email-deliveries']);
 
 function App() {
   const { user, appUser, loading, hasMenuAccess, isAdmin } = useAuth();
@@ -163,6 +164,8 @@ function App() {
         return <AuditLog />;
       case 'test-email':
         return <TestEmail />;
+      case 'email-deliveries':
+        return <EmailDeliveries />;
       default:
         return hasMenuAccess('dashboard') ? <Dashboard /> : <AccessDenied />;
     }
