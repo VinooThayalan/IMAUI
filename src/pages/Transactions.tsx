@@ -1263,6 +1263,8 @@ export function Transactions() {
       setSelectedTransactionIds(new Set(draftTransactions.map(t => t.id)));
     }
   }
+  
+}}
 
   async function submitSelectedForApproval() {
     if (selectedTransactionIds.size === 0) {
