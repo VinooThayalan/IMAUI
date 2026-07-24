@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Mail, Send, CheckCircle, XCircle, Loader } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 type Status = 'idle' | 'sending' | 'success' | 'error';
 
 export function TestEmail() {
+  const { appUser } = useAuth();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState('');
@@ -20,6 +22,8 @@ export function TestEmail() {
       const { data, error } = await supabase.functions.invoke('send-transaction-email', {
         body: {
           to: email.trim(),
+          triggered_by: appUser?.email || null,
+          source: 'test-email',
           transaction: {
             entity: 'Test Entity',
             transaction_type: 'BUY',

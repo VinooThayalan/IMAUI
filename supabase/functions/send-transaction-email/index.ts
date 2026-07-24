@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import nodemailer from "npm:nodemailer@6.9.13";
+import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,6 +53,42 @@ interface ApprovalNotificationData {
   txn_no_of_shares?: string;
   txn_price_per_share?: string;
   txn_total_amount?: string;
+}
+
+function getSupabaseClient() {
+  const url = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !serviceKey) throw new Error("Missing Supabase env vars");
+  return createClient(url, serviceKey);
+}
+
+async function logEmail(params: {
+  to: string;
+  cc: string[] | undefined;
+  subject: string;
+  html: string;
+  status: "sent" | "failed";
+  errorMessage?: string;
+  triggeredBy?: string;
+  source?: string;
+  emailType?: string;
+}) {
+  try {
+    const supabase = getSupabaseClient();
+    await supabase.from("email_logs").insert({
+      to_email: params.to,
+      cc_emails: params.cc && params.cc.length > 0 ? params.cc : null,
+      subject: params.subject,
+      html_content: params.html,
+      status: params.status,
+      error_message: params.errorMessage || null,
+      triggered_by: params.triggeredBy || null,
+      source: params.source || null,
+      email_type: params.emailType || null,
+    });
+  } catch (err) {
+    console.error("Failed to log email:", err);
+  }
 }
 
 function createTransport() {
@@ -307,6 +344,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+    const triggeredBy = body.triggered_by || null;
+    const source = body.source || null;
 
     // Approval/rejection notification path
     if (body.type === "approval_notification") {
@@ -328,6 +367,18 @@ Deno.serve(async (req: Request) => {
       const html = buildApprovalHtml(notification);
 
       const sent = await sendEmail(to, cc, subject, html);
+
+      await logEmail({
+        to,
+        cc,
+        subject,
+        html,
+        status: sent ? "sent" : "failed",
+        errorMessage: sent ? undefined : "SMTP send failed — see edge function logs",
+        triggeredBy,
+        source,
+        emailType: "approval_notification",
+      });
 
       console.log(`Approval notification (${notification.action}) for ${notification.contract_no} → ${to}`);
 
@@ -351,6 +402,18 @@ Deno.serve(async (req: Request) => {
     const html = buildTransactionHtml(transaction);
     const sent = await sendEmail(to, cc, subject, html);
 
+    await logEmail({
+      to,
+      cc,
+      subject,
+      html,
+      status: sent ? "sent" : "failed",
+      errorMessage: sent ? undefined : "SMTP send failed — see edge function logs",
+      triggeredBy,
+      source,
+      emailType: "transaction",
+    });
+
     console.log(`Transaction email to: ${to}${cc?.length ? ` CC: ${cc.join(", ")}` : ""}`);
 
     return new Response(
@@ -360,6 +423,29 @@ Deno.serve(async (req: Request) => {
 
   } catch (error) {
     console.error("Error processing email request:", error);
+
+    // Attempt to log the failure if we have enough info
+    try {
+      const body = await req.clone().json();
+      if (body.to) {
+        await logEmail({
+          to: body.to,
+          cc: body.cc,
+          subject: body.type === "approval_notification"
+            ? `Contract Note: ${body.notification?.contract_no || "Unknown"}`
+            : `Transaction Details — ${body.transaction?.transaction_type || ""} ${body.transaction?.ticker || ""}`,
+          html: "",
+          status: "failed",
+          errorMessage: error.message || "Internal server error",
+          triggeredBy: body.triggered_by || null,
+          source: body.source || null,
+          emailType: body.type || "transaction",
+        });
+      }
+    } catch (logErr) {
+      console.error("Failed to log error email:", logErr);
+    }
+
     return new Response(
       JSON.stringify({ error: error.message || "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

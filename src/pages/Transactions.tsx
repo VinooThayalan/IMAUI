@@ -724,6 +724,8 @@ export function Transactions() {
             },
             body: JSON.stringify({
               to: broker.contact_person_email,
+              triggered_by: user?.email || null,
+              source: 'transactions',
               transaction: { ...txnData, note: `CANCELLATION NOTICE — Reason: ${reason.trim()}` },
             }),
           }).catch(err => console.error('Broker email failed:', err));
@@ -1165,6 +1167,8 @@ export function Transactions() {
         body: JSON.stringify({
           to: emailAddress.trim(),
           cc: ccAddresses.filter(e => e.trim()),
+          triggered_by: user?.email || null,
+          source: 'transactions',
           transaction: transactionData
         })
       });
