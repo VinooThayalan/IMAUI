@@ -110,7 +110,7 @@ async function sendEmail(to: string, cc: string[] | undefined, subject: string, 
   try {
     const transporter = createTransport();
     await transporter.sendMail({
-      from: '"Portfolio Manager" <noreply@imametrocorp.com>',
+      from: '"Portfolio Manager" <contact@strategizer.lk>',
       to,
       cc: cc && cc.length > 0 ? cc.join(", ") : undefined,
       subject,
