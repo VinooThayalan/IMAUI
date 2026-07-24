@@ -95,7 +95,7 @@ export function PortfolioSummary() {
     try {
       setLoading(true);
 
-      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes] = await Promise.all([
+      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes, scripsRes] = await Promise.all([
         supabase
           .from('transactions')
           .select(`
@@ -134,9 +134,17 @@ export function PortfolioSummary() {
         supabase
           .from('buy_sell_notes')
           .select('transaction_id, note_type, trade_date, no_of_shares, gross_amount')
+          .eq('status', 'PROCESSED')
           .lte('trade_date', asOfDate)
           .order('trade_date', { ascending: true }),
+        supabase
+          .from('scrip_entries')
+          .select('entity_id, share_id, no_of_shares, effective_date, entry_date')
+          .eq('status', 'RECEIVED')
+          .lte('effective_date', asOfDate),
       ]);
+
+      if (scripsRes.error) throw scripsRes.error;
 
       if (transactionsRes.error) throw transactionsRes.error;
       if (entitiesRes.error) throw entitiesRes.error;
@@ -284,6 +292,10 @@ export function PortfolioSummary() {
           sector_types?: { sector_name: string } | null;
         } | null;
       }) => {
+        // Only process transactions that have a PROCESSED buy/sell note (matches Share Analytics)
+        const note = noteByTxn.get(tx.id);
+        if (!note) return;
+
         if (!shareMap.has(tx.share_id) && tx.shares) {
           shareMap.set(tx.share_id, {
             ticker: tx.shares.ticker,
@@ -298,13 +310,10 @@ export function PortfolioSummary() {
         }
         const holding = ensureHolding(tx.entity_id, tx.share_id, tx.entities?.name);
 
-        const note = noteByTxn.get(tx.id);
-        const shares = note ? note.shares : Number(tx.no_of_shares) || 0;
-        // Always use the stored total_amount from the transaction (net of fees) for accurate cost basis
+        const shares = note.shares;
         const amount = Number(tx.total_amount) || 0;
-        const txType = note?.note_type || tx.transaction_type;
-        const isBuy = (txType || '').toUpperCase() === 'BUY';
-        const txDate = note?.trade_date || tx.transaction_date;
+        const isBuy = (note.note_type || '').toUpperCase() === 'BUY';
+        const txDate = note.trade_date || tx.transaction_date;
 
         if (isBuy) {
           applyBuy(holding, shares, amount);
@@ -323,6 +332,19 @@ export function PortfolioSummary() {
             });
           }
         }
+      });
+
+      // Scrip entries (rights issues, subdivisions, buybacks, amalgamations) — free shares, no cost
+      (scripsRes.data || []).forEach((sc: {
+        entity_id: string;
+        share_id: string;
+        no_of_shares: number;
+        effective_date: string | null;
+        entry_date: string;
+      }) => {
+        const holding = ensureHolding(sc.entity_id, sc.share_id, undefined);
+        holding.shares += Number(sc.no_of_shares) || 0;
+        // Scrip shares are free — cost stays the same, reducing average cost per share
       });
 
       // Build dividend map and add to cash flows
