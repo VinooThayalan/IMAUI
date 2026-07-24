@@ -100,7 +100,7 @@ function createTransport() {
     port: 587,
     secure: false,
     auth: {
-      user: "8c5bcc001@smtp-brevo.com",
+      user: "af3070001@smtp-brevo.com",
       pass: BREVO_API_KEY,
     },
   });
