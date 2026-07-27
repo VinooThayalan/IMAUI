@@ -305,16 +305,26 @@ function buildTransactionHtml(transaction: TransactionData): string {
     ["Bank Acc No.", transaction.bank_acc_no],
   ];
 
-  const rowsHtml = fields.map(([label, value], i) => {
+  function cell(label: string, value: string, rowIndex: number): string {
     const isKey = keyFields.has(label);
-    const bg = isKey ? "#eff6ff" : i % 2 === 0 ? "#ffffff" : "#f9fafb";
+    const bg = isKey ? "#eff6ff" : rowIndex % 2 === 0 ? "#ffffff" : "#f9fafb";
     const labelColor = isKey ? "#1d4ed8" : "#6b7280";
     const valueColor = isKey ? "#1e3a8a" : "#1f2937";
-    return `<td style="padding: 8px 14px; border-bottom: 1px solid #f1f5f9; background: ${bg}; vertical-align: middle;">
-      <span style="font-size: 12px; font-weight: 600; color: ${labelColor}; display: inline-block; margin-right: 8px;">${label}</span>
-      <span style="font-size: 12px; font-weight: 700; color: ${valueColor}; float: right;">${value}</span>
+    return `<td style="width:50%;padding:9px 14px;border-bottom:1px solid #f1f5f9;background:${bg};vertical-align:middle;">
+      <table style="width:100%;border-collapse:collapse;"><tr>
+        <td style="font-size:12px;font-weight:600;color:${labelColor};white-space:nowrap;">${label}</td>
+        <td style="font-size:12px;font-weight:700;color:${valueColor};text-align:right;white-space:nowrap;">${value}</td>
+      </tr></table>
     </td>`;
-  }).join("");
+  }
+
+  const tableRows = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    const rowIndex = Math.floor(i / 2);
+    const left = cell(fields[i][0], fields[i][1], rowIndex);
+    const right = i + 1 < fields.length ? cell(fields[i + 1][0], fields[i + 1][1], rowIndex) : `<td style="width:50%;"></td>`;
+    tableRows.push(`<tr>${left}${right}</tr>`);
+  }
 
   const noteSection = transaction.note
     ? `<div style="margin-top: 16px; padding: 12px 16px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
@@ -336,27 +346,24 @@ function buildTransactionHtml(transaction: TransactionData): string {
     <!-- Header -->
     <div style="background: #1e293b; padding: 20px 28px; text-align: center;">
       <h1 style="margin: 0; color: white; font-size: 18px; font-weight: 700; letter-spacing: -0.3px;">Transaction Details</h1>
-      <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px;">Generated on ${new Date().toLocaleString()}</p>
     </div>
 
-    <div style="padding: 24px 28px;">
+    <div style="padding: 20px 24px;">
 
       <!-- Type badge + share headline -->
-      <div style="display: flex; align-items: center; margin-bottom: 16px;">
-        <span style="display: inline-block; padding: 3px 12px; border-radius: 9999px; font-weight: 700; font-size: 12px; color: ${typeColor}; background: ${typeBg}; border: 1px solid ${typeBorder};">${typeLabel}</span>
-        <span style="font-weight: 700; color: #111827; font-size: 14px; margin-left: 10px;">${transaction.ticker} — ${transaction.share}</span>
-        <span style="color: #9ca3af; font-size: 12px; margin-left: auto;">${transaction.entity}</span>
-      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><tr>
+        <td style="vertical-align:middle;">
+          <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${typeColor};background:${typeBg};border:1px solid ${typeBorder};margin-right:10px;">${typeLabel}</span>
+          <span style="font-weight:700;color:#111827;font-size:14px;">${transaction.ticker} — ${transaction.share}</span>
+        </td>
+        <td style="text-align:right;vertical-align:middle;">
+          <span style="color:#9ca3af;font-size:12px;">${transaction.entity}</span>
+        </td>
+      </tr></table>
 
       <!-- Two-column grid -->
-      <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-        <tr>${rowsHtml.slice(0, 2)}</tr>
-        <tr>${rowsHtml.slice(2, 4)}</tr>
-        <tr>${rowsHtml.slice(4, 6)}</tr>
-        <tr>${rowsHtml.slice(6, 8)}</tr>
-        <tr>${rowsHtml.slice(8, 10)}</tr>
-        <tr>${rowsHtml.slice(10, 12)}</tr>
-        <tr>${rowsHtml.slice(12, 14)}</tr>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        ${tableRows.join("\n        ")}
       </table>
 
       ${noteSection}
