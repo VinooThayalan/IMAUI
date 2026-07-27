@@ -1269,6 +1269,7 @@ export function BuyAndSellNotes() {
 
     // Find the column header row — supports both Bought Note ("qty","security") and
     // Trade Confirmation ("no of shares" / "shares", "contract no", "net amount") column names
+    // Strict check: all 3 keywords on the same row
     const headerRow = rowList.find((r) => {
       const text = r
         .map((i) => i.str)
@@ -1278,31 +1279,44 @@ export function BuyAndSellNotes() {
       const hasQtyOrShares =
         text.includes("qty") ||
         text.includes("shares") ||
-        text.includes("no of shares");
+        text.includes("no of shares") ||
+        text.includes("quantity");
       const hasAmount =
         text.includes("amount") ||
         text.includes("gross") ||
-        text.includes("net");
+        text.includes("net") ||
+        text.includes("value");
       return hasContract && hasQtyOrShares && hasAmount;
     });
-    if (!headerRow) return [];
+    // Looser fallback: 2 of 3 keywords and no digits in the row.
+    // Some templates (e.g. CMB) use "Quantity" or split keywords across lines.
+    const headerRowResolved = headerRow || rowList.find((r) => {
+      if (r.some((i) => /\d/.test(i.str))) return false;
+      const text = r.map((i) => i.str).join(" ").toLowerCase();
+      let score = 0;
+      if (text.includes("contract")) score += 1;
+      if (text.includes("qty") || text.includes("shares") || text.includes("quantity")) score += 1;
+      if (text.includes("amount") || text.includes("gross") || text.includes("net") || text.includes("value")) score += 1;
+      return score >= 2;
+    });
+    if (!headerRowResolved) return [];
 
     // Also collect adjacent rows in case multi-line headers (e.g. "No of" on one line, "Shares" below,
     // or when the right-side column headers render at a slightly different Y than the left-side ones)
-    const headerY = headerRow[0].y;
-    const headerPage = headerRow[0].page;
-    const headerRowIdx = rowList.indexOf(headerRow);
+    const headerY = headerRowResolved[0].y;
+    const headerPage = headerRowResolved[0].page;
+    const headerRowIdx = rowList.indexOf(headerRowResolved);
 
-    const isHeaderCandidate = (row: typeof headerRow) =>
+    const isHeaderCandidate = (row: typeof headerRowResolved) =>
       row[0].page === headerPage &&
-      Math.abs(row[0].y - headerY) <= 30 &&
+      Math.abs(row[0].y - headerY) <= 40 &&
       !row.some((i) => /\d/.test(i.str));
 
-    let combinedHeaderItems = [...headerRow];
+    let combinedHeaderItems = [...headerRowResolved];
 
-    // Merge up to 3 rows above and below — CMB Bought Notes split fee column headers
-    // onto a separate line that can be 20-30 Y units away from the identifying row.
-    for (let off = 1; off <= 3; off += 1) {
+    // Merge up to 4 rows above and below — CMB Bought Notes split fee column headers
+    // onto a separate line up to 40 Y units away from the identifying row.
+    for (let off = 1; off <= 4; off += 1) {
       const above = headerRowIdx - off >= 0 ? rowList[headerRowIdx - off] : null;
       if (above && isHeaderCandidate(above)) combinedHeaderItems.push(...above);
       const below = rowList[headerRowIdx + off];
@@ -1341,7 +1355,7 @@ export function BuyAndSellNotes() {
       else if (s === "of" && !colX.qty) {
         /* skip */
       }
-      else if (s === "qty" || s === "shares" || s === "share") {
+      else if (s === "qty" || s === "shares" || s === "share" || s === "quantity") {
         colX.qty = rx;
       }
       else if (s.startsWith("security")) colX.security = rx;
@@ -1349,8 +1363,11 @@ export function BuyAndSellNotes() {
         colX.rate = rx;
       }
       else if (s.startsWith("gross")) colX.gross = rx;
-      // "Gross Amount" appears as two separate tokens in many PDFs.
-      // Do not treat this Amount token as Net Amount.
+      else if (s === "value" && prevStr === "gross") {
+        colX.gross = colX.gross ?? rx;
+      }
+      // "Gross Amount" / "Gross Value" appears as two separate tokens in many PDFs.
+      // Do not treat this Amount/Value token as Net Amount.
       else if (s === "amount" && prevStr === "gross") {
         colX.gross = colX.gross ?? rx;
       }
@@ -1369,20 +1386,25 @@ export function BuyAndSellNotes() {
           colX.sec = rx;
         }
       }
-      else if (s === "stl" || s === "gov" || s === "gov cess" || s === "cess")
+      else if (s === "stl" || s === "gov" || s === "gov cess" || s === "cess" ||
+               s === "govt" || s === "govt." || s === "levy" ||
+               s === "gov levy" || s === "govt levy" || s === "govt. levy")
         colX.stl = colX.stl ?? rx;
       else if (s.startsWith("clearing") || s === "clearing") {
         colX.clearing = rx;
       }
       else if (s.startsWith("foreign")) colX.foreign = rx;
       else if (s === "netamount" || s === "net amount") colX.amount = rx;
-      else if (s === "net" && (nextStr === "amount" || nextStr === "amount.")) {
+      else if (s === "net" && (nextStr === "amount" || nextStr === "amount." || nextStr === "value")) {
         colX.amount = rx;
       }
       else if (
         s === "amount" &&
         (prevStr === "net" || prevStr === "netamount" || prevStr === "net amount")
       ) {
+        colX.amount = rx;
+      }
+      else if (s === "value" && (prevStr === "net" || prevStr === "net value")) {
         colX.amount = rx;
       }
       else if (
@@ -1402,8 +1424,8 @@ export function BuyAndSellNotes() {
 
     const out: ExtractedRow[] = [];
 
-    const nearest = (row: typeof headerRow, x: number, tolerance = 40) => {
-      let best: (typeof headerRow)[number] | null = null;
+    const nearest = (row: typeof headerRowResolved, x: number, tolerance = 40) => {
+      let best: (typeof headerRowResolved)[number] | null = null;
       let bestDist = Infinity;
       for (const it of row) {
         const d = Math.abs(it.x - x);
@@ -1422,7 +1444,7 @@ export function BuyAndSellNotes() {
     // regardless of the value's length. This prevents small numbers (which start
     // further right) from crossing into the next column's region.
     const rEdge = (it: { x: number; width: number }) => it.x + it.width;
-    const voronoiGet = (row: typeof headerRow, colName: string): string => {
+    const voronoiGet = (row: typeof headerRowResolved, colName: string): string => {
       const idx = colEntries.findIndex(([k]) => k === colName);
       if (idx === -1) return "";
       const colRightEdge = colEntries[idx][1]; // already the right edge
