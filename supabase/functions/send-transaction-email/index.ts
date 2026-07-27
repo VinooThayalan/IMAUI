@@ -273,13 +273,63 @@ function buildApprovalHtml(data: ApprovalNotificationData): string {
 }
 
 function buildTransactionHtml(transaction: TransactionData): string {
-  const typeColor = transaction.transaction_type === "BUY" ? "#10b981" : "#ef4444";
-  const typeLabel = transaction.transaction_type === "BUY" ? "Purchase" : "Sale";
+  const isBuy = transaction.transaction_type === "BUY";
+  const typeColor = isBuy ? "#16a34a" : "#dc2626";
+  const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
+  const typeBorder = isBuy ? "#86efac" : "#fca5a5";
+  const typeLabel = isBuy ? "BUY" : "SELL";
+
+  const keyFields = new Set([
+    "Gross Price / Share",
+    "Total Amount",
+    "CDS Acc Type",
+    "CDS Acc No.",
+    "Bank Name",
+    "Bank Acc No.",
+  ]);
+
+  const fields: [string, string][] = [
+    ["Transaction Date", transaction.transaction_date],
+    ["Order Type", transaction.order_type],
+    ["No. of Shares", transaction.no_of_shares],
+    ["Gross Price / Share", `LKR ${transaction.gross_price_per_share}`],
+    ["Net Price / Share", `LKR ${transaction.net_price_per_share}`],
+    ["Total Amount", `LKR ${transaction.total_amount}`],
+    ["CDS Acc Type", transaction.cds_acc_type],
+    ["CDS Acc No.", transaction.cds_acc_no],
+    ["Broker", transaction.broker_name],
+    ["Brokerage Fee Type", transaction.brokerage_fee_type],
+    ["Brokerage Fee Rate", transaction.brokerage_fee_rate],
+    ["Brokerage Fee", `LKR ${transaction.brokerage_fee}`],
+    ["Bank Name", transaction.bank_name],
+    ["Bank Acc No.", transaction.bank_acc_no],
+  ];
+
+  function cell(label: string, value: string, rowIndex: number): string {
+    const isKey = keyFields.has(label);
+    const bg = isKey ? "#eff6ff" : rowIndex % 2 === 0 ? "#ffffff" : "#f9fafb";
+    const labelColor = isKey ? "#1d4ed8" : "#6b7280";
+    const valueColor = isKey ? "#1e3a8a" : "#1f2937";
+    return `<td style="width:50%;padding:9px 14px;border-bottom:1px solid #f1f5f9;background:${bg};vertical-align:middle;">
+      <table style="width:100%;border-collapse:collapse;"><tr>
+        <td style="font-size:12px;font-weight:600;color:${labelColor};white-space:nowrap;">${label}</td>
+        <td style="font-size:12px;font-weight:700;color:${valueColor};text-align:right;white-space:nowrap;">${value}</td>
+      </tr></table>
+    </td>`;
+  }
+
+  const tableRows = [];
+  for (let i = 0; i < fields.length; i += 2) {
+    const rowIndex = Math.floor(i / 2);
+    const left = cell(fields[i][0], fields[i][1], rowIndex);
+    const right = i + 1 < fields.length ? cell(fields[i + 1][0], fields[i + 1][1], rowIndex) : `<td style="width:50%;"></td>`;
+    tableRows.push(`<tr>${left}${right}</tr>`);
+  }
 
   const noteSection = transaction.note
-    ? `<div style="margin-top: 24px; padding: 16px; background-color: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;">
-    <p style="margin: 0 0 6px 0; font-weight: 600; color: #92400e; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">Note</p>
-    <p style="margin: 0; color: #1f2937; font-size: 15px; white-space: pre-wrap;">${transaction.note}</p>
+    ? `<div style="margin-top: 16px; padding: 12px 16px; background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
+    <p style="margin: 0 0 4px 0; font-weight: 700; color: #92400e; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;">Note</p>
+    <p style="margin: 0; color: #1f2937; font-size: 13px; white-space: pre-wrap;">${transaction.note}</p>
   </div>`
     : "";
 
@@ -287,52 +337,45 @@ function buildTransactionHtml(transaction: TransactionData): string {
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Transaction Details</title>
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 20px; }
-    .header { background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 24px; text-align: center; }
-    .header h1 { margin: 0; color: #1f2937; font-size: 22px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    tr { border-bottom: 1px solid #e5e7eb; }
-    td { padding: 10px 8px; }
-    td:first-child { font-weight: 600; color: #4b5563; width: 200px; font-size: 14px; }
-    td:last-child { color: #1f2937; font-size: 14px; }
-    .highlight { background-color: #d1fae5; color: #065f46; font-weight: 600; }
-    .type-badge { display: inline-block; padding: 3px 12px; border-radius: 9999px; font-weight: 600; color: white; background-color: ${typeColor}; font-size: 13px; }
-    .section-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #9ca3af; padding: 10px 8px 4px; border-bottom: 2px solid #f3f4f6; }
-    .footer { margin-top: 32px; padding-top: 16px; border-top: 2px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 13px; }
-  </style>
+  <title>Transaction Details — ${typeLabel} ${transaction.ticker}</title>
 </head>
-<body>
-  <div class="header">
-    <h1>Transaction Details</h1>
-    <p style="margin: 8px 0 0 0; color: #6b7280; font-size: 14px;">Generated on ${new Date().toLocaleString()}</p>
+<body style="font-family: Arial, Helvetica, sans-serif; line-height: 1.5; color: #1f2937; max-width: 680px; margin: 0 auto; padding: 24px; background: #f9fafb;">
+
+  <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+
+    <!-- Header -->
+    <div style="background: #1e293b; padding: 20px 28px; text-align: center;">
+      <h1 style="margin: 0; color: white; font-size: 18px; font-weight: 700; letter-spacing: -0.3px;">Transaction Details</h1>
+    </div>
+
+    <div style="padding: 20px 24px;">
+
+      <!-- Type badge + share headline -->
+      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><tr>
+        <td style="vertical-align:middle;">
+          <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${typeColor};background:${typeBg};border:1px solid ${typeBorder};margin-right:10px;">${typeLabel}</span>
+          <span style="font-weight:700;color:#111827;font-size:14px;">${transaction.ticker} — ${transaction.share}</span>
+        </td>
+        <td style="text-align:right;vertical-align:middle;">
+          <span style="color:#9ca3af;font-size:12px;">${transaction.entity}</span>
+        </td>
+      </tr></table>
+
+      <!-- Two-column grid -->
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        ${tableRows.join("\n        ")}
+      </table>
+
+      ${noteSection}
+
+    </div>
+
+    <!-- Footer -->
+    <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 14px 28px; text-align: center;">
+      <p style="margin: 0; color: #94a3b8; font-size: 12px;">This is an automated email containing transaction details.</p>
+    </div>
+
   </div>
-  <table>
-    <tr class="section-header"><td colspan="2">Transaction</td></tr>
-    <tr><td>Entity</td><td>${transaction.entity}</td></tr>
-    <tr><td>Transaction Type</td><td><span class="type-badge">${typeLabel}</span></td></tr>
-    <tr><td>Share</td><td>${transaction.ticker} — ${transaction.share}</td></tr>
-    <tr><td>Transaction Date</td><td>${transaction.transaction_date}</td></tr>
-    <tr><td>Order Type</td><td>${transaction.order_type}</td></tr>
-    <tr><td>No. of Shares</td><td>${transaction.no_of_shares}</td></tr>
-    <tr class="section-header"><td colspan="2">Pricing</td></tr>
-    <tr><td>Gross Price Per Share</td><td class="highlight">LKR ${transaction.gross_price_per_share}</td></tr>
-    <tr><td>Net Price Per Share</td><td>LKR ${transaction.net_price_per_share}</td></tr>
-    <tr><td>Total Amount</td><td><strong>LKR ${transaction.total_amount}</strong></td></tr>
-    <tr class="section-header"><td colspan="2">Brokerage</td></tr>
-    <tr><td>Broker Name</td><td>${transaction.broker_name}</td></tr>
-    <tr><td>Brokerage Fee Type</td><td>${transaction.brokerage_fee_type}</td></tr>
-    <tr><td>Brokerage Fee Rate</td><td>${transaction.brokerage_fee_rate}</td></tr>
-    <tr><td>Brokerage Fee</td><td>LKR ${transaction.brokerage_fee}</td></tr>
-    <tr class="section-header"><td colspan="2">Settlement</td></tr>
-    <tr><td>CDS Account Type</td><td class="highlight">${transaction.cds_acc_type}</td></tr>
-    <tr><td>CDS Account No.</td><td class="highlight">${transaction.cds_acc_no}</td></tr>
-    <tr><td>Bank Name</td><td class="highlight">${transaction.bank_name}</td></tr>
-    <tr><td>Bank Account No.</td><td class="highlight">${transaction.bank_acc_no}</td></tr>
-  </table>
-  ${noteSection}
-  <div class="footer"><p>This is an automated email containing transaction details.</p></div>
 </body>
 </html>`;
 }
