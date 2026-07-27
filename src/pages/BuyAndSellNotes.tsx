@@ -1355,7 +1355,18 @@ export function BuyAndSellNotes() {
       else if (s.startsWith("brokerage")) colX.brokerage = rx;
       else if (s.startsWith("cds")) colX.cds = rx;
       else if (s.startsWith("cse") || s === "exchange") colX.cse = rx;
-      else if (s === "sec") colX.sec = rx;
+      else if (s === "sec") {
+        // "SEC Cess" / "SEC Fees" appear as two tokens in some PDFs.
+        // Consume the following "cess"/"fees" token so it doesn't also set colX.stl
+        // (which would put sec and stl at nearly the same X, collapsing their Voronoi boundary
+        //  and shifting every subsequent fee column one position off).
+        if (nextStr === "cess" || nextStr === "fees" || nextStr === "fee") {
+          colX.sec = combinedHeaderItems[i + 1].x + combinedHeaderItems[i + 1].width;
+          i += 1;
+        } else {
+          colX.sec = rx;
+        }
+      }
       else if (s === "stl" || s === "gov" || s === "gov cess" || s === "cess")
         colX.stl = colX.stl ?? rx;
       else if (s.startsWith("clearing") || s === "clearing") {
