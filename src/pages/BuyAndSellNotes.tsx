@@ -620,8 +620,10 @@ export function BuyAndSellNotes() {
           }
       }
 
-      // Extract fees: after gross, pick the remaining values as fees
+      // Extract fees: after gross, pick the remaining values as fees.
       // LOLC Bought/Sold Note column order: Brokerage, CDS Fees, CSE Fees, SEC, STL, Clearing, Foreign
+      // The CMB column order (Brokerage, SEC, CSE, CDS, STL, Clearing) is handled at the call site
+      // by swapping sec/cds_fees and providing both as separate candidates to the scoring engine.
       let brokerage = numeric[2] ?? 0;
       const cds_fees = numeric[3] ?? 0;
       const cse_fees = numeric[4] ?? 0;
@@ -1782,10 +1784,19 @@ export function BuyAndSellNotes() {
       if (isTradeConfirmation(rawText)) {
         const xColRows = parseRowsByXColumns(items, securityHint);
         const tcRows = parseTradeConfirmationRows(rawText);
+
+        // CMB Trade Confirmations also swap SEC and CDS vs LOLC — provide both variants.
+        const cmbVariant = (name: string, rows: ExtractedRow[]): { name: string; rows: ExtractedRow[] } => ({
+          name: name + ":CMB",
+          rows: rows.map((r) => ({ ...r, sec: r.cds_fees, cds_fees: r.sec })),
+        });
+
         rows = chooseBestRows(
           [
             { name: "TC:XCol", rows: xColRows },
+            cmbVariant("TC:XCol", xColRows),
             { name: "TC:Raw", rows: tcRows },
+            cmbVariant("TC:Raw", tcRows),
           ],
           parserLog,
             selectedTxn,
@@ -1794,11 +1805,25 @@ export function BuyAndSellNotes() {
         const xColRows = parseRowsByXColumns(items, securityHint);
         const rawRows = parseRowsFromRawText(rawText);
         const groupedRows = parseBoughtNoteRows(grouped);
+
+        // CMB Bought Notes list fee columns as Brokerage, SEC, CSE, CDS, STL, Clearing
+        // while LOLC notes use Brokerage, CDS, CSE, SEC, STL, Clearing (SEC and CDS swapped).
+        // Every parser above hardcodes the LOLC order. To handle both, we produce a
+        // CMB variant of each candidate by swapping sec ↔ cds_fees and let the scoring
+        // engine pick whichever matches the transaction's expected fees.
+        const cmbVariant = (name: string, rows: ExtractedRow[]): { name: string; rows: ExtractedRow[] } => ({
+          name: name + ":CMB",
+          rows: rows.map((r) => ({ ...r, sec: r.cds_fees, cds_fees: r.sec })),
+        });
+
         rows = chooseBestRows(
           [
             { name: "BN:XCol", rows: xColRows },
+            cmbVariant("BN:XCol", xColRows),
             { name: "BN:RawText", rows: rawRows },
+            cmbVariant("BN:RawText", rawRows),
             { name: "BN:Bought", rows: groupedRows },
+            cmbVariant("BN:Bought", groupedRows),
           ],
           parserLog,
           selectedTxn,
