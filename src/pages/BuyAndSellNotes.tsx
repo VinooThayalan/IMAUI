@@ -1002,6 +1002,11 @@ export function BuyAndSellNotes() {
         const ratioDistance = Math.abs(Math.log(Math.max(grossRatio, 0.0001)));
         score += Math.max(0, 10 - ratioDistance * 8);
       }
+      // Prefer parsers that actually extracted fee data. A parser that produces
+      // gross≈net with zero fees is likely mis-mapping a column (e.g. net into gross).
+      const feeTotal = (row.brokerage || 0) + (row.sec || 0) + (row.cse_fees || 0) +
+        (row.cds_fees || 0) + (row.stl || 0) + (row.clearing_fee || 0);
+      if (feeTotal > 0) score += 20;
 
       const feeSum =
         (row.brokerage || 0) +
@@ -1290,21 +1295,18 @@ export function BuyAndSellNotes() {
 
     const isHeaderCandidate = (row: typeof headerRow) =>
       row[0].page === headerPage &&
-      Math.abs(row[0].y - headerY) <= 20 &&
+      Math.abs(row[0].y - headerY) <= 30 &&
       !row.some((i) => /\d/.test(i.str));
 
     let combinedHeaderItems = [...headerRow];
 
-    // Merge the row immediately above (higher Y = earlier in sorted list)
-    const rowAbove = headerRowIdx > 0 ? rowList[headerRowIdx - 1] : null;
-    if (rowAbove && isHeaderCandidate(rowAbove)) {
-      combinedHeaderItems.push(...rowAbove);
-    }
-
-    // Merge the row immediately below (lower Y = later in sorted list)
-    const rowBelow = rowList[headerRowIdx + 1];
-    if (rowBelow && isHeaderCandidate(rowBelow)) {
-      combinedHeaderItems.push(...rowBelow);
+    // Merge up to 3 rows above and below — CMB Bought Notes split fee column headers
+    // onto a separate line that can be 20-30 Y units away from the identifying row.
+    for (let off = 1; off <= 3; off += 1) {
+      const above = headerRowIdx - off >= 0 ? rowList[headerRowIdx - off] : null;
+      if (above && isHeaderCandidate(above)) combinedHeaderItems.push(...above);
+      const below = rowList[headerRowIdx + off];
+      if (below && isHeaderCandidate(below)) combinedHeaderItems.push(...below);
     }
 
     // Sort combined header items by X position to ensure correct column order
@@ -1542,7 +1544,7 @@ export function BuyAndSellNotes() {
       // Broker name: company heading at top (lines before TRADE CONFIRMATION)
       const firstPageRows = rows.slice(0, 10);
       const brokerRow = firstPageRows.find((r) =>
-        /\b(securities|brokers?|stock|capital|financial)\b/i.test(
+        /\b(securities|brokers?|stock|capital|financial|bank|investment|trust|custodian|asset)\b/i.test(
           r.map((c) => c.str).join(" "),
         ),
       );
@@ -1633,7 +1635,7 @@ export function BuyAndSellNotes() {
 
     const firstPageRows = rows.slice(0, 12);
     const brokerRow = firstPageRows.find((r) =>
-      /\b(securities|brokers?|stock|capital|financial)\b/i.test(
+      /\b(securities|brokers?|stock|capital|financial|bank|investment|trust|custodian|asset)\b/i.test(
         r.map((c) => c.str).join(" "),
       ),
     );
@@ -1918,10 +1920,22 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
+      // Try to match broker from PDF header text if the transaction doesn't carry one
+      const resolvedBrokerId = bestCandidate?.broker_id || (() => {
+        const pdfBroker = extracted.broker_name.toLowerCase();
+        if (!pdfBroker) return null;
+        const matched = brokers.find((b) => {
+          const bn = b.broker_name.toLowerCase();
+          return pdfBroker.includes(bn) || bn.includes(pdfBroker) ||
+            pdfBroker.split(/\s+/).some((w) => w.length > 3 && bn.includes(w));
+        });
+        return matched?.id ?? null;
+      })();
+
       setFormData((prev) => ({
         ...prev,
         ...(bestCandidate?.id ? { transaction_id: bestCandidate.id } : {}),
-        ...(bestCandidate?.broker_id ? { broker_id: bestCandidate.broker_id } : {}),
+        ...(resolvedBrokerId ? { broker_id: resolvedBrokerId } : {}),
         settlement_date: extracted.settlement || prev.settlement_date,
       }));
     } catch (err) {
