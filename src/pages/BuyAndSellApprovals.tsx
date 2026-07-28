@@ -180,13 +180,14 @@ export function BuyAndSellApprovals() {
     setCcEntityEmail(true);
   }
 
-  async function sendBrokerNotification(
+   async function sendBrokerNotification(
     note: BuyAndSellNote,
     action: 'APPROVED' | 'REJECTED',
     reviewRemarks: string,
     entity: Entity | null,
     share: Share | null,
     broker: Broker | null,
+    eb: EntityBroker | null,
     withCcEntity: boolean,
     transaction?: Transaction | null,
   ) {
@@ -225,6 +226,12 @@ export function BuyAndSellApprovals() {
           price_avg: fmt(note.price_avg),
           gross_amount: fmt(note.gross_amount),
           brokerage: fmt(note.brokerage),
+          sec: fmt(note.sec),
+          exchange: fmt(note.exchange),
+          cds: fmt(note.cds),
+          gov_cess: fmt(note.gov_cess),
+          clearing_fees: fmt(note.clearing_fees),
+          foreign_brokerage: fmt(note.foreign_brokerage),
           net_amount: fmt(note.net_amount),
           trade_date: fmtDate(note.trade_date),
           settlement_date: fmtDate(note.settlement_date),
@@ -232,12 +239,20 @@ export function BuyAndSellApprovals() {
           dealer_name: note.dealer_name || undefined,
           remarks: note.remarks || undefined,
           approval_notes: reviewRemarks || undefined,
-          reviewed_by: 'Reviewer',
+          reviewed_by: user?.email || 'Reviewer',
           reviewed_at: reviewedAt,
           // Transaction (system) values for comparison — included on rejections
           txn_no_of_shares: transaction?.no_of_shares != null ? transaction.no_of_shares.toLocaleString() : undefined,
           txn_price_per_share: transaction?.price_per_share != null ? fmt(transaction.price_per_share) : undefined,
           txn_total_amount: transaction?.total_amount != null ? fmt(transaction.total_amount) : undefined,
+          txn_transaction_date: transaction?.transaction_date ? fmtDate(transaction.transaction_date) : undefined,
+          // Account details
+          broker_account_number: eb?.broker_account_number || undefined,
+          custodian_account_number: eb?.custodian_account_number || undefined,
+          // Broker contact details
+          broker_contact_person_name: broker?.contact_person_name || undefined,
+          broker_contact_person_phone: broker?.contact_person_phone || undefined,
+          broker_contact_person_designation: broker?.contact_person_designation || undefined,
         },
       }),
     }).catch(err => console.error('Email notification failed:', err));
@@ -247,7 +262,7 @@ export function BuyAndSellApprovals() {
     if (!selectedNote) return;
     setIsSubmitting(true);
     try {
-      const { entity, share, broker } = getDetails(selectedNote);
+      const { entity, share, broker, eb } = getDetails(selectedNote);
       if (!entity) throw new Error('Entity not found for this note');
 
       // Fetch old record for audit
@@ -335,7 +350,7 @@ export function BuyAndSellApprovals() {
         });
       }
 
-      if (sendEmail) await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail);
+      if (sendEmail) await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, eb, ccEntityEmail);
 
       await loadData();
       closeModal();
@@ -350,7 +365,7 @@ export function BuyAndSellApprovals() {
     if (!selectedNote || !actionRemarks.trim()) return;
     setIsSubmitting(true);
     try {
-      const { entity, share, broker } = getDetails(selectedNote);
+      const { entity, share, broker, eb } = getDetails(selectedNote);
 
       // Fetch old record for audit
       const oldRecord = await fetchRecordForAudit('buy_sell_notes', selectedNote.id);
@@ -383,7 +398,7 @@ export function BuyAndSellApprovals() {
       });
 
       const linkedTxn = transactions.find(t => t.id === selectedNote.transaction_id) ?? null;
-      if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn);
+       if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, eb, ccEntityEmail, linkedTxn);
 
       await loadData();
       closeModal();
@@ -763,7 +778,7 @@ const displayNotes = notes.filter(n => {
       {/* Email Comparison Modal */}
       {emailModalNote && (() => {
         const note = emailModalNote;
-        const { entity, share, broker } = getDetails(note);
+         const { entity, share, broker, eb } = getDetails(note);
         const txn = transactions.find(t => t.id === note.transaction_id) ?? null;
 
         const fmt = (n?: number | null) =>
@@ -808,7 +823,7 @@ const displayNotes = notes.filter(n => {
           }
           setIsSendingEmail(true);
           try {
-            await sendBrokerNotification(note, 'APPROVED', '', entity, share, broker, false, txn);
+            await sendBrokerNotification(note, 'APPROVED', '', entity, share, broker, eb, false, txn);
             alert(`Email sent to ${broker.contact_person_email}`);
             setEmailModalNote(null);
           } catch (err: any) {

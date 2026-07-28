@@ -41,6 +41,12 @@ interface ApprovalNotificationData {
   price_avg: string;
   gross_amount: string;
   brokerage: string;
+  sec: string;
+  exchange: string;
+  cds: string;
+  gov_cess: string;
+  clearing_fees: string;
+  foreign_brokerage: string;
   net_amount: string;
   trade_date: string;
   settlement_date: string;
@@ -53,6 +59,12 @@ interface ApprovalNotificationData {
   txn_no_of_shares?: string;
   txn_price_per_share?: string;
   txn_total_amount?: string;
+  txn_transaction_date?: string;
+  broker_account_number?: string;
+  custodian_account_number?: string;
+  broker_contact_person_name?: string;
+  broker_contact_person_phone?: string;
+  broker_contact_person_designation?: string;
 }
 
 function getSupabaseClient() {
@@ -195,57 +207,131 @@ function buildApprovalHtml(data: ApprovalNotificationData): string {
         ${data.dealer_name ? `<tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;"><td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Dealer</td><td style="padding: 10px 12px; font-size: 13px; color: #0f172a;">${data.dealer_name}</td></tr>` : ""}
       </table>
 
-      <!-- Financial Summary -->
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-        <tr style="background: #f1f5f9;">
-          <td colspan="2" style="padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b;">Financial Summary</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #f1f5f9;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569; width: 180px;">Gross Amount</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.gross_amount}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Brokerage & Fees</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.brokerage}</td>
-        </tr>
-        <tr style="background: #0f172a;">
-          <td style="padding: 12px; font-size: 14px; font-weight: 700; color: white;">Net Amount</td>
-          <td style="padding: 12px; font-size: 16px; font-weight: 700; color: white; font-family: monospace;">Rs. ${data.net_amount}</td>
-        </tr>
-      </table>
+       <!-- Financial Summary -->
+       <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+         <tr style="background: #f1f5f9;">
+           <td colspan="2" style="padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b;">Financial Summary</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569; width: 180px;">Gross Amount</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.gross_amount}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Brokerage</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.brokerage}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">SEC</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.sec}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">CSE / Exchange</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.exchange}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">CDS Fees</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.cds}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Gov. Levy (STL)</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.gov_cess}</td>
+         </tr>
+         <tr style="border-bottom: 1px solid #f1f5f9;">
+           <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Clearing Fees</td>
+           <td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.clearing_fees}</td>
+         </tr>
+         ${data.foreign_brokerage !== '-' ? `<tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;"><td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Foreign Brokerage</td><td style="padding: 10px 12px; font-size: 13px; color: #0f172a; font-family: monospace;">Rs. ${data.foreign_brokerage}</td></tr>` : ""}
+         <tr style="background: #0f172a;">
+           <td style="padding: 12px; font-size: 14px; font-weight: 700; color: white;">Net Amount</td>
+           <td style="padding: 12px; font-size: 16px; font-weight: 700; color: white; font-family: monospace;">Rs. ${data.net_amount}</td>
+         </tr>
+       </table>
 
-      ${!isApproved && (data.txn_no_of_shares || data.txn_price_per_share || data.txn_total_amount) ? `
-      <!-- Value Comparison -->
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-        <tr style="background: #7f1d1d;">
-          <td colspan="3" style="padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fecaca;">Value Discrepancy — System vs Contract Note</td>
-        </tr>
-        <tr style="background: #f1f5f9;">
-          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748b; width: 180px;">Field</td>
-          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1d4ed8;">System (Transaction)</td>
-          <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #b91c1c;">Broker Note</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #f1f5f9;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">No. of Shares</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">${data.txn_no_of_shares || "-"}</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">${data.no_of_shares}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Price per Share</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_price_per_share || "-"}</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.price_avg}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #f1f5f9;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Gross Amount</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_total_amount || "-"}</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.gross_amount}</td>
-        </tr>
-        <tr style="background: #fafafa;">
-          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Net Amount</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
-          <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.net_amount}</td>
-        </tr>
-      </table>` : ""}
+       ${data.broker_account_number || data.custodian_account_number ? `
+       <!-- Account Details -->
+       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+         <p style="margin: 0 0 4px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b;">Account Details</p>
+         ${data.broker_account_number ? `<p style="margin: 0 0 4px 0; font-size: 13px; color: #0f172a;"><strong>Broker Account:</strong> <span style="font-family: monospace;">${data.broker_account_number}</span></p>` : ""}
+         ${data.custodian_account_number ? `<p style="margin: 0; font-size: 13px; color: #0f172a;"><strong>CDS Custodian:</strong> <span style="font-family: monospace;">${data.custodian_account_number}</span></p>` : ""}
+       </div>` : ""}
+
+       ${data.broker_contact_person_name ? `
+       <!-- Broker Contact -->
+       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+         <p style="margin: 0 0 4px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b;">Broker Contact</p>
+         <p style="margin: 0 0 4px 0; font-size: 13px; color: #0f172a;">${data.broker_contact_person_name}${data.broker_contact_person_designation ? ` · ${data.broker_contact_person_designation}` : ''}</p>
+         ${data.broker_contact_person_phone ? `<p style="margin: 0; font-size: 13px; color: #475569;">Phone: ${data.broker_contact_person_phone}</p>` : ""}
+       </div>` : ""}
+
+       ${!isApproved && (data.txn_no_of_shares || data.txn_price_per_share || data.txn_total_amount) ? `
+       <!-- Value Comparison -->
+       <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+         <tr style="background: #7f1d1d;">
+           <td colspan="3" style="padding: 8px 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #fecaca;">Value Discrepancy — System vs Contract Note</td>
+         </tr>
+         <tr style="background: #f1f5f9;">
+           <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #64748b; width: 180px;">Field</td>
+           <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1d4ed8;">System (Transaction)</td>
+           <td style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #b91c1c;">Broker Note</td>
+         </tr>
+        ${data.txn_transaction_date ? `<tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Transaction Date</td><td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">${data.txn_transaction_date}</td><td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">${data.trade_date}</td></tr>` : ""}
+          <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">No. of Shares</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">${data.txn_no_of_shares || "-"}</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">${data.no_of_shares}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Price per Share</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_price_per_share || "-"}</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.price_avg}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Gross Amount</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #1d4ed8; font-family: monospace;">Rs. ${data.txn_total_amount || "-"}</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.gross_amount}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Brokerage</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.brokerage}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">SEC</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.sec}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">CSE / Exchange</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.exchange}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">CDS Fees</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.cds}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Gov. Levy (STL)</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.gov_cess}</td>
+          </tr>
+          <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Clearing Fees</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.clearing_fees}</td>
+          </tr>
+          ${data.foreign_brokerage !== '-' ? `<tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Foreign Brokerage</td><td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td><td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">Rs. ${data.foreign_brokerage}</td></tr>` : ""}
+          <tr style="background: #fafafa;">
+            <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #475569;">Settlement Date</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 10px 12px; font-size: 13px; color: #b91c1c; font-family: monospace;">${data.settlement_date}</td>
+          </tr>
+          <tr style="background: #0f172a;">
+            <td style="padding: 12px; font-size: 14px; font-weight: 700; color: white;">Net Amount</td>
+            <td style="padding: 12px; font-size: 13px; color: #64748b; font-family: monospace;">—</td>
+            <td style="padding: 12px; font-size: 14px; font-weight: 700; color: white; font-family: monospace;">Rs. ${data.net_amount}</td>
+          </tr>
+        </table>` : ""}
 
       ${data.approval_notes ? `
       <!-- Review Notes -->
