@@ -95,6 +95,12 @@ interface Transaction {
   total_amount: number;
   total_amount_gross?: number;
   fees?: number;
+  brokerage_fee?: number | null;
+  cse_fee?: number | null;
+  cds_fee?: number | null;
+  clearing_fee?: number | null;
+  sec_cess?: number | null;
+  share_transaction_levy?: number | null;
   brokerage_fee_type_id?: string;
   brokerage_fee_rate?: number;
   broker_id?: string;
@@ -1996,6 +2002,28 @@ export function BuyAndSellNotes() {
     const zero = { brokerage: 0, sec: 0, exchange: 0, cds: 0, gov_cess: 0, clearing_fees: 0 };
     if (totalFees === 0) return zero;
 
+    // Prefer per-component columns stored on the transaction (exact values
+    // captured at creation time). Fall back to recalculation only for legacy
+    // transactions created before the breakdown columns existed.
+    const hasStoredBreakdown =
+      txn.brokerage_fee != null ||
+      txn.cse_fee != null ||
+      txn.cds_fee != null ||
+      txn.clearing_fee != null ||
+      txn.sec_cess != null ||
+      txn.share_transaction_levy != null;
+
+    if (hasStoredBreakdown) {
+      return {
+        brokerage: Number(txn.brokerage_fee) || 0,
+        sec: Number(txn.sec_cess) || 0,
+        exchange: Number(txn.cse_fee) || 0,
+        cds: Number(txn.cds_fee) || 0,
+        gov_cess: Number(txn.share_transaction_levy) || 0,
+        clearing_fees: Number(txn.clearing_fee) || 0,
+      };
+    }
+
     const feeType = brokerageFeeTypes.find(
       (ft) => ft.id === txn.brokerage_fee_type_id,
     );
@@ -2027,10 +2055,6 @@ export function BuyAndSellNotes() {
     }
 
     // --- Tiered transaction ---
-    // When gross exceeds the below-tier max_price, Transactions.tsx splits
-    // the calculation across two tiers (below at lower rates, excess at higher
-    // rates) and stores a blended rate in brokerage_fee_rate. We must
-    // reconstruct each component from both tiers to get correct values.
     const sortedTiers = [...brokerageFeeTypes].sort(
       (a, b) => (a.min_price ?? 0) - (b.min_price ?? 0),
     );
@@ -2074,9 +2098,6 @@ export function BuyAndSellNotes() {
     }
 
     // --- Negotiated fee (single tier) ---
-    // When use_negotiated_fee is true, Transactions.tsx stores ONLY the
-    // negotiated brokerage in txn.fees (gross × rate / 100). Other fees
-    // are not stored — compute them from the fee type's standard rates.
     const negotiatedRate = Number(txn.brokerage_fee_rate) || 0;
     const brokerageRate = findRate(items, ["brokerage"], ["sec", "cse", "cds", "clearing", "levy", "cess"]);
     const standardRate = Number(feeType?.rate) || brokerageRate;
@@ -2095,7 +2116,6 @@ export function BuyAndSellNotes() {
     }
 
     // --- Standard (single tier, non-negotiated) ---
-    // Distribute total fees proportionally by fee type breakdown rates.
     const totalRate = items.reduce((s, it) => s + (Number(it.rate) || 0), 0);
     if (totalRate === 0) {
       return { ...zero, brokerage: totalFees };
