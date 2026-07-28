@@ -25,9 +25,39 @@ interface TransactionData {
   brokerage_fee_type: string;
   brokerage_fee_rate: string;
   brokerage_fee: string;
+  brokerage_fee_component: string;
+  cse_fee: string;
+  cds_fee: string;
+  clearing_fee: string;
+  sec_cess: string;
+  share_transaction_levy: string;
   bank_name: string;
   bank_acc_no: string;
   note?: string;
+}
+
+interface ComparisonRow {
+  label: string;
+  txnVal: string;
+  noteVal: string;
+  mismatch?: boolean;
+}
+
+interface BrokerComparisonData {
+  contract_no: string;
+  note_type: "Buy" | "Sell";
+  entity_name: string;
+  share_name: string;
+  ticker: string;
+  broker_name: string;
+  broker_email: string;
+  contact_person?: string;
+  contact_person_designation?: string;
+  rows: ComparisonRow[];
+  trade_date_txn?: string;
+  trade_date_note?: string;
+  settlement_date_note?: string;
+  remarks?: string;
 }
 
 interface ApprovalNotificationData {
@@ -272,6 +302,113 @@ function buildApprovalHtml(data: ApprovalNotificationData): string {
 </html>`;
 }
 
+function buildBrokerComparisonHtml(data: BrokerComparisonData): string {
+  const isBuy = data.note_type === "Buy";
+  const typeColor = isBuy ? "#16a34a" : "#dc2626";
+  const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
+  const typeBorder = isBuy ? "#86efac" : "#fca5a5";
+  const typeLabel = isBuy ? "BUY" : "SELL";
+
+  const rowHtml = data.rows.map((r) => {
+    const bg = r.mismatch ? "#fff7ed" : "#ffffff";
+    const labelColor = r.mismatch ? "#c2410c" : "#374151";
+    const txnColor = r.mismatch ? "#c2410c" : "#6b7280";
+    const noteColor = r.mismatch ? "#c2410c" : "#111827";
+    const noteWeight = r.mismatch || true ? "700" : "600";
+    const mismatchBadge = r.mismatch
+      ? ` <span style="display:inline-flex;align-items:center;gap:2px;font-size:10px;font-weight:700;color:#ea580c;background:#ffedd5;border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:middle;">&#9888; Mismatch</span>`
+      : "";
+    return `<tr style="background:${bg};border-bottom:1px solid #f3f4f6;">
+      <td style="padding:10px 16px;font-size:13px;font-weight:600;color:${labelColor};white-space:nowrap;">${r.label}${mismatchBadge}</td>
+      <td style="padding:10px 16px;font-size:13px;color:${txnColor};text-align:right;font-family:monospace;white-space:nowrap;">${r.txnVal}</td>
+      <td style="padding:10px 16px;font-size:13px;color:${noteColor};text-align:right;font-family:monospace;font-weight:${noteWeight};white-space:nowrap;">${r.noteVal}</td>
+    </tr>`;
+  }).join("\n");
+
+  const dateRows = [
+    `<tr style="background:#f9fafb;border-bottom:1px solid #f3f4f6;">
+      <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#374151;">Trade Date</td>
+      <td style="padding:10px 16px;font-size:13px;color:#6b7280;text-align:right;font-family:monospace;">${data.trade_date_txn || "\u2014"}</td>
+      <td style="padding:10px 16px;font-size:13px;color:#111827;text-align:right;font-family:monospace;font-weight:600;">${data.trade_date_note || "\u2014"}</td>
+    </tr>`,
+    `<tr style="background:#f9fafb;">
+      <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#374151;">Settlement Date</td>
+      <td style="padding:10px 16px;font-size:13px;color:#6b7280;text-align:right;font-family:monospace;">\u2014</td>
+      <td style="padding:10px 16px;font-size:13px;color:#111827;text-align:right;font-family:monospace;font-weight:600;">${data.settlement_date_note || "\u2014"}</td>
+    </tr>`,
+  ].join("\n");
+
+  const remarksSection = data.remarks
+    ? `<div style="margin-top:14px;padding:10px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;">
+      <p style="margin:0 0 2px 0;font-weight:700;color:#92400e;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Remarks</p>
+      <p style="margin:0;color:#1f2937;font-size:13px;">${data.remarks}</p>
+    </div>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Contract Note Comparison \u2014 ${data.contract_no}</title>
+</head>
+<body style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#1f2937;max-width:680px;margin:0 auto;padding:24px;background:#f9fafb;">
+  <div style="background:white;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+
+    <!-- Header -->
+    <div style="background:#1e293b;padding:20px 28px;display:flex;align-items:center;gap:12px;">
+      <div style="width:36px;height:36px;background:#3b82f6;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <span style="color:white;font-size:18px;font-weight:700;">@</span>
+      </div>
+      <div style="flex:1;">
+        <h1 style="margin:0;color:white;font-size:18px;font-weight:700;">Email Broker</h1>
+        <p style="margin:2px 0 0 0;color:#94a3b8;font-size:12px;">${data.contract_no} \u00b7 ${data.ticker} \u00b7 ${data.entity_name}</p>
+      </div>
+      <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${typeColor};background:${typeBg};border:1px solid ${typeBorder};">${typeLabel}</span>
+    </div>
+
+    <div style="padding:20px 24px;">
+
+      <!-- Recipient -->
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+        <p style="margin:0 0 6px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#3b82f6;">Recipient</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <p style="margin:0;font-size:14px;font-weight:700;color:#111827;">${data.broker_name}</p>
+            ${data.contact_person ? `<p style="margin:2px 0 0 0;font-size:12px;color:#6b7280;">${data.contact_person}${data.contact_person_designation ? ` \u00b7 ${data.contact_person_designation}` : ""}</p>` : ""}
+          </div>
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:white;border:1px solid #93c5fd;border-radius:8px;font-size:13px;font-weight:500;color:#1d4ed8;">${data.broker_email}</span>
+        </div>
+      </div>
+
+      <!-- Comparison Table -->
+      <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Transaction vs Note Comparison</p>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <thead>
+          <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+            <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">Field</th>
+            <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">Transaction</th>
+            <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.03em;">Note / Upload</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowHtml}
+          ${dateRows}
+        </tbody>
+      </table>
+
+      ${remarksSection}
+
+    </div>
+
+    <!-- Footer -->
+    <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:14px 28px;text-align:center;">
+      <p style="margin:0;color:#94a3b8;font-size:12px;">This is an automated email from the Portfolio Management System.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function buildTransactionHtml(transaction: TransactionData): string {
   const isBuy = transaction.transaction_type === "BUY";
   const typeColor = isBuy ? "#16a34a" : "#dc2626";
@@ -286,6 +423,7 @@ function buildTransactionHtml(transaction: TransactionData): string {
     "CDS Acc No.",
     "Bank Name",
     "Bank Acc No.",
+    "Total Fees",
   ]);
 
   const fields: [string, string][] = [
@@ -300,7 +438,13 @@ function buildTransactionHtml(transaction: TransactionData): string {
     ["Broker", transaction.broker_name],
     ["Brokerage Fee Type", transaction.brokerage_fee_type],
     ["Brokerage Fee Rate", transaction.brokerage_fee_rate],
-    ["Brokerage Fee", `LKR ${transaction.brokerage_fee}`],
+    ["Brokerage Fee", `LKR ${transaction.brokerage_fee_component}`],
+    ["CSE Fees", `LKR ${transaction.cse_fee}`],
+    ["CDS Fees", `LKR ${transaction.cds_fee}`],
+    ["Clearing Fees", `LKR ${transaction.clearing_fee}`],
+    ["SEC CESS", `LKR ${transaction.sec_cess}`],
+    ["Share Trans. Levy", `LKR ${transaction.share_transaction_levy}`],
+    ["Total Fees", `LKR ${transaction.brokerage_fee}`],
     ["Bank Name", transaction.bank_name],
     ["Bank Acc No.", transaction.bank_acc_no],
   ];
@@ -389,6 +533,45 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const triggeredBy = body.triggered_by || null;
     const source = body.source || null;
+
+    // Broker comparison email path (Email Broker modal)
+    if (body.type === "broker_comparison") {
+      const { to, cc, comparison } = body as {
+        to: string;
+        cc?: string[];
+        comparison: BrokerComparisonData;
+      };
+
+      if (!to || !comparison) {
+        return new Response(
+          JSON.stringify({ error: "Missing required fields" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const subject = `Contract Note Comparison: ${comparison.contract_no} \u2014 ${comparison.note_type} ${comparison.ticker}`;
+      const html = buildBrokerComparisonHtml(comparison);
+      const sent = await sendEmail(to, cc, subject, html);
+
+      await logEmail({
+        to,
+        cc,
+        subject,
+        html,
+        status: sent ? "sent" : "failed",
+        errorMessage: sent ? undefined : "SMTP send failed \u2014 see edge function logs",
+        triggeredBy,
+        source,
+        emailType: "broker_comparison",
+      });
+
+      console.log(`Broker comparison email for ${comparison.contract_no} \u2192 ${to}`);
+
+      return new Response(
+        JSON.stringify({ success: true, sent, to, cc: cc || [] }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Approval/rejection notification path
     if (body.type === "approval_notification") {
