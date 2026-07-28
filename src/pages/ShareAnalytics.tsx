@@ -903,6 +903,116 @@ export function ShareAnalytics() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      // ── Cache layer ───────────────────────────────────────────────────────
+      // Compute a source hash from the latest updated_at timestamps of every
+      // source table that feeds the report. If the hash matches the most recent
+      // cached batch, serve rows directly from the cache table — no recompute.
+      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
+        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+      ]);
+
+      const fingerprint = [
+        bsnMax.data?.[0]?.updated_at   ?? '0',
+        txnMax.data?.[0]?.updated_at   ?? '0',
+        obMax.data?.[0]?.updated_at    ?? '0',
+        divMax.data?.[0]?.updated_at   ?? '0',
+        priceMax.data?.[0]?.updated_at ?? '0',
+        scripMax.data?.[0]?.updated_at ?? '0',
+        shareMax.data?.[0]?.updated_at ?? '0',
+        entMax.data?.[0]?.updated_at   ?? '0',
+      ].join('|');
+      const sourceHash = btoa(fingerprint + '|' + (selectedEntityId || 'all')).replace(/[/+=]/g, '');
+
+      // Check whether we already have a cached batch with this exact hash
+      const { data: existingBatch } = await supabase
+        .from('share_analytics_cache')
+        .select('source_hash')
+        .eq('source_hash', sourceHash)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingBatch) {
+        // ── Cache hit — read from cache table ──────────────────────────────
+        const { data: cached, error: cacheErr } = await supabase
+          .from('share_analytics_cache')
+          .select('*')
+          .eq('source_hash', sourceHash)
+          .order('entity_name', { ascending: true })
+          .order('share_ticker', { ascending: true });
+        if (cacheErr) throw cacheErr;
+
+        if (cached) {
+          // Reconstruct groups from cached rows
+          const groupMap = new Map<string, ShareGroup>();
+          for (const c of cached) {
+            if (selectedEntityId && c.entity_id !== selectedEntityId) continue;
+            const key = `${c.entity_id}__${c.share_id}`;
+            const row: ComputedRow = {
+              id: c.row_id,
+              note_type: c.note_type,
+              trade_date: c.trade_date,
+              no_of_shares: Number(c.no_of_shares) || 0,
+              price_avg: c.price_avg != null ? Number(c.price_avg) : null,
+              gross_amount: Number(c.gross_amount) || 0,
+              net_amount: Number(c.net_amount) || 0,
+              entity_id: c.entity_id,
+              entity_name: c.entity_name,
+              share_id: c.share_id,
+              share_ticker: c.share_ticker,
+              share_name: c.share_name,
+              cds_account: c.cds_account,
+              row_type: c.row_type as ComputedRow['row_type'],
+              purchase_cost: Number(c.purchase_cost) || 0,
+              sale_value: Number(c.sale_value) || 0,
+              dividend: Number(c.dividend) || 0,
+              share_cum_bal: Number(c.share_cum_bal) || 0,
+              av_cost: Number(c.av_cost) || 0,
+              av_price: Number(c.av_price) || 0,
+              cum_purchase_cost: Number(c.cum_purchase_cost) || 0,
+              cum_sale_value: Number(c.cum_sale_value) || 0,
+              cum_dividend: Number(c.cum_dividend) || 0,
+              cum_surplus: Number(c.cum_surplus) || 0,
+              market_value: Number(c.market_value) || 0,
+              cash_flow: Number(c.cash_flow) || 0,
+              total_surplus: Number(c.total_surplus) || 0,
+            };
+            let grp = groupMap.get(key);
+            if (!grp) {
+              grp = {
+                share_id: c.share_id,
+                share_ticker: c.share_ticker,
+                share_name: c.share_name,
+                entity_id: c.entity_id,
+                entity_name: c.entity_name,
+                market_price: Number(c.market_price) || 0,
+                market_price_date: c.market_price_date ?? null,
+                cds_accounts: c.cds_accounts ?? [],
+                brokerage_fee_rate: Number(c.brokerage_fee_rate) || 0,
+                rows: [],
+              };
+              groupMap.set(key, grp);
+            }
+            grp.rows.push(row);
+          }
+          const cachedGroups = Array.from(groupMap.values());
+          // Sort rows within each group by trade_date
+          for (const g of cachedGroups) {
+            g.rows.sort((a, b) => (a.trade_date ?? '') < (b.trade_date ?? '') ? -1 : 1);
+          }
+          cachedGroups.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
+          setGroups(cachedGroups);
+          return; // Skip full recompute
+        }
+      }
+
+      // ── Cache miss — recompute from source tables ─────────────────────────
       const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes, scripsRes, feeTypesRes] = await Promise.all([
         supabase.from('entities').select('id, name'),
         supabase.from('shares').select('id, ticker, share_name'),
@@ -1047,6 +1157,37 @@ export function ShareAnalytics() {
 
       result.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
       setGroups(result);
+
+      // ── Persist computed result to cache ───────────────────────────────
+      // Store every computed row so the next open with the same source hash
+      // can read directly from the cache table without recomputing.
+      const cacheRows: Record<string, unknown>[] = [];
+      for (const g of result) {
+        for (const r of g.rows) {
+          cacheRows.push({
+            entity_id: g.entity_id, share_id: g.share_id,
+            entity_name: g.entity_name, share_ticker: g.share_ticker, share_name: g.share_name,
+            market_price: g.market_price, market_price_date: g.market_price_date,
+            cds_accounts: g.cds_accounts, brokerage_fee_rate: g.brokerage_fee_rate,
+            row_id: r.id, row_type: r.row_type, note_type: r.note_type,
+            trade_date: r.trade_date, no_of_shares: r.no_of_shares,
+            price_avg: r.price_avg, gross_amount: r.gross_amount, net_amount: r.net_amount,
+            cds_account: r.cds_account,
+            purchase_cost: r.purchase_cost, sale_value: r.sale_value, dividend: r.dividend,
+            share_cum_bal: r.share_cum_bal, av_cost: r.av_cost, av_price: r.av_price,
+            cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
+            cum_dividend: r.cum_dividend, cum_surplus: r.cum_surplus,
+            market_value: r.market_value, cash_flow: r.cash_flow, total_surplus: r.total_surplus,
+            source_hash: sourceHash,
+          });
+        }
+      }
+      if (cacheRows.length > 0) {
+        await supabase.from('share_analytics_cache').delete().eq('source_hash', sourceHash);
+        for (let i = 0; i < cacheRows.length; i += 500) {
+          await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {
