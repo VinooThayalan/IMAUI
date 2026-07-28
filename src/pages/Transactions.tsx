@@ -29,6 +29,12 @@ interface Transaction {
   brokerage_fee_type_id: string | null;
   brokerage_fee_rate: number | null;
   fees: number;
+  brokerage_fee: number | null;
+  cse_fee: number | null;
+  cds_fee: number | null;
+  clearing_fee: number | null;
+  sec_cess: number | null;
+  share_transaction_levy: number | null;
   net_price_per_share: number;
   total_amount: number;
   approval_status: string;
@@ -82,6 +88,15 @@ interface Broker {
 interface FeeBreakdownItem {
   name: string;
   rate: number;
+}
+
+interface FeeComponentAmount {
+  brokerage_fee: number;
+  cse_fee: number;
+  cds_fee: number;
+  clearing_fee: number;
+  sec_cess: number;
+  share_transaction_levy: number;
 }
 
 interface BrokerageFeeType {
@@ -177,6 +192,7 @@ export function Transactions() {
   const [feeBreakdownItems, setFeeBreakdownItems] = useState<FeeBreakdownItem[]>([]);
   // When amount straddles the 100M threshold, aboveTierItems holds the above-tier breakdown
   const [aboveTierItems, setAboveTierItems] = useState<FeeBreakdownItem[]>([]);
+  const [feeComponentAmounts, setFeeComponentAmounts] = useState<FeeComponentAmount>({ brokerage_fee: 0, cse_fee: 0, cds_fee: 0, clearing_fee: 0, sec_cess: 0, share_transaction_levy: 0 });
   const [sharesInputFocused, setSharesInputFocused] = useState(false);
   const [latestSharePrice, setLatestSharePrice] = useState<{ price: number; date: string } | null>(null);
 
@@ -252,6 +268,7 @@ export function Transactions() {
           const totalFees = belowFees + aboveFees;
           const blendedRate = grossAmount > 0 ? (totalFees / grossAmount) * 100 : 0;
 
+          setFeeComponentAmounts(computeFeeComponents(belowBreakdown, aboveBreakdown, grossAmount, threshold));
           setFormData(prev => ({
             ...prev,
             brokerage_fee_type_id: belowTier.id,
@@ -274,6 +291,7 @@ export function Transactions() {
             setAboveTierItems([]);
 
             const fees = breakdown.reduce((sum, item) => sum + (grossAmount * item.rate) / 100, 0);
+            setFeeComponentAmounts(computeFeeComponents(breakdown, [], grossAmount, null));
             setFormData(prev => ({
               ...prev,
               brokerage_fee_type_id: matchingFeeType.id,
@@ -405,6 +423,31 @@ export function Transactions() {
     }
   }
 
+  function computeFeeComponents(belowItems: FeeBreakdownItem[], aboveItems: FeeBreakdownItem[], grossAmount: number, threshold: number | null): FeeComponentAmount {
+    const result: FeeComponentAmount = { brokerage_fee: 0, cse_fee: 0, cds_fee: 0, clearing_fee: 0, sec_cess: 0, share_transaction_levy: 0 };
+
+    const mapItem = (item: FeeBreakdownItem, amount: number) => {
+      const fee = (amount * item.rate) / 100;
+      const lower = item.name.toLowerCase();
+      if (lower.includes('brokerage')) result.brokerage_fee += fee;
+      else if (lower.includes('cse')) result.cse_fee += fee;
+      else if (lower.includes('cds')) result.cds_fee += fee;
+      else if (lower.includes('clearing')) result.clearing_fee += fee;
+      else if (lower.includes('sec')) result.sec_cess += fee;
+      else if (lower.includes('levy') || lower.includes('iovy')) result.share_transaction_levy += fee;
+    };
+
+    if (threshold !== null && grossAmount > threshold && aboveItems.length > 0) {
+      const excess = grossAmount - threshold;
+      belowItems.forEach(item => mapItem(item, threshold));
+      aboveItems.forEach(item => mapItem(item, excess));
+    } else {
+      belowItems.forEach(item => mapItem(item, grossAmount));
+    }
+
+    return result;
+  }
+
   function calculateFeesFromBreakdown(items: FeeBreakdownItem[], aboveItems?: FeeBreakdownItem[]) {
     const shares = parseFloat(formData.no_of_shares) || 0;
     const price = parseFloat(formData.price_per_share) || 0;
@@ -424,6 +467,7 @@ export function Transactions() {
       fees = items.reduce((sum, item) => sum + (grossAmount * item.rate) / 100, 0);
     }
 
+    setFeeComponentAmounts(computeFeeComponents(items, currentAboveItems, grossAmount, threshold));
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
@@ -432,6 +476,15 @@ export function Transactions() {
     const price = parseFloat(formData.price_per_share) || 0;
     const grossAmount = shares * price;
     const fees = (grossAmount * rate) / 100;
+    const componentRate = rate / 100;
+    setFeeComponentAmounts({
+      brokerage_fee: grossAmount * componentRate,
+      cse_fee: 0,
+      cds_fee: 0,
+      clearing_fee: 0,
+      sec_cess: 0,
+      share_transaction_levy: 0,
+    });
     setFormData(prev => ({ ...prev, fees: fees.toFixed(2) }));
   }
 
@@ -642,6 +695,12 @@ export function Transactions() {
         brokerage_fee_type_id: formData.brokerage_fee_type_id || null,
         brokerage_fee_rate: formData.brokerage_fee_rate ? parseFloat(formData.brokerage_fee_rate) : null,
         fees: parseFloat(formData.fees) || 0,
+        brokerage_fee: feeComponentAmounts.brokerage_fee || 0,
+        cse_fee: feeComponentAmounts.cse_fee || 0,
+        cds_fee: feeComponentAmounts.cds_fee || 0,
+        clearing_fee: feeComponentAmounts.clearing_fee || 0,
+        sec_cess: feeComponentAmounts.sec_cess || 0,
+        share_transaction_levy: feeComponentAmounts.share_transaction_levy || 0,
         net_price_per_share: netPricePerShare,
         total_amount: totalAmountNet,
         approval_status: 'DRAFT',
@@ -1153,6 +1212,12 @@ export function Transactions() {
         brokerage_fee_type: brokerageFeeType?.name || 'N/A',
         brokerage_fee_rate: selectedTransaction.brokerage_fee_rate ? `${selectedTransaction.brokerage_fee_rate}%` : 'N/A',
         brokerage_fee: Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        brokerage_fee_component: Number(selectedTransaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        cse_fee: Number(selectedTransaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        cds_fee: Number(selectedTransaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        clearing_fee: Number(selectedTransaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        sec_cess: Number(selectedTransaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+        share_transaction_levy: Number(selectedTransaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
         bank_name: bank?.name || 'N/A',
         bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
         ...(emailNote.trim() ? { note: emailNote.trim() } : {}),
@@ -1238,6 +1303,12 @@ export function Transactions() {
       brokerage_fee_type: brokerageFeeType?.name || 'N/A',
       brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
       brokerage_fee: Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      brokerage_fee_component: Number(transaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      cse_fee: Number(transaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      cds_fee: Number(transaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      clearing_fee: Number(transaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      sec_cess: Number(transaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      share_transaction_levy: Number(transaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
       bank_name: bank?.name || 'N/A',
       bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
     };
@@ -2443,6 +2514,35 @@ export function Transactions() {
                   </p>
                 </div>
                 <div className="col-span-2">
+                  <p className="text-sm font-medium text-gray-500 mb-2">Fee Breakdown</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">Brokerage Fee</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">CSE Fees</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">CDS Fees</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">Clearing Fees</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">SEC CESS</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500">Share Transaction Levy</p>
+                      <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+                </div>
+                <div>
                   <p className="text-sm font-medium text-gray-500">CDS/Broker Account</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">{selectedTransaction.cds_account_id || 'N/A'}</p>
                 </div>
@@ -2644,11 +2744,17 @@ export function Transactions() {
                     ['Broker', data.broker_name],
                     ['Brokerage Fee Type', data.brokerage_fee_type],
                     ['Brokerage Fee Rate', data.brokerage_fee_rate],
-                    ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
+                    ['Brokerage Fee', `LKR ${data.brokerage_fee_component}`],
+                    ['CSE Fees', `LKR ${data.cse_fee}`],
+                    ['CDS Fees', `LKR ${data.cds_fee}`],
+                    ['Clearing Fees', `LKR ${data.clearing_fee}`],
+                    ['SEC CESS', `LKR ${data.sec_cess}`],
+                    ['Share Trans. Levy', `LKR ${data.share_transaction_levy}`],
+                    ['Total Fees', `LKR ${data.brokerage_fee}`],
                     ['Bank Name', data.bank_name],
                     ['Bank Acc No.', data.bank_acc_no],
                   ].map(([label, value], i) => {
-                    const isKey = ['Total Amount', 'CDS Acc Type', 'CDS Acc No.', 'Gross Price / Share', 'Bank Name', 'Bank Acc No.'].includes(label as string);
+                    const isKey = ['Total Amount', 'CDS Acc Type', 'CDS Acc No.', 'Gross Price / Share', 'Bank Name', 'Bank Acc No.', 'Total Fees'].includes(label as string);
                     return (
                       <div key={i} className={`flex items-center justify-between px-3 py-1.5 border-b border-gray-100 ${isKey ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                         <span className={`text-xs font-medium ${isKey ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span>

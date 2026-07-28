@@ -25,6 +25,12 @@ interface TransactionData {
   brokerage_fee_type: string;
   brokerage_fee_rate: string;
   brokerage_fee: string;
+  brokerage_fee_component: string;
+  cse_fee: string;
+  cds_fee: string;
+  clearing_fee: string;
+  sec_cess: string;
+  share_transaction_levy: string;
   bank_name: string;
   bank_acc_no: string;
   note?: string;
@@ -286,6 +292,7 @@ function buildTransactionHtml(transaction: TransactionData): string {
     "CDS Acc No.",
     "Bank Name",
     "Bank Acc No.",
+    "Total Fees",
   ]);
 
   const fields: [string, string][] = [
@@ -300,7 +307,13 @@ function buildTransactionHtml(transaction: TransactionData): string {
     ["Broker", transaction.broker_name],
     ["Brokerage Fee Type", transaction.brokerage_fee_type],
     ["Brokerage Fee Rate", transaction.brokerage_fee_rate],
-    ["Brokerage Fee", `LKR ${transaction.brokerage_fee}`],
+    ["Brokerage Fee", `LKR ${transaction.brokerage_fee_component}`],
+    ["CSE Fees", `LKR ${transaction.cse_fee}`],
+    ["CDS Fees", `LKR ${transaction.cds_fee}`],
+    ["Clearing Fees", `LKR ${transaction.clearing_fee}`],
+    ["SEC CESS", `LKR ${transaction.sec_cess}`],
+    ["Share Trans. Levy", `LKR ${transaction.share_transaction_levy}`],
+    ["Total Fees", `LKR ${transaction.brokerage_fee}`],
     ["Bank Name", transaction.bank_name],
     ["Bank Acc No.", transaction.bank_acc_no],
   ];
