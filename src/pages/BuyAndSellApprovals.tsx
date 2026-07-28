@@ -45,6 +45,13 @@ interface Transaction {
   price_per_share: number;
   total_amount: number;
   transaction_date?: string;
+  fees?: number;
+  brokerage_fee?: number | null;
+  cse_fee?: number | null;
+  cds_fee?: number | null;
+  clearing_fee?: number | null;
+  sec_cess?: number | null;
+  share_transaction_levy?: number | null;
 }
 
 interface Entity {
@@ -109,7 +116,7 @@ export function BuyAndSellApprovals() {
       setLoading(true);
       const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date'),
+        supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date, fees, brokerage_fee, cse_fee, cds_fee, clearing_fee, sec_cess, share_transaction_levy'),
         supabase.from('entities').select('id, entity_id, name, cc_email').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation').eq('is_active', true),
@@ -178,6 +185,54 @@ export function BuyAndSellApprovals() {
     setIsSubmitting(false);
     setSendEmail(true);
     setCcEntityEmail(true);
+  }
+
+  async function sendBrokerComparisonEmail(
+    note: BuyAndSellNote,
+    entity: Entity | null,
+    share: Share | null,
+    broker: Broker | null,
+    txn: Transaction | null,
+    rows: Array<{ label: string; txnVal: string; noteVal: string; mismatch?: boolean }>,
+  ) {
+    const brokerEmail = broker?.contact_person_email;
+    if (!brokerEmail) return;
+
+    const fmtDate = (d?: string | null) =>
+      d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+    await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${anonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'broker_comparison',
+        to: brokerEmail,
+        triggered_by: user?.email || null,
+        source: 'buy-sell-approvals',
+        comparison: {
+          contract_no: note.contract_no || note.note_number || '—',
+          note_type: note.note_type,
+          entity_name: entity?.name || '—',
+          share_name: share?.share_name || '—',
+          ticker: share?.ticker || '—',
+          broker_name: broker?.broker_name || note.broker || '—',
+          broker_email: brokerEmail,
+          contact_person: broker?.contact_person_name || undefined,
+          contact_person_designation: broker?.contact_person_designation || undefined,
+          rows,
+          trade_date_txn: fmtDate(txn?.transaction_date),
+          trade_date_note: fmtDate(note.trade_date),
+          settlement_date_note: fmtDate(note.settlement_date),
+          remarks: note.remarks || undefined,
+        },
+      }),
+    }).catch(err => console.error('Broker comparison email failed:', err));
   }
 
   async function sendBrokerNotification(
@@ -792,13 +847,13 @@ const displayNotes = notes.filter(n => {
             noteVal: fmt(note.gross_amount),
             mismatch: txn != null && note.gross_amount != null && Math.abs(Number(txn.total_amount) - Number(note.gross_amount)) > 1,
           },
-          { label: 'Brokerage', txnVal: '—', noteVal: fmt(note.brokerage) },
-          { label: 'SEC', txnVal: '—', noteVal: fmt(note.sec) },
-          { label: 'Exchange', txnVal: '—', noteVal: fmt(note.exchange) },
-          { label: 'CDS Fees', txnVal: '—', noteVal: fmt(note.cds) },
-          { label: 'Gov. Levy', txnVal: '—', noteVal: fmt(note.gov_cess) },
-          { label: 'Clearing Fees', txnVal: '—', noteVal: fmt(note.clearing_fees) },
-          { label: 'Net Amount', txnVal: fmt(txn?.total_amount), noteVal: fmt(note.net_amount) },
+          { label: 'Brokerage', txnVal: fmt(txn?.brokerage_fee), noteVal: fmt(note.brokerage), mismatch: txn != null && txn.brokerage_fee != null && note.brokerage != null && Math.abs(Number(txn.brokerage_fee) - Number(note.brokerage)) > 1 },
+          { label: 'SEC', txnVal: fmt(txn?.sec_cess), noteVal: fmt(note.sec), mismatch: txn != null && txn.sec_cess != null && note.sec != null && Math.abs(Number(txn.sec_cess) - Number(note.sec)) > 1 },
+          { label: 'Exchange', txnVal: fmt(txn?.cse_fee), noteVal: fmt(note.exchange), mismatch: txn != null && txn.cse_fee != null && note.exchange != null && Math.abs(Number(txn.cse_fee) - Number(note.exchange)) > 1 },
+          { label: 'CDS Fees', txnVal: fmt(txn?.cds_fee), noteVal: fmt(note.cds), mismatch: txn != null && txn.cds_fee != null && note.cds != null && Math.abs(Number(txn.cds_fee) - Number(note.cds)) > 1 },
+          { label: 'Gov. Levy', txnVal: fmt(txn?.share_transaction_levy), noteVal: fmt(note.gov_cess), mismatch: txn != null && txn.share_transaction_levy != null && note.gov_cess != null && Math.abs(Number(txn.share_transaction_levy) - Number(note.gov_cess)) > 1 },
+          { label: 'Clearing Fees', txnVal: fmt(txn?.clearing_fee), noteVal: fmt(note.clearing_fees), mismatch: txn != null && txn.clearing_fee != null && note.clearing_fees != null && Math.abs(Number(txn.clearing_fee) - Number(note.clearing_fees)) > 1 },
+          { label: 'Net Amount', txnVal: fmt(txn?.total_amount), noteVal: fmt(note.net_amount), mismatch: txn != null && note.net_amount != null && Math.abs(Number(txn.total_amount) - Number(note.net_amount)) > 1 },
         ];
 
         async function handleSendEmailFromModal() {
@@ -808,7 +863,7 @@ const displayNotes = notes.filter(n => {
           }
           setIsSendingEmail(true);
           try {
-            await sendBrokerNotification(note, 'APPROVED', '', entity, share, broker, false, txn);
+            await sendBrokerComparisonEmail(note, entity, share, broker, txn, rows);
             alert(`Email sent to ${broker.contact_person_email}`);
             setEmailModalNote(null);
           } catch (err: any) {
