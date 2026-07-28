@@ -49,6 +49,7 @@ interface RawNote {
   no_of_shares: number;
   price_avg: number | null;
   gross_amount: number;
+  net_amount: number;
   entity_id: string;
   entity_name: string;
   share_id: string;
@@ -973,7 +974,7 @@ export function ShareAnalytics() {
 
       const { data: notesData, error: notesError } = await supabase
         .from('buy_sell_notes')
-        .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, transaction_id')
+        .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, net_amount, transaction_id')
         .eq('status', 'PROCESSED')
         .order('trade_date', { ascending: true });
       if (notesError) throw notesError;
@@ -983,13 +984,17 @@ export function ShareAnalytics() {
         .map((n: any) => {
           const txn   = txnMap.get(n.transaction_id)!;
           const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
-          // Use the stored total_amount from the transaction (net of fees) for cost/proceeds tracking
-          const netAmount = txn.total_amount > 0 ? txn.total_amount : (Number(n.gross_amount) || 0);
+          // Use the note's own net_amount (net of fees) for cost/proceeds tracking;
+          // fall back to gross_amount if net_amount is not available.
+          const noteNet = Number(n.net_amount) || 0;
+          const noteGross = Number(n.gross_amount) || 0;
+          const amount = noteNet > 0 ? noteNet : noteGross;
           return {
             id: n.id, note_type: n.note_type, trade_date: n.trade_date,
             no_of_shares: Number(n.no_of_shares) || 0,
             price_avg: n.price_avg != null ? Number(n.price_avg) : null,
-            gross_amount: netAmount,
+            gross_amount: amount,
+            net_amount: noteNet,
             entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
             cds_account: txn.cds_account_id ?? null,
