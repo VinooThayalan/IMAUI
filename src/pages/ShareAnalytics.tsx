@@ -1161,7 +1161,25 @@ export function ShareAnalytics() {
       // Store every computed row so the next open with the same source hash
       // can read directly from the cache table without recomputing.
       const cacheRows: Record<string, unknown>[] = [];
+      const today = new Date();
       for (const g of result) {
+        const lastRow = g.rows[g.rows.length - 1];
+        const feeRateG = g.brokerage_fee_rate / 100;
+        const mvAfterFeesG = g.market_price > 0
+          ? lastRow.share_cum_bal * (g.market_price - g.market_price * feeRateG)
+          : 0;
+        const groupCfs = g.rows
+          .filter(r => r.cash_flow !== 0 && r.trade_date)
+          .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
+        if (mvAfterFeesG > 0) groupCfs.push({ date: today, amount: mvAfterFeesG });
+        let groupAer: number | null = null;
+        if (groupCfs.length >= 2) {
+          try {
+            const rate = xirr(groupCfs);
+            groupAer = isFinite(rate) ? rate * 100 : null;
+          } catch { groupAer = null; }
+        }
+
         for (const r of g.rows) {
           cacheRows.push({
             entity_id: g.entity_id, share_id: g.share_id,
@@ -1177,6 +1195,7 @@ export function ShareAnalytics() {
             cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
             cum_dividend: r.cum_dividend, cum_surplus: r.cum_surplus,
             market_value: r.market_value, cash_flow: r.cash_flow, total_surplus: r.total_surplus,
+            aer: groupAer,
             source_hash: sourceHash,
           });
         }
