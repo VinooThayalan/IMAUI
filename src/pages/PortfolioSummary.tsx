@@ -248,7 +248,7 @@ export function PortfolioSummary() {
           .lte('effective_date', asOfDate),
         supabase
           .from('buy_sell_notes')
-          .select('transaction_id, note_type, trade_date, no_of_shares, gross_amount')
+          .select('transaction_id, note_type, trade_date, no_of_shares, gross_amount, net_amount')
           .eq('status', 'PROCESSED')
           .lte('trade_date', asOfDate)
           .order('trade_date', { ascending: true }),
@@ -370,17 +370,20 @@ export function PortfolioSummary() {
         }
       });
 
-      const noteByTxn = new Map<string, { shares: number; gross: number; note_type: string; trade_date: string | null }>();
+      const noteByTxn = new Map<string, { shares: number; amount: number; note_type: string; trade_date: string | null }>();
       (notesRes.data || []).forEach((n: {
         transaction_id: string;
         note_type: string;
         no_of_shares: number;
         gross_amount: number;
+        net_amount: number;
         trade_date: string | null;
       }) => {
+        const noteNet = Number(n.net_amount) || 0;
+        const noteGross = Number(n.gross_amount) || 0;
         noteByTxn.set(n.transaction_id, {
           shares: Number(n.no_of_shares) || 0,
-          gross: Number(n.gross_amount) || 0,
+          amount: noteNet > 0 ? noteNet : noteGross,
           note_type: n.note_type,
           trade_date: n.trade_date,
         });
@@ -426,7 +429,7 @@ export function PortfolioSummary() {
         const holding = ensureHolding(tx.entity_id, tx.share_id, tx.entities?.name);
 
         const shares = note.shares;
-        const amount = Number(tx.total_amount) || 0;
+        const amount = note.amount;
         const isBuy = (note.note_type || '').toUpperCase() === 'BUY';
         const txDate = note.trade_date || tx.transaction_date;
 
