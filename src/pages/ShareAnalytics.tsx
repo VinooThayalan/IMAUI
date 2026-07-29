@@ -928,7 +928,7 @@ export function ShareAnalytics() {
         shareMax.data?.[0]?.updated_at ?? '0',
         entMax.data?.[0]?.updated_at   ?? '0',
       ].join('|');
-      const sourceHash = btoa(fingerprint + '|' + (selectedEntityId || 'all')).replace(/[/+=]/g, '');
+      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
 
       // Check whether we already have a cached batch with this exact hash
       const { data: existingBatch } = await supabase
@@ -1067,7 +1067,6 @@ export function ShareAnalytics() {
 
       const scripMap = new Map<string, ScripRecord[]>();
       for (const s of (scripsRes.data || [])) {
-        if (selectedEntityId && s.entity_id !== selectedEntityId) continue;
         const k = `${s.entity_id}__${s.share_id}`;
         if (!scripMap.has(k)) scripMap.set(k, []);
         scripMap.get(k)!.push({ entity_id: s.entity_id, share_id: s.share_id, no_of_shares: Number(s.no_of_shares) || 0, effective_date: s.effective_date ?? null, entry_date: s.entry_date });
@@ -1110,14 +1109,14 @@ export function ShareAnalytics() {
             cds_account: txn.cds_account_id ?? null,
           };
         })
-        .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
+        .filter((n: RawNote) => true);
 
       const allRaw = raw;
 
       const groupKeys = new Set<string>();
       for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
       for (const [k] of openingMap) {
-        if (!selectedEntityId || k.startsWith(selectedEntityId)) groupKeys.add(k);
+        groupKeys.add(k);
       }
       for (const [k] of scripMap) groupKeys.add(k);
 

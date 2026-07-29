@@ -95,6 +95,222 @@ export function Portfolio() {
   const fetchPortfolioData = useCallback(async (entityId?: string) => {
     setLoading(true);
     try {
+      const scope = entityId || 'all';
+
+      // ── Compute source hash (same fingerprint as ShareAnalytics) ─────────
+      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
+        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+      ]);
+
+      const fingerprint = [
+        bsnMax.data?.[0]?.updated_at   ?? '0',
+        txnMax.data?.[0]?.updated_at   ?? '0',
+        obMax.data?.[0]?.updated_at    ?? '0',
+        divMax.data?.[0]?.updated_at   ?? '0',
+        priceMax.data?.[0]?.updated_at ?? '0',
+        scripMax.data?.[0]?.updated_at ?? '0',
+        shareMax.data?.[0]?.updated_at ?? '0',
+        entMax.data?.[0]?.updated_at   ?? '0',
+      ].join('|');
+      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
+
+      // ── Check portfolio_cache for a matching batch ───────────────────────
+      const { data: existing } = await supabase
+        .from('portfolio_cache')
+        .select('source_hash')
+        .eq('scope', scope)
+        .eq('source_hash', sourceHash)
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        const { data: cached, error: cacheErr } = await supabase
+          .from('portfolio_cache')
+          .select('*')
+          .eq('scope', scope)
+          .eq('source_hash', sourceHash)
+          .order('section', { ascending: true })
+          .order('sort_order', { ascending: true });
+        if (cacheErr) throw cacheErr;
+
+        if (cached) {
+          let totalValue = 0, totalGainLoss = 0, percentChange = 0, cashBalance = 0;
+          const sectors: SectorRow[] = [];
+          const entities_: EntityRow[] = [];
+          const tops: PerformerRow[] = [];
+          const bottoms: PerformerRow[] = [];
+
+          for (const c of cached) {
+            if (c.section === 'summary') {
+              if (c.label === 'totalValue') totalValue = Number(c.value) || 0;
+              if (c.label === 'totalGainLoss') totalGainLoss = Number(c.value) || 0;
+              if (c.label === 'percentChange') percentChange = Number(c.value) || 0;
+              if (c.label === 'cashBalance') cashBalance = Number(c.value) || 0;
+            } else if (c.section === 'sector') {
+              sectors.push({
+                sector: c.label, value: Number(c.value) || 0,
+                percentage: Number(c.percentage) || 0,
+                color: sectorBarColor(c.label, c.sort_order),
+              });
+            } else if (c.section === 'entity') {
+              entities_.push({
+                name: c.label, value: Number(c.value) || 0,
+                percentage: Number(c.percentage) || 0,
+                shares: Number(c.extra_value) || 0,
+              });
+            } else if (c.section === 'performer') {
+              const pr: PerformerRow = {
+                ticker: c.label, name: c.label_2 || '—',
+                gainLoss: Number(c.value) || 0,
+                percentage: Number(c.percentage) || 0,
+              };
+              if (c.is_top_performer) tops.push(pr);
+              else bottoms.push(pr);
+            }
+          }
+
+          setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
+          setSectorAllocation(sectors);
+          setEntityBreakdown(entities_);
+          setTopPerformers(tops);
+          setBottomPerformers(bottoms);
+
+          // Still need entities list for the dropdown
+          const { data: entData } = await supabase.from('entities').select('id, name');
+          setEntities((entData || []).map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
+          return;
+        }
+      }
+
+      // ── Cache miss: read holdings from share_analytics_cache ─────────────
+      // The last row of each entity-share group has the final cumulative values.
+      const { data: analyticsRows, error: analyticsErr } = await supabase
+        .from('share_analytics_cache')
+        .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, source_hash')
+        .order('entity_name', { ascending: true })
+        .order('share_ticker', { ascending: true })
+        .order('trade_date', { ascending: true });
+
+      if (analyticsErr) throw analyticsErr;
+
+      // If share_analytics_cache is empty or the hash doesn't match, we need
+      // to fall back to computing from source tables directly.
+      const analyticsHash = analyticsRows?.[0]?.source_hash;
+      const cacheValid = analyticsRows && analyticsRows.length > 0 && analyticsHash === sourceHash;
+
+      if (cacheValid) {
+        // Build holdings from the last row of each entity-share group
+        const lastRowMap = new Map<string, { held: number; cost: number; marketValue: number; dividends: number; entity_id: string; share_id: string; entity_name: string; share_ticker: string; share_name: string }>();
+        for (const r of analyticsRows) {
+          if (entityId && r.entity_id !== entityId) continue;
+          const key = `${r.entity_id}__${r.share_id}`;
+          // Since ordered by trade_date ascending, last entry wins = final state
+          lastRowMap.set(key, {
+            held: Number(r.share_cum_bal) || 0,
+            cost: Number(r.av_cost) || 0,
+            marketValue: Number(r.market_value) || 0,
+            dividends: Number(r.cum_dividend) || 0,
+            entity_id: r.entity_id, share_id: r.share_id,
+            entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
+          });
+        }
+
+        // Aggregate
+        let totalValue = 0, totalCost = 0, totalGainLoss = 0;
+        const sectorMap = new Map<string, number>();
+        const entityHoldMap = new Map<string, { value: number; shares: number; name: string }>();
+        const performers: PerformerRow[] = [];
+
+        // We need sector info from shares table
+        const { data: sharesData } = await supabase
+          .from('shares')
+          .select('id, ticker, share_name, sector, sector_types(sector_name)')
+          .eq('is_active', true);
+        const shareSectorMap = new Map<string, string>();
+        (sharesData || []).forEach((s: {
+          id: string;
+          sector?: string;
+          sector_types?: { sector_name: string } | null;
+        }) => {
+          shareSectorMap.set(s.id, s.sector_types?.sector_name || s.sector || 'Other');
+        });
+
+        const { data: entData } = await supabase.from('entities').select('id, name, current_balance');
+        let cashBalance = 0;
+        (entData || []).forEach((e: { id: string; name: string; current_balance: number }) => {
+          if (!entityId || e.id === entityId) cashBalance += Number(e.current_balance) || 0;
+        });
+        setEntities((entData || []).map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
+
+        lastRowMap.forEach((h, _key) => {
+          if (h.held <= 0) return;
+          totalValue += h.marketValue;
+          totalCost += h.cost;
+          const gainLoss = h.marketValue - h.cost + h.dividends;
+          totalGainLoss += gainLoss;
+          const pct = h.cost > 0 ? (gainLoss / h.cost) * 100 : 0;
+          const sector = shareSectorMap.get(h.share_id) || 'Other';
+          sectorMap.set(sector, (sectorMap.get(sector) || 0) + h.marketValue);
+
+          performers.push({ ticker: h.share_ticker, name: h.share_name, gainLoss, percentage: pct });
+
+          const ent = entityHoldMap.get(h.entity_id);
+          if (ent) { ent.value += h.marketValue; ent.shares += 1; }
+          else entityHoldMap.set(h.entity_id, { value: h.marketValue, shares: 1, name: h.entity_name });
+        });
+
+        const percentChange = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
+        setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
+
+        const sectors: SectorRow[] = Array.from(sectorMap.entries())
+          .map(([sector, value], index) => ({
+            sector, value,
+            percentage: totalValue > 0 ? (value / totalValue) * 100 : 0,
+            color: sectorBarColor(sector, index),
+          }))
+          .sort((a, b) => b.value - a.value);
+        setSectorAllocation(sectors);
+
+        const entityRows: EntityRow[] = Array.from(entityHoldMap.entries())
+          .map(([_, v]) => ({
+            name: v.name, value: v.value,
+            percentage: totalValue > 0 ? (v.value / totalValue) * 100 : 0,
+            shares: v.shares,
+          }))
+          .sort((a, b) => b.value - a.value);
+        setEntityBreakdown(entityRows);
+
+        performers.sort((a, b) => b.gainLoss - a.gainLoss);
+        setTopPerformers(performers.filter(p => p.gainLoss > 0).slice(0, 3));
+        setBottomPerformers([...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3));
+
+        // ── Store in portfolio_cache ─────────────────────────────────────
+        const cacheRows: Record<string, unknown>[] = [];
+        cacheRows.push({ scope, section: 'summary', sort_order: 0, label: 'totalValue', value: totalValue, percentage: 0, source_hash: sourceHash });
+        cacheRows.push({ scope, section: 'summary', sort_order: 1, label: 'totalGainLoss', value: totalGainLoss, percentage: 0, source_hash: sourceHash });
+        cacheRows.push({ scope, section: 'summary', sort_order: 2, label: 'percentChange', value: 0, percentage: percentChange, source_hash: sourceHash });
+        cacheRows.push({ scope, section: 'summary', sort_order: 3, label: 'cashBalance', value: cashBalance, percentage: 0, source_hash: sourceHash });
+        sectors.forEach((s, i) => cacheRows.push({ scope, section: 'sector', sort_order: i, label: s.sector, value: s.value, percentage: s.percentage, source_hash: sourceHash }));
+        entityRows.forEach((e, i) => cacheRows.push({ scope, section: 'entity', sort_order: i, label: e.name, value: e.value, percentage: e.percentage, extra_value: e.shares, source_hash: sourceHash }));
+        performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
+        [...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: false, source_hash: sourceHash }));
+
+        await supabase.from('portfolio_cache').delete().eq('scope', scope).eq('source_hash', sourceHash);
+        for (let i = 0; i < cacheRows.length; i += 500) {
+          await supabase.from('portfolio_cache').insert(cacheRows.slice(i, i + 500));
+        }
+        return;
+      }
+
+      // ── Fallback: share_analytics_cache is empty or stale ────────────────
+      // Compute directly from source tables (same logic as before caching).
       const txnQuery = supabase
           .from('transactions')
           .select(`
@@ -314,12 +530,29 @@ export function Portfolio() {
       entityRows.sort((a, b) => b.value - a.value);
       setEntityBreakdown(entityRows);
 
+      const percentChange = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
       setPortfolioData({
         totalValue,
         totalGainLoss,
-        percentChange: totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0,
+        percentChange,
         cashBalance,
       });
+
+      // ── Store fallback results in portfolio_cache too ──────────────────
+      const cacheRows: Record<string, unknown>[] = [];
+      cacheRows.push({ scope, section: 'summary', sort_order: 0, label: 'totalValue', value: totalValue, percentage: 0, source_hash: sourceHash });
+      cacheRows.push({ scope, section: 'summary', sort_order: 1, label: 'totalGainLoss', value: totalGainLoss, percentage: 0, source_hash: sourceHash });
+      cacheRows.push({ scope, section: 'summary', sort_order: 2, label: 'percentChange', value: 0, percentage: percentChange, source_hash: sourceHash });
+      cacheRows.push({ scope, section: 'summary', sort_order: 3, label: 'cashBalance', value: cashBalance, percentage: 0, source_hash: sourceHash });
+      sectors.forEach((s, i) => cacheRows.push({ scope, section: 'sector', sort_order: i, label: s.sector, value: s.value, percentage: s.percentage, source_hash: sourceHash }));
+      entityRows.forEach((e, i) => cacheRows.push({ scope, section: 'entity', sort_order: i, label: e.name, value: e.value, percentage: e.percentage, extra_value: e.shares, source_hash: sourceHash }));
+      performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
+      [...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: false, source_hash: sourceHash }));
+
+      await supabase.from('portfolio_cache').delete().eq('scope', scope).eq('source_hash', sourceHash);
+      for (let i = 0; i < cacheRows.length; i += 500) {
+        await supabase.from('portfolio_cache').insert(cacheRows.slice(i, i + 500));
+      }
     } catch (error) {
       console.error('Error fetching portfolio data:', error);
     } finally {
