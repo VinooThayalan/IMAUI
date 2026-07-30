@@ -210,7 +210,7 @@ export function PortfolioSummary() {
       }
 
       // ── Fallback: compute from source tables (historical as-of date or cache miss) ──
-      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes, scripsRes] = await Promise.all([
+      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes, scripsRes, feeTypesRes] = await Promise.all([
         supabase
           .from('transactions')
           .select(`
@@ -257,6 +257,11 @@ export function PortfolioSummary() {
           .select('entity_id, share_id, no_of_shares, effective_date, entry_date')
           .eq('status', 'RECEIVED')
           .lte('effective_date', asOfDate),
+        supabase
+          .from('brokerage_fee_types')
+          .select('rate, min_price')
+          .eq('is_active', true)
+          .order('min_price', { ascending: true, nullsFirst: true }),
       ]);
 
       if (scripsRes.error) throw scripsRes.error;
@@ -290,6 +295,10 @@ export function PortfolioSummary() {
           sector: s.sector_types?.sector_name || s.sector || 'N/A',
         });
       });
+
+      const defaultFeeRate = feeTypesRes.data && feeTypesRes.data.length > 0
+        ? Number(feeTypesRes.data[0].rate)
+        : 0;
 
       type Holding = {
         entity_id: string;
@@ -502,7 +511,7 @@ export function PortfolioSummary() {
           const share = shareMap.get(holding.share_id);
           const marketPrice = latestPrices.get(holding.share_id) || 0;
           const costPerShare = holding.shares > 0 ? holding.cost / holding.shares : 0;
-          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? 0) / 100;
+          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? defaultFeeRate) / 100;
           const marketValueGross = holding.shares * marketPrice;
           // Net market value = gross market value after deducting sell brokerage fee (matches ShareAnalytics)
           const marketValueNet = marketValueGross * (1 - feeRate);
