@@ -124,12 +124,12 @@ export function PortfolioSummary() {
         const { data: cacheRows } = await supabase
           .from('share_analytics_cache')
           .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, source_hash')
+          .eq('source_hash', sourceHash)
           .order('entity_name', { ascending: true })
           .order('share_ticker', { ascending: true })
           .order('trade_date', { ascending: true });
 
-        const cacheHash = cacheRows?.[0]?.source_hash;
-        if (cacheRows && cacheRows.length > 0 && cacheHash === sourceHash) {
+        if (cacheRows && cacheRows.length > 0) {
           // Build holdings from the last row of each entity-share group
           const lastRowMap = new Map<string, {
             entity_id: string; share_id: string; entity_name: string;

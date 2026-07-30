@@ -1201,7 +1201,7 @@ export function ShareAnalytics() {
         }
       }
       if (cacheRows.length > 0) {
-        await supabase.from('share_analytics_cache').delete().eq('source_hash', sourceHash);
+        await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
         for (let i = 0; i < cacheRows.length; i += 500) {
           await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
         }
