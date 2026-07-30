@@ -928,7 +928,7 @@ export function ShareAnalytics() {
         shareMax.data?.[0]?.updated_at ?? '0',
         entMax.data?.[0]?.updated_at   ?? '0',
       ].join('|');
-      const sourceHash = btoa(fingerprint + '|' + (selectedEntityId || 'all')).replace(/[/+=]/g, '');
+      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
 
       // Check whether we already have a cached batch with this exact hash
       const { data: existingBatch } = await supabase
@@ -1067,7 +1067,6 @@ export function ShareAnalytics() {
 
       const scripMap = new Map<string, ScripRecord[]>();
       for (const s of (scripsRes.data || [])) {
-        if (selectedEntityId && s.entity_id !== selectedEntityId) continue;
         const k = `${s.entity_id}__${s.share_id}`;
         if (!scripMap.has(k)) scripMap.set(k, []);
         scripMap.get(k)!.push({ entity_id: s.entity_id, share_id: s.share_id, no_of_shares: Number(s.no_of_shares) || 0, effective_date: s.effective_date ?? null, entry_date: s.entry_date });
@@ -1110,14 +1109,14 @@ export function ShareAnalytics() {
             cds_account: txn.cds_account_id ?? null,
           };
         })
-        .filter((n: RawNote) => !selectedEntityId || n.entity_id === selectedEntityId);
+        .filter((n: RawNote) => true);
 
       const allRaw = raw;
 
       const groupKeys = new Set<string>();
       for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
       for (const [k] of openingMap) {
-        if (!selectedEntityId || k.startsWith(selectedEntityId)) groupKeys.add(k);
+        groupKeys.add(k);
       }
       for (const [k] of scripMap) groupKeys.add(k);
 
@@ -1162,7 +1161,25 @@ export function ShareAnalytics() {
       // Store every computed row so the next open with the same source hash
       // can read directly from the cache table without recomputing.
       const cacheRows: Record<string, unknown>[] = [];
+      const today = new Date();
       for (const g of result) {
+        const lastRow = g.rows[g.rows.length - 1];
+        const feeRateG = g.brokerage_fee_rate / 100;
+        const mvAfterFeesG = g.market_price > 0
+          ? lastRow.share_cum_bal * (g.market_price - g.market_price * feeRateG)
+          : 0;
+        const groupCfs = g.rows
+          .filter(r => r.cash_flow !== 0 && r.trade_date)
+          .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
+        if (mvAfterFeesG > 0) groupCfs.push({ date: today, amount: mvAfterFeesG });
+        let groupAer: number | null = null;
+        if (groupCfs.length >= 2) {
+          try {
+            const rate = xirr(groupCfs);
+            groupAer = isFinite(rate) ? rate * 100 : null;
+          } catch { groupAer = null; }
+        }
+
         for (const r of g.rows) {
           cacheRows.push({
             entity_id: g.entity_id, share_id: g.share_id,
@@ -1178,6 +1195,7 @@ export function ShareAnalytics() {
             cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
             cum_dividend: r.cum_dividend, cum_surplus: r.cum_surplus,
             market_value: r.market_value, cash_flow: r.cash_flow, total_surplus: r.total_surplus,
+            aer: groupAer,
             source_hash: sourceHash,
           });
         }
