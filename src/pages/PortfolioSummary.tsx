@@ -24,34 +24,6 @@ function exportCsv(filename: string, headers: string[], rows: (string | number)[
   URL.revokeObjectURL(url);
 }
 
-// XIRR: annualized internal rate of return for irregular cash flows
-function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
-  if (cashFlows.length < 2) return 0;
-
-  const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
-  const d0 = sorted[0].date.getTime();
-  const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-
-  let rate = guess;
-  for (let iter = 0; iter < 200; iter++) {
-    let f = 0;
-    let df = 0;
-    for (const cf of sorted) {
-      const t = (cf.date.getTime() - d0) / MS_PER_YEAR;
-      const base = 1 + rate;
-      if (base <= 0) break;
-      const pv = Math.pow(base, t);
-      f += cf.amount / pv;
-      df -= (t * cf.amount) / (pv * base);
-    }
-    if (Math.abs(df) < 1e-12) break;
-    const newRate = rate - f / df;
-    if (Math.abs(newRate - rate) < 1e-8) return newRate;
-    rate = Math.max(-0.999, newRate); // clamp to avoid log(0)
-  }
-  return rate;
-}
-
 interface PortfolioRow {
   entity_id: string;
   entity_name: string;
@@ -95,476 +67,120 @@ export function PortfolioSummary() {
     try {
       setLoading(true);
 
-      // ── Try share_analytics_cache first (same source hash as ShareAnalytics) ──
-      // This ensures AER and all computed values match ShareAnalytics exactly.
-      const todayStr = new Date().toISOString().split('T')[0];
-      if (asOfDate >= todayStr) {
-        const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
-          supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-          supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        ]);
-        const fingerprint = [
-          bsnMax.data?.[0]?.updated_at   ?? '0',
-          txnMax.data?.[0]?.updated_at   ?? '0',
-          obMax.data?.[0]?.updated_at    ?? '0',
-          divMax.data?.[0]?.updated_at   ?? '0',
-          priceMax.data?.[0]?.updated_at ?? '0',
-          scripMax.data?.[0]?.updated_at ?? '0',
-          shareMax.data?.[0]?.updated_at ?? '0',
-          entMax.data?.[0]?.updated_at   ?? '0',
-        ].join('|');
-        const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
-
-        const { data: cacheRows } = await supabase
-          .from('share_analytics_cache')
-          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, source_hash')
-          .eq('source_hash', sourceHash)
-          .order('entity_name', { ascending: true })
-          .order('share_ticker', { ascending: true })
-          .order('trade_date', { ascending: true });
-
-        if (cacheRows && cacheRows.length > 0) {
-          // Build holdings from the last row of each entity-share group
-          const lastRowMap = new Map<string, {
-            entity_id: string; share_id: string; entity_name: string;
-            share_ticker: string; share_name: string;
-            share_cum_bal: number; av_cost: number; market_value: number;
-            cum_dividend: number; cum_purchase_cost: number; cum_sale_value: number;
-            market_price: number; brokerage_fee_rate: number; cds_accounts: string[];
-            aer: number | null;
-          }>();
-          for (const r of cacheRows) {
-            const key = `${r.entity_id}_${r.share_id}`;
-            lastRowMap.set(key, {
-              entity_id: r.entity_id, share_id: r.share_id,
-              entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
-              share_cum_bal: Number(r.share_cum_bal) || 0,
-              av_cost: Number(r.av_cost) || 0,
-              market_value: Number(r.market_value) || 0,
-              cum_dividend: Number(r.cum_dividend) || 0,
-              cum_purchase_cost: Number(r.cum_purchase_cost) || 0,
-              cum_sale_value: Number(r.cum_sale_value) || 0,
-              market_price: Number(r.market_price) || 0,
-              brokerage_fee_rate: Number(r.brokerage_fee_rate) || 0,
-              cds_accounts: r.cds_accounts ?? [],
-              aer: r.aer != null ? Number(r.aer) : null,
-            });
-          }
-
-          // Fetch sector info and dividend DPS
-          const [sharesRes2, divRes2] = await Promise.all([
-            supabase.from('shares').select('id, sector, sector_types(sector_name)'),
-            supabase.from('dividends').select('share_id, entity_id, net_dividend_per_share').order('payment_date', { ascending: false }),
-          ]);
-          const shareSectorMap = new Map<string, string>();
-          (sharesRes2.data || []).forEach((s: { id: string; sector?: string; sector_types?: { sector_name: string } | null }) => {
-            shareSectorMap.set(s.id, s.sector_types?.sector_name || s.sector || 'N/A');
-          });
-          const dpsMap = new Map<string, number>();
-          (divRes2.data || []).forEach((d: { share_id: string; entity_id: string; net_dividend_per_share?: number }) => {
-            const key = `${d.entity_id}_${d.share_id}`;
-            if (!dpsMap.has(key) && d.net_dividend_per_share != null) {
-              dpsMap.set(key, Number(d.net_dividend_per_share));
-            }
-          });
-
-          const portfolioData: PortfolioRow[] = [];
-          lastRowMap.forEach((h, key) => {
-            if (h.share_cum_bal <= 0) return;
-            const feeRate = h.brokerage_fee_rate / 100;
-            const marketValueNet = h.market_value * (1 - feeRate);
-            const totalReturns = marketValueNet + h.cum_sale_value + h.cum_dividend - h.cum_purchase_cost;
-            const dps = dpsMap.get(key) ?? 0;
-            portfolioData.push({
-              entity_id: h.entity_id,
-              entity_name: h.entity_name,
-              cds_accounts: h.cds_accounts,
-              sector: shareSectorMap.get(h.share_id) || 'N/A',
-              share_id: h.share_id,
-              ticker: h.share_ticker || 'N/A',
-              share_name: h.share_name || 'N/A',
-              balance_shares: h.share_cum_bal,
-              cost: h.av_cost,
-              cost_per_share: h.share_cum_bal > 0 ? h.av_cost / h.share_cum_bal : 0,
-              market_price_per_share: h.market_price,
-              market_value_net: marketValueNet,
-              div: h.cum_dividend,
-              total_returns: totalReturns,
-              aer: h.aer ?? 0,
-              cash_dps_last_fy: dps,
-              cash_div: h.share_cum_bal * dps,
-              remarks: '',
-            });
-          });
-
-          portfolioData.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.ticker.localeCompare(b.ticker));
-          setData(portfolioData);
-          return;
-        }
-      }
-
-      // ── Fallback: compute from source tables (historical as-of date or cache miss) ──
-      const [transactionsRes, pricesRes, dividendsRes, entitiesRes, sharesRes, openingRes, notesRes, scripsRes, feeTypesRes] = await Promise.all([
-        supabase
-          .from('transactions')
-          .select(`
-            id,
-            entity_id,
-            share_id,
-            transaction_type,
-            no_of_shares,
-            total_amount,
-            transaction_date,
-            approval_status,
-            cds_account_id,
-            brokerage_fee_rate,
-            entities ( name, entity_id ),
-            shares ( ticker, share_name, sector, sector_types ( sector_name ) )
-          `)
-          .lte('transaction_date', asOfDate)
-          .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true }),
-        supabase
-          .from('daily_share_prices')
-          .select('share_id, share_price, effective_date')
-          .lte('effective_date', asOfDate)
-          .order('effective_date', { ascending: false }),
-        supabase
-          .from('dividends')
-          .select('share_id, entity_id, amount_net, net_dividend_per_share, payment_date')
-          .lte('payment_date', asOfDate)
-          .order('payment_date', { ascending: true }),
-        supabase.from('entities').select('id, name, entity_id'),
-        supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)'),
-        supabase
-          .from('entity_share_opening_balances')
-          .select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date')
-          .lte('effective_date', asOfDate),
-        supabase
-          .from('buy_sell_notes')
-          .select('transaction_id, note_type, trade_date, no_of_shares, gross_amount, net_amount')
-          .eq('status', 'PROCESSED')
-          .lte('trade_date', asOfDate)
-          .order('trade_date', { ascending: true }),
-        supabase
-          .from('scrip_entries')
-          .select('entity_id, share_id, no_of_shares, effective_date, entry_date')
-          .eq('status', 'RECEIVED')
-          .lte('effective_date', asOfDate),
-        supabase
-          .from('brokerage_fee_types')
-          .select('rate, min_price')
-          .eq('is_active', true)
-          .order('min_price', { ascending: true, nullsFirst: true }),
+      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
+        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
       ]);
+      const fingerprint = [
+        bsnMax.data?.[0]?.updated_at   ?? '0',
+        txnMax.data?.[0]?.updated_at   ?? '0',
+        obMax.data?.[0]?.updated_at    ?? '0',
+        divMax.data?.[0]?.updated_at   ?? '0',
+        priceMax.data?.[0]?.updated_at ?? '0',
+        scripMax.data?.[0]?.updated_at ?? '0',
+        shareMax.data?.[0]?.updated_at ?? '0',
+        entMax.data?.[0]?.updated_at   ?? '0',
+      ].join('|');
+      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
 
-      if (scripsRes.error) throw scripsRes.error;
+      const { data: cacheRows, error: cacheError } = await supabase
+        .from('share_analytics_cache')
+        .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, source_hash')
+        .eq('source_hash', sourceHash)
+        .order('entity_name', { ascending: true })
+        .order('share_ticker', { ascending: true })
+        .order('trade_date', { ascending: true });
 
-      if (transactionsRes.error) throw transactionsRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
+      if (cacheError) throw cacheError;
 
-      const latestPrices = new Map<string, number>();
-      (pricesRes.data || []).forEach((p: { share_id: string; share_price: number }) => {
-        if (!latestPrices.has(p.share_id)) {
-          latestPrices.set(p.share_id, Number(p.share_price) || 0);
-        }
-      });
+      if (!cacheRows || cacheRows.length === 0) {
+        setData([]);
+        return;
+      }
 
-      const entityMap = new Map<string, { name: string; entity_id: string }>();
-      (entitiesRes.data || []).forEach((e: { id: string; name: string; entity_id: string }) => {
-        entityMap.set(e.id, { name: e.name, entity_id: e.entity_id });
-      });
+      const lastRowMap = new Map<string, {
+        entity_id: string; share_id: string; entity_name: string;
+        share_ticker: string; share_name: string;
+        share_cum_bal: number; av_cost: number; market_value: number;
+        cum_dividend: number; cum_purchase_cost: number; cum_sale_value: number;
+        market_price: number; brokerage_fee_rate: number; cds_accounts: string[];
+        aer: number | null;
+      }>();
+      for (const r of cacheRows) {
+        const key = `${r.entity_id}_${r.share_id}`;
+        lastRowMap.set(key, {
+          entity_id: r.entity_id, share_id: r.share_id,
+          entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
+          share_cum_bal: Number(r.share_cum_bal) || 0,
+          av_cost: Number(r.av_cost) || 0,
+          market_value: Number(r.market_value) || 0,
+          cum_dividend: Number(r.cum_dividend) || 0,
+          cum_purchase_cost: Number(r.cum_purchase_cost) || 0,
+          cum_sale_value: Number(r.cum_sale_value) || 0,
+          market_price: Number(r.market_price) || 0,
+          brokerage_fee_rate: Number(r.brokerage_fee_rate) || 0,
+          cds_accounts: r.cds_accounts ?? [],
+          aer: r.aer != null ? Number(r.aer) : null,
+        });
+      }
 
-      const shareMap = new Map<string, { ticker: string; name: string; sector: string }>();
-      (sharesRes.data || []).forEach((s: {
+      const [sharesRes2, divRes2] = await Promise.all([
+        supabase.from('shares').select('id, sector, sector_types(sector_name)'),
+        supabase.from('dividends').select('share_id, entity_id, net_dividend_per_share').order('payment_date', { ascending: false }),
+      ]);
+      const shareSectorMap = new Map<string, string>();
+      (sharesRes2.data || []).forEach((s: {
         id: string;
-        ticker: string;
-        share_name: string;
         sector?: string;
-        sector_types?: { sector_name: string } | null;
+        sector_types?: { sector_name: string } | { sector_name: string }[] | null;
       }) => {
-        shareMap.set(s.id, {
-          ticker: s.ticker,
-          name: s.share_name,
-          sector: s.sector_types?.sector_name || s.sector || 'N/A',
+        const st = Array.isArray(s.sector_types) ? s.sector_types[0] : s.sector_types;
+        shareSectorMap.set(s.id, st?.sector_name || s.sector || 'N/A');
+      });
+      const dpsMap = new Map<string, number>();
+      (divRes2.data || []).forEach((d: { share_id: string; entity_id: string; net_dividend_per_share?: number }) => {
+        const key = `${d.entity_id}_${d.share_id}`;
+        if (!dpsMap.has(key) && d.net_dividend_per_share != null) {
+          dpsMap.set(key, Number(d.net_dividend_per_share));
+        }
+      });
+
+      const portfolioData: PortfolioRow[] = [];
+      lastRowMap.forEach((h, key) => {
+        if (h.share_cum_bal <= 0) return;
+        const feeRate = h.brokerage_fee_rate / 100;
+        const marketValueNet = h.market_value * (1 - feeRate);
+        const totalReturns = marketValueNet + h.cum_sale_value + h.cum_dividend - h.cum_purchase_cost;
+        const dps = dpsMap.get(key) ?? 0;
+        portfolioData.push({
+          entity_id: h.entity_id,
+          entity_name: h.entity_name,
+          cds_accounts: h.cds_accounts,
+          sector: shareSectorMap.get(h.share_id) || 'N/A',
+          share_id: h.share_id,
+          ticker: h.share_ticker || 'N/A',
+          share_name: h.share_name || 'N/A',
+          balance_shares: h.share_cum_bal,
+          cost: h.av_cost,
+          cost_per_share: h.share_cum_bal > 0 ? h.av_cost / h.share_cum_bal : 0,
+          market_price_per_share: h.market_price,
+          market_value_net: marketValueNet,
+          div: h.cum_dividend,
+          total_returns: totalReturns,
+          aer: h.aer ?? 0,
+          cash_dps_last_fy: dps,
+          cash_div: h.share_cum_bal * dps,
+          remarks: '',
         });
       });
 
-      const defaultFeeRate = feeTypesRes.data && feeTypesRes.data.length > 0
-        ? Number(feeTypesRes.data[0].rate)
-        : 0;
-
-      type Holding = {
-        entity_id: string;
-        entity_name: string;
-        share_id: string;
-        shares: number;
-        cost: number;           // running AV cost of currently held shares
-        total_cost_paid: number; // cumulative cost of all buys + opening balance
-        sale_proceeds: number;  // cumulative proceeds from all sells
-      };
-
-      const holdingsMap = new Map<string, Holding>();
-      const cdsSetMap = new Map<string, Set<string>>(); // key: entity_id_share_id
-      // Cash flows per entity+share for XIRR: negative = money out (buy), positive = money in (sell/div/terminal)
-      const cashFlowsMap = new Map<string, Array<{ date: Date; amount: number }>>();
-
-      function ensureHolding(entityId: string, shareId: string, entityName?: string): Holding {
-        const key = `${entityId}_${shareId}`;
-        if (!holdingsMap.has(key)) {
-          const entity = entityMap.get(entityId);
-          holdingsMap.set(key, {
-            entity_id: entityId,
-            entity_name: entityName || entity?.name || 'Unknown',
-            share_id: shareId,
-            shares: 0,
-            cost: 0,
-            total_cost_paid: 0,
-            sale_proceeds: 0,
-          });
-        }
-        return holdingsMap.get(key)!;
-      }
-
-      function recordCds(entityId: string, shareId: string, cdsAccountId: string | null | undefined) {
-        if (!cdsAccountId) return;
-        const key = `${entityId}_${shareId}`;
-        if (!cdsSetMap.has(key)) cdsSetMap.set(key, new Set());
-        cdsSetMap.get(key)!.add(cdsAccountId);
-      }
-
-      function ensureCashFlows(entityId: string, shareId: string): Array<{ date: Date; amount: number }> {
-        const key = `${entityId}_${shareId}`;
-        if (!cashFlowsMap.has(key)) cashFlowsMap.set(key, []);
-        return cashFlowsMap.get(key)!;
-      }
-
-      function applyBuy(holding: Holding, shares: number, amount: number) {
-        holding.shares += shares;
-        holding.cost += amount;
-        holding.total_cost_paid += amount;
-      }
-
-      function applySell(holding: Holding, shares: number, proceeds: number) {
-        const avgCost = holding.shares > 0 ? holding.cost / holding.shares : 0;
-        holding.shares = Math.max(0, holding.shares - shares);
-        holding.cost = Math.max(0, holding.cost - avgCost * shares);
-        holding.sale_proceeds += proceeds;
-      }
-
-      // Opening balances
-      (openingRes.data || []).forEach((ob: {
-        entity_id: string;
-        share_id: string;
-        opening_shares: number;
-        average_purchase_cost: number;
-        effective_date: string;
-      }) => {
-        const holding = ensureHolding(ob.entity_id, ob.share_id, undefined);
-        const shares = Number(ob.opening_shares) || 0;
-        const cost = shares * (Number(ob.average_purchase_cost) || 0);
-        applyBuy(holding, shares, cost);
-
-        if (cost > 0 && ob.effective_date) {
-          ensureCashFlows(ob.entity_id, ob.share_id).push({
-            date: new Date(ob.effective_date),
-            amount: -cost, // money out
-          });
-        }
-      });
-
-      const noteByTxn = new Map<string, { shares: number; amount: number; note_type: string; trade_date: string | null }>();
-      (notesRes.data || []).forEach((n: {
-        transaction_id: string;
-        note_type: string;
-        no_of_shares: number;
-        gross_amount: number;
-        net_amount: number;
-        trade_date: string | null;
-      }) => {
-        const noteNet = Number(n.net_amount) || 0;
-        const noteGross = Number(n.gross_amount) || 0;
-        noteByTxn.set(n.transaction_id, {
-          shares: Number(n.no_of_shares) || 0,
-          amount: noteNet > 0 ? noteNet : noteGross,
-          note_type: n.note_type,
-          trade_date: n.trade_date,
-        });
-      });
-
-      // latest brokerage_fee_rate per entity+share (transactions ordered ascending → last wins)
-      const feeRateMap = new Map<string, number>();
-
-      (transactionsRes.data || []).forEach((tx: {
-        id: string;
-        entity_id: string;
-        share_id: string;
-        transaction_type: string;
-        no_of_shares: number;
-        total_amount: number;
-        transaction_date: string;
-        cds_account_id?: string | null;
-        brokerage_fee_rate?: number | null;
-        entities?: { name: string; entity_id: string } | null;
-        shares?: {
-          ticker: string;
-          share_name: string;
-          sector?: string;
-          sector_types?: { sector_name: string } | null;
-        } | null;
-      }) => {
-        // Only process transactions that have a PROCESSED buy/sell note (matches Share Analytics)
-        const note = noteByTxn.get(tx.id);
-        if (!note) return;
-
-        if (!shareMap.has(tx.share_id) && tx.shares) {
-          shareMap.set(tx.share_id, {
-            ticker: tx.shares.ticker,
-            name: tx.shares.share_name,
-            sector: tx.shares.sector_types?.sector_name || tx.shares.sector || 'N/A',
-          });
-        }
-
-        recordCds(tx.entity_id, tx.share_id, tx.cds_account_id);
-        if (tx.brokerage_fee_rate != null) {
-          feeRateMap.set(`${tx.entity_id}_${tx.share_id}`, Number(tx.brokerage_fee_rate));
-        }
-        const holding = ensureHolding(tx.entity_id, tx.share_id, tx.entities?.name);
-
-        const shares = note.shares;
-        const amount = note.amount;
-        const isBuy = (note.note_type || '').toUpperCase() === 'BUY';
-        const txDate = note.trade_date || tx.transaction_date;
-
-        if (isBuy) {
-          applyBuy(holding, shares, amount);
-          if (amount > 0 && txDate) {
-            ensureCashFlows(tx.entity_id, tx.share_id).push({
-              date: new Date(txDate),
-              amount: -amount, // money out
-            });
-          }
-        } else {
-          applySell(holding, shares, amount);
-          if (amount > 0 && txDate) {
-            ensureCashFlows(tx.entity_id, tx.share_id).push({
-              date: new Date(txDate),
-              amount: +amount, // money in
-            });
-          }
-        }
-      });
-
-      // Scrip entries (rights issues, subdivisions, buybacks, amalgamations) — free shares, no cost
-      (scripsRes.data || []).forEach((sc: {
-        entity_id: string;
-        share_id: string;
-        no_of_shares: number;
-        effective_date: string | null;
-        entry_date: string;
-      }) => {
-        const holding = ensureHolding(sc.entity_id, sc.share_id, undefined);
-        holding.shares += Number(sc.no_of_shares) || 0;
-        // Scrip shares are free — cost stays the same, reducing average cost per share
-      });
-
-      // Build dividend map and add to cash flows
-      const dividendMap = new Map<string, { total: number; dps_last_fy: number }>();
-      (dividendsRes.data || []).forEach((div: {
-        entity_id: string;
-        share_id: string;
-        amount_net: number;
-        net_dividend_per_share?: number;
-        payment_date?: string;
-      }) => {
-        const key = `${div.entity_id}_${div.share_id}`;
-        if (!dividendMap.has(key)) {
-          dividendMap.set(key, { total: 0, dps_last_fy: 0 });
-        }
-        const divData = dividendMap.get(key)!;
-        const net = Number(div.amount_net) || 0;
-        divData.total += net;
-        if (div.net_dividend_per_share != null) {
-          divData.dps_last_fy = Number(div.net_dividend_per_share);
-        }
-        // Add dividend as positive cash flow for XIRR
-        if (net > 0 && div.payment_date) {
-          ensureCashFlows(div.entity_id, div.share_id).push({
-            date: new Date(div.payment_date),
-            amount: +net,
-          });
-        }
-      });
-
-      const terminalDate = new Date(asOfDate);
-
-      const portfolioData: PortfolioRow[] = Array.from(holdingsMap.entries())
-        .map(([key, holding]) => {
-          if (holding.shares <= 0) return null;
-
-          const share = shareMap.get(holding.share_id);
-          const marketPrice = latestPrices.get(holding.share_id) || 0;
-          const costPerShare = holding.shares > 0 ? holding.cost / holding.shares : 0;
-          const feeRate = (feeRateMap.get(`${holding.entity_id}_${holding.share_id}`) ?? defaultFeeRate) / 100;
-          const marketValueGross = holding.shares * marketPrice;
-          // Net market value = gross market value after deducting sell brokerage fee (matches ShareAnalytics)
-          const marketValueNet = marketValueGross * (1 - feeRate);
-
-          const divData = dividendMap.get(key) || { total: 0, dps_last_fy: 0 };
-          // Total Returns = (net market value + all sale proceeds + dividends) - total cost ever paid
-          const totalReturns = marketValueNet + holding.sale_proceeds + divData.total - holding.total_cost_paid;
-
-          // XIRR: terminal value = net market value (same as ShareAnalytics)
-          const terminalValue = marketValueNet;
-          const cfs = ensureCashFlows(holding.entity_id, holding.share_id);
-          let aerPct = 0;
-          if (terminalValue > 0 && cfs.length > 0) {
-            const xirrFlows = [
-              ...cfs,
-              { date: terminalDate, amount: terminalValue },
-            ];
-            try {
-              const rate = xirr(xirrFlows);
-              aerPct = isFinite(rate) ? rate * 100 : 0;
-            } catch {
-              aerPct = 0;
-            }
-          }
-
-          const cashDiv = holding.shares * divData.dps_last_fy;
-
-          const cdsKey = `${holding.entity_id}_${holding.share_id}`;
-          const cdsAccounts = cdsSetMap.has(cdsKey) ? Array.from(cdsSetMap.get(cdsKey)!) : [];
-
-          return {
-            entity_id: holding.entity_id,
-            entity_name: holding.entity_name,
-            cds_accounts: cdsAccounts,
-            sector: share?.sector || 'N/A',
-            share_id: holding.share_id,
-            ticker: share?.ticker || 'N/A',
-            share_name: share?.name || 'N/A',
-            balance_shares: holding.shares,
-            cost: holding.cost,
-            cost_per_share: costPerShare,
-            market_price_per_share: marketPrice,
-            market_value_net: marketValueNet,
-            div: divData.total,
-            total_returns: totalReturns,
-            aer: aerPct,
-            cash_dps_last_fy: divData.dps_last_fy,
-            cash_div: cashDiv,
-            remarks: '',
-          };
-        })
-        .filter((row): row is PortfolioRow => row !== null);
-
+      portfolioData.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.ticker.localeCompare(b.ticker));
       setData(portfolioData);
     } catch (error) {
       console.error('Error fetching portfolio data:', error);
@@ -848,7 +464,7 @@ export function PortfolioSummary() {
             <ul className="space-y-1 list-disc list-inside">
               <li><strong>Cost:</strong> Final Average (AV) Cost based on transactions up to the selected date</li>
               <li><strong>Market price per share:</strong> Latest updated market value from CSE</li>
-              <li><strong>Market Value (Net):</strong> Balance shares × market price × (1 − brokerage fee rate) — matches Share Analytics</li>
+              <li><strong>Market Value (Net):</strong> Balance shares × market price × (1 − brokerage fee rate)</li>
               <li><strong>Total Returns:</strong> Market value (net) + Total sale proceeds + Dividends − Total cost paid (includes realized gains from sells)</li>
               <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, net market value as terminal inflow)</li>
               <li><strong>Cash DPS (Net) Last FY:</strong> Editable — enter the cash dividend per share for the last financial year. Cash Div column = Balance Shares × Cash DPS entered.</li>
