@@ -893,6 +893,7 @@ export function ShareAnalytics() {
   const [loading, setLoading]                     = useState(false);
   const [groups, setGroups]                       = useState<ShareGroup[]>([]);
   const [activeGroup, setActiveGroup]             = useState<ShareGroup | null>(null);
+  const [cacheError, setCacheError]               = useState<string | null>(null);
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
@@ -1157,9 +1158,17 @@ export function ShareAnalytics() {
       result.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
       setGroups(result);
 
-      // ── Persist computed result to cache ───────────────────────────────
-      // Store every computed row so the next open with the same source hash
-      // can read directly from the cache table without recomputing.
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+
+    // ── Persist computed result to cache ───────────────────────────────
+    // Runs in its own try/catch so a cache failure never prevents the
+    // report from displaying, and never gets swallowed silently.
+    try {
+      setCacheError(null);
       const cacheRows: Record<string, unknown>[] = [];
       const today = new Date();
       for (const g of result) {
@@ -1202,16 +1211,16 @@ export function ShareAnalytics() {
       }
       if (cacheRows.length > 0) {
         const { error: delErr } = await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
-        if (delErr) console.error('[analytics cache] delete failed:', delErr);
+        if (delErr) throw new Error(`delete: ${delErr.message}`);
         for (let i = 0; i < cacheRows.length; i += 500) {
           const { error: insErr } = await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
-          if (insErr) console.error('[analytics cache] insert failed:', insErr);
+          if (insErr) throw new Error(`insert: ${insErr.message}`);
         }
       }
     } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[analytics cache] write failed:', msg);
+      setCacheError(msg);
     }
   }, [selectedEntityId]);
 
@@ -1342,6 +1351,14 @@ export function ShareAnalytics() {
           </div>
         </div>
       </div>
+
+      {/* Cache write error banner */}
+      {cacheError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 text-sm text-red-700">
+          <span className="font-semibold">Cache write failed: </span>
+          {cacheError}
+        </div>
+      )}
 
       {/* Entity summary cards — only when an entity is selected */}
       {selectedEntityId && !loading && filtered.length > 0 && (
