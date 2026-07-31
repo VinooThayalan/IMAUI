@@ -168,7 +168,7 @@ function computeRows(
       id: `ob-${opening.entity_id}-${opening.share_id}`,
       note_type: 'Opening', trade_date: opening.effective_date,
       no_of_shares: opening.opening_shares, price_avg: opening.average_purchase_cost,
-      gross_amount: heldCost,
+      gross_amount: heldCost, net_amount: heldCost,
       entity_id: opening.entity_id, entity_name: '', share_id: opening.share_id,
       share_ticker: '', share_name: '', cds_account: null,
       row_type: 'opening',
@@ -204,7 +204,7 @@ function computeRows(
       rows.push({
         id: `div-${d.entity_id}-${d.share_id}-${d.payment_date}`,
         note_type: 'Dividend', trade_date: d.payment_date,
-        no_of_shares: 0, price_avg: null, gross_amount: d.amount_net,
+        no_of_shares: 0, price_avg: null, gross_amount: d.amount_net, net_amount: d.amount_net,
         entity_id: d.entity_id, entity_name: '', share_id: d.share_id,
         share_ticker: '', share_name: '', cds_account: null,
         row_type: 'dividend',
@@ -220,7 +220,7 @@ function computeRows(
       rows.push({
         id: `scrip-${sc.entity_id}-${sc.share_id}-${date}`,
         note_type: 'Scrip', trade_date: date,
-        no_of_shares: qty, price_avg: 0, gross_amount: 0,
+        no_of_shares: qty, price_avg: 0, gross_amount: 0, net_amount: 0,
         entity_id: sc.entity_id, entity_name: '', share_id: sc.share_id,
         share_ticker: '', share_name: '', cds_account: null,
         row_type: 'scrip',
@@ -893,6 +893,7 @@ export function ShareAnalytics() {
   const [loading, setLoading]                     = useState(false);
   const [groups, setGroups]                       = useState<ShareGroup[]>([]);
   const [activeGroup, setActiveGroup]             = useState<ShareGroup | null>(null);
+  const [cacheError, setCacheError]               = useState<string | null>(null);
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
@@ -1157,55 +1158,63 @@ export function ShareAnalytics() {
       result.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
       setGroups(result);
 
-      // ── Persist computed result to cache ───────────────────────────────
-      // Store every computed row so the next open with the same source hash
-      // can read directly from the cache table without recomputing.
-      const cacheRows: Record<string, unknown>[] = [];
-      const today = new Date();
-      for (const g of result) {
-        const lastRow = g.rows[g.rows.length - 1];
-        const feeRateG = g.brokerage_fee_rate / 100;
-        const mvAfterFeesG = g.market_price > 0
-          ? lastRow.share_cum_bal * (g.market_price - g.market_price * feeRateG)
-          : 0;
-        const groupCfs = g.rows
-          .filter(r => r.cash_flow !== 0 && r.trade_date)
-          .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
-        if (mvAfterFeesG > 0) groupCfs.push({ date: today, amount: mvAfterFeesG });
-        let groupAer: number | null = null;
-        if (groupCfs.length >= 2) {
-          try {
-            const rate = xirr(groupCfs);
-            groupAer = isFinite(rate) ? rate * 100 : null;
-          } catch { groupAer = null; }
-        }
+      // Persist computed result to cache (own try/catch so write failure still shows the report)
+      try {
+        setCacheError(null);
+        const cacheRows: Record<string, unknown>[] = [];
+        const today = new Date();
+        for (const g of result) {
+          const lastRow = g.rows[g.rows.length - 1];
+          const feeRateG = g.brokerage_fee_rate / 100;
+          const mvAfterFeesG = g.market_price > 0
+            ? lastRow.share_cum_bal * (g.market_price - g.market_price * feeRateG)
+            : 0;
+          const groupCfs = g.rows
+            .filter(r => r.cash_flow !== 0 && r.trade_date)
+            .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
+          if (mvAfterFeesG > 0) groupCfs.push({ date: today, amount: mvAfterFeesG });
+          let groupAer: number | null = null;
+          if (groupCfs.length >= 2) {
+            try {
+              const rate = xirr(groupCfs);
+              groupAer = isFinite(rate) ? rate * 100 : null;
+            } catch { groupAer = null; }
+          }
 
-        for (const r of g.rows) {
-          cacheRows.push({
-            entity_id: g.entity_id, share_id: g.share_id,
-            entity_name: g.entity_name, share_ticker: g.share_ticker, share_name: g.share_name,
-            market_price: g.market_price, market_price_date: g.market_price_date,
-            cds_accounts: g.cds_accounts, brokerage_fee_rate: g.brokerage_fee_rate,
-            row_id: r.id, row_type: r.row_type, note_type: r.note_type,
-            trade_date: r.trade_date, no_of_shares: r.no_of_shares,
-            price_avg: r.price_avg, gross_amount: r.gross_amount, net_amount: r.net_amount,
-            cds_account: r.cds_account,
-            purchase_cost: r.purchase_cost, sale_value: r.sale_value, dividend: r.dividend,
-            share_cum_bal: r.share_cum_bal, av_cost: r.av_cost, av_price: r.av_price,
-            cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
-            cum_dividend: r.cum_dividend, cum_surplus: r.cum_surplus,
-            market_value: r.market_value, cash_flow: r.cash_flow, total_surplus: r.total_surplus,
-            aer: groupAer,
-            source_hash: sourceHash,
-          });
+          for (const r of g.rows) {
+            cacheRows.push({
+              entity_id: g.entity_id, share_id: g.share_id,
+              entity_name: g.entity_name, share_ticker: g.share_ticker, share_name: g.share_name,
+              market_price: g.market_price, market_price_date: g.market_price_date,
+              cds_accounts: g.cds_accounts, brokerage_fee_rate: g.brokerage_fee_rate,
+              row_id: r.id, row_type: r.row_type, note_type: r.note_type,
+              trade_date: r.trade_date, no_of_shares: r.no_of_shares,
+              price_avg: r.price_avg, gross_amount: r.gross_amount ?? 0, net_amount: r.net_amount ?? 0,
+              cds_account: r.cds_account,
+              purchase_cost: r.purchase_cost, sale_value: r.sale_value, dividend: r.dividend,
+              share_cum_bal: r.share_cum_bal, av_cost: r.av_cost, av_price: r.av_price,
+              cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
+              cum_dividend: r.cum_dividend, cum_surplus: r.cum_surplus,
+              market_value: r.market_value, cash_flow: r.cash_flow, total_surplus: r.total_surplus,
+              aer: groupAer,
+              source_hash: sourceHash,
+            });
+          }
         }
-      }
-      if (cacheRows.length > 0) {
-        await supabase.from('share_analytics_cache').delete().eq('source_hash', sourceHash);
-        for (let i = 0; i < cacheRows.length; i += 500) {
-          await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
+        if (cacheRows.length > 0) {
+          const { error: delErr } = await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
+          if (delErr) throw new Error(`delete: ${delErr.message}`);
+          for (let i = 0; i < cacheRows.length; i += 500) {
+            const { error: insErr } = await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
+            if (insErr) throw new Error(`insert: ${insErr.message}`);
+          }
         }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[analytics cache] write failed:', msg);
+        setCacheError(msg);
       }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -1340,6 +1349,14 @@ export function ShareAnalytics() {
           </div>
         </div>
       </div>
+
+      {/* Cache write error banner */}
+      {cacheError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4 text-sm text-red-700">
+          <span className="font-semibold">Cache write failed: </span>
+          {cacheError}
+        </div>
+      )}
 
       {/* Entity summary cards — only when an entity is selected */}
       {selectedEntityId && !loading && filtered.length > 0 && (

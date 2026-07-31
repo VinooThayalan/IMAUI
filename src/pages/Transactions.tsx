@@ -1832,8 +1832,7 @@ export function Transactions() {
                           )}
                         </button>
                       )}
-                      {transaction.approval_status !== 'CANCELLED' && transaction.approval_status !== 'REJECTED' &&
-                       !(transaction.approval_status === 'MANUAL_APPROVED' && transaction.approval_document_name) && (
+                      {transaction.approval_status !== 'CANCELLED' && transaction.approval_status !== 'REJECTED' && (
                         <button
                           onClick={() => handleCancelTransaction(transaction)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
