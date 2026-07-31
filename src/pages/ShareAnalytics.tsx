@@ -1201,9 +1201,11 @@ export function ShareAnalytics() {
         }
       }
       if (cacheRows.length > 0) {
-        await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
+        const { error: delErr } = await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
+        if (delErr) console.error('[analytics cache] delete failed:', delErr);
         for (let i = 0; i < cacheRows.length; i += 500) {
-          await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
+          const { error: insErr } = await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
+          if (insErr) console.error('[analytics cache] insert failed:', insErr);
         }
       }
     } catch (err) {
