@@ -62,8 +62,9 @@ export function MenuAccess() {
 
       setUsers(usersResult.data || []);
       setMenuItems(menuResult.data || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Load menu access failed:', err);
+      setError('Could not load users and menu items. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -79,8 +80,9 @@ export function MenuAccess() {
       if (error) throw error;
       setUserMenuAccess(data || []);
       setPendingChanges(new Set((data || []).map(a => a.menu_item_id)));
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Load user menu access failed:', err);
+      setError('Could not load this user\u2019s menu access. Please try again.');
     }
   }
 
@@ -146,8 +148,9 @@ export function MenuAccess() {
       await loadUserMenuAccess(selectedUserId);
       setSuccessMessage('Menu access saved successfully');
       setTimeout(() => setSuccessMessage(''), 3000);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Save menu access failed:', err);
+      setError('Could not save menu access. You may not have permission to change it.');
       setTimeout(() => setError(''), 5000);
     } finally {
       setSaving(false);

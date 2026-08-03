@@ -471,7 +471,7 @@ export function Entities() {
       } else if (error.code === '42501') {
         alert('Permission denied. You do not have access to assign brokers to this entity.');
       } else {
-        alert(`Failed to assign broker: ${error.message || 'Please try again.'}`);
+        alert('Could not assign this broker. Please try again.');
       }
     }
   }

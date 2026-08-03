@@ -3,7 +3,7 @@ import {
   Search, Filter, Mail, FileText, Ban, RotateCcw, X, Plus
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
@@ -434,7 +434,7 @@ export function TransactionApprovals() {
           await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Authorization': `Bearer ${await getAccessToken()}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -484,7 +484,7 @@ export function TransactionApprovals() {
           await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Authorization': `Bearer ${await getAccessToken()}`,
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -553,7 +553,7 @@ export function TransactionApprovals() {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${await getAccessToken()}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

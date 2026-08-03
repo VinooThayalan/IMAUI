@@ -1,6 +1,6 @@
 import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
@@ -202,12 +202,11 @@ export function BuyAndSellApprovals() {
       d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${anonKey}`,
+        'Authorization': `Bearer ${await getAccessToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -255,12 +254,11 @@ export function BuyAndSellApprovals() {
     const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
     await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${anonKey}`,
+        'Authorization': `Bearer ${await getAccessToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -287,7 +285,7 @@ export function BuyAndSellApprovals() {
           dealer_name: note.dealer_name || undefined,
           remarks: note.remarks || undefined,
           approval_notes: reviewRemarks || undefined,
-          reviewed_by: 'Reviewer',
+          reviewed_by: user?.email || 'Reviewer',
           reviewed_at: reviewedAt,
           // Transaction (system) values for comparison — included on rejections
           txn_no_of_shares: transaction?.no_of_shares != null ? transaction.no_of_shares.toLocaleString() : undefined,
@@ -310,16 +308,28 @@ export function BuyAndSellApprovals() {
 
       const reviewedAt = new Date().toISOString();
 
-      const { error: noteErr } = await supabase
+      const reviewerName = user?.email || 'Reviewer';
+
+      // The note must still be awaiting approval at the moment we write, so a
+      // stale screen or a repeated click cannot approve something twice.
+      const { data: updatedNote, error: noteErr } = await supabase
         .from('buy_sell_notes')
         .update({
           status: 'PROCESSED',
-          approved_by: 'Reviewer',
+          approved_by: reviewerName,
           approved_at: reviewedAt,
           approval_notes: actionRemarks || null,
         })
-        .eq('id', selectedNote.id);
+        .eq('id', selectedNote.id)
+        .eq('status', 'PENDING_APPROVAL')
+        .select('id');
       if (noteErr) throw noteErr;
+      if (!updatedNote || updatedNote.length === 0) {
+        alert('This note is no longer awaiting approval. Refreshing the list.');
+        await loadData();
+        closeModal();
+        return;
+      }
 
       // Log UPDATE audit for buy_sell_notes
       await logAudit('UPDATE', {
@@ -329,7 +339,7 @@ export function BuyAndSellApprovals() {
         oldRecord,
         newRecord: {
           status: 'PROCESSED',
-          approved_by: 'Reviewer',
+          approved_by: reviewerName,
           approved_at: reviewedAt,
           approval_notes: actionRemarks || null,
         },
@@ -360,7 +370,7 @@ export function BuyAndSellApprovals() {
           entity_id: entity.id,
           bank_id: null,
           reference_id: selectedNote.id,
-          created_by: 'Reviewer',
+          created_by: reviewerName,
           notes: actionRemarks || null,
         })
         .select('id')
@@ -384,7 +394,7 @@ export function BuyAndSellApprovals() {
             entity_id: entity.id,
             bank_id: null,
             reference_id: selectedNote.id,
-            created_by: 'Reviewer',
+            created_by: reviewerName,
             notes: actionRemarks || null,
           },
         });
@@ -394,8 +404,9 @@ export function BuyAndSellApprovals() {
 
       await loadData();
       closeModal();
-    } catch (err: any) {
-      alert(`Failed to approve: ${err?.message || JSON.stringify(err)}`);
+    } catch (err) {
+      console.error('Approve failed:', err);
+      alert('Could not approve this note. Please refresh and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -412,16 +423,26 @@ export function BuyAndSellApprovals() {
 
       const approvedAt = new Date().toISOString();
 
-      const { error } = await supabase
+      const reviewerName = user?.email || 'Reviewer';
+
+      const { data: rejectedNote, error } = await supabase
         .from('buy_sell_notes')
         .update({
           status: 'REJECTED',
-          approved_by: 'Reviewer',
+          approved_by: reviewerName,
           approved_at: approvedAt,
           approval_notes: actionRemarks,
         })
-        .eq('id', selectedNote.id);
+        .eq('id', selectedNote.id)
+        .eq('status', 'PENDING_APPROVAL')
+        .select('id');
       if (error) throw error;
+      if (!rejectedNote || rejectedNote.length === 0) {
+        alert('This note is no longer awaiting approval. Refreshing the list.');
+        await loadData();
+        closeModal();
+        return;
+      }
 
       // Log UPDATE audit for buy_sell_notes
       await logAudit('UPDATE', {
@@ -431,7 +452,7 @@ export function BuyAndSellApprovals() {
         oldRecord,
         newRecord: {
           status: 'REJECTED',
-          approved_by: 'Reviewer',
+          approved_by: reviewerName,
           approved_at: approvedAt,
           approval_notes: actionRemarks,
         },
@@ -442,8 +463,9 @@ export function BuyAndSellApprovals() {
 
       await loadData();
       closeModal();
-    } catch (err: any) {
-      alert(`Failed to reject: ${err?.message || JSON.stringify(err)}`);
+    } catch (err) {
+      console.error('Reject failed:', err);
+      alert('Could not reject this note. Please refresh and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -866,8 +888,9 @@ const displayNotes = notes.filter(n => {
             await sendBrokerComparisonEmail(note, entity, share, broker, txn, rows);
             alert(`Email sent to ${broker.contact_person_email}`);
             setEmailModalNote(null);
-          } catch (err: any) {
-            alert(`Failed to send email: ${err?.message || 'Unknown error'}`);
+          } catch (err) {
+            console.error('Broker email failed:', err);
+            alert('Could not send the email. Please try again.');
           } finally {
             setIsSendingEmail(false);
           }

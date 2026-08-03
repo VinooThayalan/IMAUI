@@ -95,6 +95,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (appUserError) throw appUserError;
 
       if (appUserData) {
+        // A deactivated account keeps no session. The database enforces this
+        // too; this only makes the app stop showing a shell it cannot use.
+        if (appUserData.is_active === false) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setAppUser(null);
+          setMenuAccess([]);
+          setEntityAccess([]);
+          return;
+        }
         setAppUser(appUserData as AppUser);
         void loadPermissions(userId, appUserData.role);
         return;
@@ -104,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: userEmail ?? '',
         full_name: null,
         role: 'user',
-        is_active: true,
+        is_active: false,
       });
     } catch (error) {
       console.error('Error loading app user:', error);
@@ -113,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: userEmail ?? '',
         full_name: null,
         role: 'user',
-        is_active: true,
+        is_active: false,
       });
     }
   }

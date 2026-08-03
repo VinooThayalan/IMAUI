@@ -82,8 +82,9 @@ export function EntityAccess() {
       if (entitiesResult.error) throw entitiesResult.error;
       setUsers(usersResult.data || []);
       setEntities(entitiesResult.data || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Load entity access failed:', err);
+      setError('Could not load users and entities. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -98,8 +99,9 @@ export function EntityAccess() {
       if (error) throw error;
       setUserEntityAccess(data || []);
       setPendingChanges(new Set((data || []).map(a => a.entity_id)));
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Load user entity access failed:', err);
+      setError('Could not load this user\u2019s entity access. Please try again.');
     }
   }
 
@@ -112,8 +114,9 @@ export function EntityAccess() {
         .order('created_at');
       if (error) throw error;
       setApprovers(data || []);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      console.error('Load approvers failed:', err);
+      setError('Could not load the approver list. Please try again.');
     }
   }
 
@@ -152,8 +155,9 @@ export function EntityAccess() {
 
       await loadUserEntityAccess(selectedUserId);
       showSuccess('Entity access saved successfully');
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      console.error('Save entity access failed:', err);
+      showError('Could not save entity access. You may not have permission to change it.');
     } finally {
       setSaving(false);
     }
@@ -181,8 +185,9 @@ export function EntityAccess() {
       setNewApproverEmail('');
       await loadApprovers(selectedApproverEntityId);
       showSuccess('Approver added successfully');
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      console.error('Add approver failed:', err);
+      showError('Could not add this approver. Only administrators can change approvers.');
     } finally {
       setAddingApprover(false);
     }
@@ -196,8 +201,9 @@ export function EntityAccess() {
       if (error) throw error;
       if (selectedApproverEntityId) await loadApprovers(selectedApproverEntityId);
       showSuccess('Approver removed');
-    } catch (err: any) {
-      showError(err.message);
+    } catch (err) {
+      console.error('Remove approver failed:', err);
+      showError('Could not remove this approver. Only administrators can change approvers.');
     } finally {
       setDeletingApproverId(null);
     }

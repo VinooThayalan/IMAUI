@@ -47,7 +47,8 @@ export function UserManagement() {
       if (error) throw error;
       setUsers(data || []);
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error loading users:', err);
+      setError('Could not load the user list. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -86,8 +87,9 @@ export function UserManagement() {
       setNewPassword('');
       setNewFullName('');
       await loadUsers();
-    } catch (err: any) {
-      setCreateError(err.message);
+    } catch (err) {
+      console.error('Create user failed:', err);
+      setCreateError('Could not create this user. Check the email address and password, then try again.');
     } finally {
       setCreating(false);
     }
@@ -114,7 +116,8 @@ export function UserManagement() {
 
       await loadUsers();
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error updating user status:', err);
+      setError('Could not update this user. Please try again.');
       setTimeout(() => setError(''), 3000);
     }
   }
@@ -128,10 +131,12 @@ export function UserManagement() {
 
       const updatedAt = new Date().toISOString();
 
-      const { error } = await supabase
-        .from('app_users')
-        .update({ role: newRole, updated_at: updatedAt })
-        .eq('id', userId);
+      // The role column is not writable from the browser. Role changes go
+      // through a database function that re-checks the caller is an admin.
+      const { error } = await supabase.rpc('admin_set_user_role', {
+        p_user_id: userId,
+        p_role: newRole,
+      });
 
       if (error) throw error;
 
@@ -149,7 +154,8 @@ export function UserManagement() {
 
       await loadUsers();
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error updating user role:', err);
+      setError('Could not change this user\u2019s role. Please try again.');
       setTimeout(() => setError(''), 3000);
     }
   }
@@ -181,8 +187,9 @@ export function UserManagement() {
 
       setShowResetPasswordModal(null);
       setResetPassword('');
-    } catch (err: any) {
-      setResetError(err.message);
+    } catch (err) {
+      console.error('Reset password failed:', err);
+      setResetError('Could not reset this password. Please try again.');
     } finally {
       setResetting(false);
     }
