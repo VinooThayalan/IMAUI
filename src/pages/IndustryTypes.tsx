@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface IndustryType {
   id: string;
@@ -139,13 +141,24 @@ export function IndustryTypes() {
           <h1 className="text-3xl font-bold text-gray-900">Industry Types</h1>
           <p className="text-gray-500 mt-1">Manage industry classifications</p>
         </div>
-        <button
-          onClick={() => handleOpenModal()}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Industry</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="industry_types"
+            data={filteredIndustries}
+            columns={[
+              { header: 'Industry ID', accessor: (r) => r.industry_id },
+              { header: 'Industry Name', accessor: (r) => r.industry_name },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof filteredIndustries[number]>[]}
+          />
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Industry</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">

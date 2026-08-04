@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface Broker {
   id: string;
@@ -297,13 +299,31 @@ export function Brokers() {
           <h1 className="text-3xl font-bold text-gray-900">Brokers</h1>
           <p className="text-gray-500 mt-1">Manage broker information</p>
         </div>
-        <button
-          onClick={() => handleOpenModal()}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Broker</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="brokers"
+            data={filteredBrokers}
+            columns={[
+              { header: 'Broker ID', accessor: (r) => r.broker_id },
+              { header: 'Broker Name', accessor: (r) => r.broker_name },
+              { header: 'Contact Person', accessor: (r) => r.contact_person_name || '' },
+              { header: 'Email', accessor: (r) => r.contact_person_email || '' },
+              { header: 'Phone', accessor: (r) => r.contact_person_phone || '' },
+              { header: 'Mobile', accessor: (r) => r.contact_person_mobile || '' },
+              { header: 'Designation', accessor: (r) => r.contact_person_designation || '' },
+              { header: 'Settlement Bank Account', accessor: (r) => r.settlement_bank_account || '' },
+              { header: 'CDS Account', accessor: (r) => r.broker_cds_account || '' },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof filteredBrokers[number]>[]}
+          />
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Broker</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
