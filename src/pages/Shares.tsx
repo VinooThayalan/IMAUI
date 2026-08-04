@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface Share {
   id: string;
@@ -205,13 +207,27 @@ export function Shares() {
           <h1 className="text-3xl font-bold text-gray-900">Shares</h1>
           <p className="text-gray-500 mt-1">Manage share information and classifications</p>
         </div>
-        <button
-          onClick={() => handleOpenModal()}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Share</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="shares"
+            data={filteredShares}
+            columns={[
+              { header: 'Ticker', accessor: (r) => r.ticker },
+              { header: 'Share Name', accessor: (r) => r.share_name || '' },
+              { header: 'GICS Code', accessor: (r) => r.gis_code || '' },
+              { header: 'Industry', accessor: (r) => r.industry_types?.industry_name || '' },
+              { header: 'Sector', accessor: (r) => r.sector_types?.sector_name || '' },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof filteredShares[number]>[]}
+          />
+          <button
+            onClick={() => handleOpenModal()}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Share</span>
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">

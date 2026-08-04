@@ -85,6 +85,68 @@ interface ApprovalNotificationData {
   txn_total_amount?: string;
 }
 
+// F20: every value interpolated into an email template is attacker-supplied
+// text. Escape it so it cannot introduce markup into the message body.
+function esc(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// F8: this function sends mail using the project's SMTP credentials, so it
+// must never act for an anonymous caller. Verify the bearer token the same
+// way the admin-users function does.
+async function requireAuthenticatedCaller(req: Request): Promise<Response | null> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return new Response(
+      JSON.stringify({ error: "Missing authorization header" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const url = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!url || !anonKey) {
+    return new Response(
+      JSON.stringify({ error: "Server configuration error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  const callerClient = createClient(url, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: { user }, error } = await callerClient.auth.getUser();
+  if (error || !user) {
+    return new Response(
+      JSON.stringify({ error: "Unauthorized" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+
+  return null;
+}
+
+// Recursively escape every string reachable in a payload, so the templates
+// below cannot be made to emit markup no matter which field carries it.
+function escapeDeep<T>(value: T): T {
+  if (typeof value === "string") return esc(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => escapeDeep(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = escapeDeep(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
 function getSupabaseClient() {
   const url = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -153,7 +215,8 @@ async function sendEmail(to: string, cc: string[] | undefined, subject: string, 
   }
 }
 
-function buildApprovalHtml(data: ApprovalNotificationData): string {
+function buildApprovalHtml(rawData: ApprovalNotificationData): string {
+  const data = escapeDeep(rawData);
   const isApproved = data.action === "APPROVED";
   const actionColor = isApproved ? "#16a34a" : "#dc2626";
   const actionBg = isApproved ? "#dcfce7" : "#fee2e2";
@@ -302,7 +365,8 @@ function buildApprovalHtml(data: ApprovalNotificationData): string {
 </html>`;
 }
 
-function buildBrokerComparisonHtml(data: BrokerComparisonData): string {
+function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
+  const data = escapeDeep(rawData);
   const isBuy = data.note_type === "Buy";
   const typeColor = isBuy ? "#16a34a" : "#dc2626";
   const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
@@ -409,7 +473,8 @@ function buildBrokerComparisonHtml(data: BrokerComparisonData): string {
 </html>`;
 }
 
-function buildTransactionHtml(transaction: TransactionData): string {
+function buildTransactionHtml(rawTransaction: TransactionData): string {
+  const transaction = escapeDeep(rawTransaction);
   const isBuy = transaction.transaction_type === "BUY";
   const typeColor = isBuy ? "#16a34a" : "#dc2626";
   const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
@@ -530,6 +595,9 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const authFailure = await requireAuthenticatedCaller(req);
+    if (authFailure) return authFailure;
+
     const body = await req.json();
     const triggeredBy = body.triggered_by || null;
     const source = body.source || null;
@@ -673,7 +741,7 @@ Deno.serve(async (req: Request) => {
     }
 
     return new Response(
-      JSON.stringify({ error: error.message || "Internal server error" }),
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

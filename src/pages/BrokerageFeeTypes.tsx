@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface FeeBreakdownItem {
   name: string;
@@ -203,13 +205,28 @@ export function BrokerageFeeTypes() {
           <h1 className="text-3xl font-bold text-gray-900">Total Fee Types</h1>
           <p className="text-gray-500 mt-1">Manage brokerage fee tiers and component breakdowns</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Fee Type</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="total_fee_types"
+            data={feeTypes}
+            columns={[
+              { header: 'Name', accessor: (r) => r.name },
+              { header: 'Min Amount', accessor: (r) => r.min_price },
+              { header: 'Max Amount', accessor: (r) => r.max_price },
+              { header: 'Total Rate (%)', accessor: (r) => r.rate },
+              { header: 'Components', accessor: (r) => r.fee_breakdown_items.map((i) => `${i.name}: ${i.rate}%`).join('; ') },
+              { header: 'Description', accessor: (r) => r.description },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof feeTypes[number]>[]}
+          />
+          <button
+            onClick={openAddModal}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Fee Type</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

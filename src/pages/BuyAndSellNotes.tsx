@@ -2760,9 +2760,7 @@ export function BuyAndSellNotes() {
       );
     } catch (error: any) {
       console.error("Error processing note:", error);
-      alert(
-        `Failed to process note:\n\n${error?.message || JSON.stringify(error)}`,
-      );
+      alert("Could not process this note. Please refresh and try again.");
     } finally {
       setIsProcessing(false);
     }
@@ -2815,9 +2813,7 @@ export function BuyAndSellNotes() {
       );
     } catch (error: any) {
       console.error("Error sending for approval:", error);
-      alert(
-        `Failed to save note:\n\n${error?.message || JSON.stringify(error)}`,
-      );
+      alert("Could not save this note. Please refresh and try again.");
     } finally {
       setIsProcessing(false);
     }

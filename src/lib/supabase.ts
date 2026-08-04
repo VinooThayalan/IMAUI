@@ -9,6 +9,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+/**
+ * Bearer token for calls to our own edge functions. The functions verify the
+ * signed-in user, so the publishable anon key is not an acceptable substitute.
+ */
+export async function getAccessToken(): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? '';
+}
+
 export interface CashTransaction {
   id: string;
   type: 'Addition' | 'Deduction';

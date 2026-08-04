@@ -55,7 +55,8 @@ function formatDate(iso: string) {
 }
 
 export function AuditLog() {
-  const { user } = useAuth();
+  const { user, appUser } = useAuth();
+  const isAdmin = appUser?.role === 'admin';
   const [logs, setLogs] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
@@ -128,19 +129,25 @@ export function AuditLog() {
   useEffect(() => { loadLogs(); }, [loadLogs]);
 
   async function toggleAudit() {
+    if (!isAdmin) {
+      alert('Only administrators can change this setting.');
+      return;
+    }
     setToggling(true);
     try {
       const newVal = !auditEnabled;
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('audit_settings')
         .update({ audit_enabled: newVal, updated_by: user?.email || 'admin', updated_at: new Date().toISOString() })
-        .not('id', 'is', null);
+        .not('id', 'is', null)
+        .select('id');
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error('not permitted');
       setAuditEnabled(newVal);
       invalidateAuditCache();
     } catch (err) {
       console.error('Error toggling audit:', err);
-      alert('Failed to update audit setting');
+      alert('Could not update the audit setting. Please try again.');
     } finally {
       setToggling(false);
     }

@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface BankMasterItem {
   id: string;
@@ -206,13 +208,33 @@ export function Banks() {
           <h1 className="text-3xl font-bold text-gray-900">Entity Bank</h1>
           <p className="text-gray-500 mt-1">Manage entity bank accounts and cash positions</p>
         </div>
-        <button
-          onClick={openAddModal}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Bank Account</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="banks"
+            data={filteredBanks}
+            columns={[
+              { header: 'Entity ID', accessor: (r) => r.entity?.entity_id || '' },
+              { header: 'Entity Name', accessor: (r) => r.entity?.name || '' },
+              { header: 'Bank Name', accessor: (r) => r.bank_master?.bank_name || r.name || '' },
+              { header: 'Bank Code', accessor: (r) => r.bank_master?.bank_code || '' },
+              { header: 'Branch', accessor: (r) => r.bank_branch?.branch_name || '' },
+              { header: 'Account Number', accessor: (r) => r.account_number || '' },
+              { header: 'Balance', accessor: (r) => r.balance },
+              { header: 'Currency', accessor: (r) => r.currency || '' },
+              { header: 'Facility Limit', accessor: (r) => r.facility_limit },
+              { header: 'Interest Rate', accessor: (r) => r.interest_rate },
+              { header: 'Charges Per Transaction', accessor: (r) => r.charges_per_transaction },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof filteredBanks[number]>[]}
+          />
+          <button
+            onClick={openAddModal}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Bank Account</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
