@@ -124,46 +124,74 @@ CREATE POLICY "Users can update ledger for accessible entities"
 CREATE POLICY "Users can delete ledger for accessible entities"
   ON cash_balance_ledger FOR DELETE TO authenticated
   USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- -- corporate_action_history
+-- DROP POLICY IF EXISTS "Authenticated users can read corporate action history" ON corporate_action_history;
 
--- corporate_action_history
-DROP POLICY IF EXISTS "Authenticated users can read corporate action history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Admins can insert corporate action history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Admins can update corporate action history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Admins can delete corporate action history" ON corporate_action_history;
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can insert corporate action history" ON corporate_action_history;
 
-CREATE POLICY "Users can read corp action history for accessible entities"
-  ON corporate_action_history FOR SELECT TO authenticated
-  USING (public.has_entity_access(entity_id));
-CREATE POLICY "Users can insert corp action history for accessible entities"
-  ON corporate_action_history FOR INSERT TO authenticated
-  WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can update corp action history for accessible entities"
-  ON corporate_action_history FOR UPDATE TO authenticated
-  USING (public.has_entity_access(entity_id))
-  WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can delete corp action history for accessible entities"
-  ON corporate_action_history FOR DELETE TO authenticated
-  USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update corporate action history" ON corporate_action_history;
 
--- corporate_actions
-DROP POLICY IF EXISTS "Authenticated users can read corporate actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Admins can insert corporate actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Admins can update corporate actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Admins can delete corporate actions" ON corporate_actions;
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete corporate action history" ON corporate_action_history;
 
-CREATE POLICY "Users can read corp actions for accessible entities"
-  ON corporate_actions FOR SELECT TO authenticated
-  USING (public.has_entity_access(entity_id));
-CREATE POLICY "Users can insert corp actions for accessible entities"
-  ON corporate_actions FOR INSERT TO authenticated
-  WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can update corp actions for accessible entities"
-  ON corporate_actions FOR UPDATE TO authenticated
-  USING (public.has_entity_access(entity_id))
-  WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can delete corp actions for accessible entities"
-  ON corporate_actions FOR DELETE TO authenticated
-  USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can read corp action history for accessible entities"
+--   ON corporate_action_history FOR SELECT TO authenticated
+--   USING (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can insert corp action history for accessible entities"
+--   ON corporate_action_history FOR INSERT TO authenticated
+--   WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can update corp action history for accessible entities"
+--   ON corporate_action_history FOR UPDATE TO authenticated
+--   USING (public.has_entity_access(entity_id))
+--   WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can delete corp action history for accessible entities"
+--   ON corporate_action_history FOR DELETE TO authenticated
+--   USING (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- -- corporate_actions
+-- DROP POLICY IF EXISTS "Authenticated users can read corporate actions" ON corporate_actions;
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can insert corporate actions" ON corporate_actions;
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update corporate actions" ON corporate_actions;
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete corporate actions" ON corporate_actions;
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can read corp actions for accessible entities"
+--   ON corporate_actions FOR SELECT TO authenticated
+--   USING (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can insert corp actions for accessible entities"
+--   ON corporate_actions FOR INSERT TO authenticated
+--   WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can update corp actions for accessible entities"
+--   ON corporate_actions FOR UPDATE TO authenticated
+--   USING (public.has_entity_access(entity_id))
+--   WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can delete corp actions for accessible entities"
+--   ON corporate_actions FOR DELETE TO authenticated
+--   USING (public.has_entity_access(entity_id));
+
 
 -- dividends
 DROP POLICY IF EXISTS "Authenticated users can read dividends" ON dividends;
