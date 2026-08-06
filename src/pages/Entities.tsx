@@ -1,6 +1,7 @@
 import { Plus, Search, Filter, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { errorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
@@ -504,7 +505,7 @@ export function Entities() {
       alert('Relationship removed successfully!');
     } catch (error) {
       console.error('Error removing broker:', error);
-      alert('Failed to remove relationship.');
+      alert(`Failed to remove relationship: ${errorMessage(error)}`);
     }
   }
 
@@ -591,13 +592,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'object' && error !== null && 'message' in error
-            ? String((error as { message: unknown }).message)
-            : String(error);
-      alert(`Failed to create entity: ${message}`);
+      alert(`Failed to create entity: ${errorMessage(error)}`);
     }
   }
 
@@ -665,7 +660,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error updating entity:', error);
-      alert('Failed to update entity. Please try again.');
+      alert(`Failed to update entity: ${errorMessage(error)}`);
     }
   }
 

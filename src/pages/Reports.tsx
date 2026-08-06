@@ -833,7 +833,7 @@ export function Reports() {
         `).in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: true }),
         supabase.from('dividends').select('entity_id, share_id, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_balance, opening_cost'),
+        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost'),
       ]);
 
       if (txRes.error) throw txRes.error;
@@ -854,9 +854,13 @@ export function Reports() {
         const k = `${ob.entity_id}||${ob.share_id}`;
         if (!map.has(k)) map.set(k, { entity_name: '', ticker: '', share_name: '', share_id: ob.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
         const r = map.get(k)!;
-        r.bal += Number(ob.opening_balance || 0);
-        r.cost += Number(ob.opening_cost || 0);
-        r.purchase_cost += Number(ob.opening_cost || 0);
+        // average_purchase_cost is per share, so the opening cost is the
+        // product — the same rule Portfolio.tsx and ShareAnalytics.tsx use.
+        const openingShares = Number(ob.opening_shares) || 0;
+        const openingCost = openingShares * (Number(ob.average_purchase_cost) || 0);
+        r.bal += openingShares;
+        r.cost += openingCost;
+        r.purchase_cost += openingCost;
       });
 
       txRes.data?.forEach((tx: any) => {
@@ -921,7 +925,7 @@ export function Reports() {
           .order('transaction_date', { ascending: true }),
         supabase.from('dividends').select('share_id, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('share_id, opening_balance, opening_cost'),
+        supabase.from('entity_share_opening_balances').select('share_id, opening_shares, average_purchase_cost'),
         supabase.from('shares').select('id, ticker, share_name, sector, sector_types(sector_name)'),
       ]);
 
@@ -948,9 +952,13 @@ export function Reports() {
       obRes.data?.forEach((ob: any) => {
         if (!holdMap.has(ob.share_id)) holdMap.set(ob.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
         const h = holdMap.get(ob.share_id)!;
-        h.held += Number(ob.opening_balance || 0);
-        h.cost += Number(ob.opening_cost || 0);
-        h.totalCostAll += Number(ob.opening_cost || 0);
+        // average_purchase_cost is per share, so the opening cost is the
+        // product — the same rule Portfolio.tsx and ShareAnalytics.tsx use.
+        const openingShares = Number(ob.opening_shares) || 0;
+        const openingCost = openingShares * (Number(ob.average_purchase_cost) || 0);
+        h.held += openingShares;
+        h.cost += openingCost;
+        h.totalCostAll += openingCost;
       });
 
       txRes.data?.forEach((tx: any) => {
@@ -1015,7 +1023,7 @@ export function Reports() {
           .order('transaction_date', { ascending: true }),
         supabase.from('dividends').select('share_id, amount_net'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('share_id, opening_balance, opening_cost'),
+        supabase.from('entity_share_opening_balances').select('share_id, opening_shares, average_purchase_cost'),
         supabase.from('shares').select('id, ticker, share_name'),
       ]);
 
@@ -1037,9 +1045,13 @@ export function Reports() {
       obRes.data?.forEach((ob: any) => {
         if (!holdMap.has(ob.share_id)) holdMap.set(ob.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
         const h = holdMap.get(ob.share_id)!;
-        h.held += Number(ob.opening_balance || 0);
-        h.cost += Number(ob.opening_cost || 0);
-        h.totalCostAll += Number(ob.opening_cost || 0);
+        // average_purchase_cost is per share, so the opening cost is the
+        // product — the same rule Portfolio.tsx and ShareAnalytics.tsx use.
+        const openingShares = Number(ob.opening_shares) || 0;
+        const openingCost = openingShares * (Number(ob.average_purchase_cost) || 0);
+        h.held += openingShares;
+        h.cost += openingCost;
+        h.totalCostAll += openingCost;
       });
 
       txRes.data?.forEach((tx: any) => {
