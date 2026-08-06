@@ -519,9 +519,10 @@ export function Entities() {
     }
 
     try {
-      const newId = crypto.randomUUID();
+      // No client-generated id: crypto.randomUUID() is undefined outside a
+      // secure context, and the app is served over plain http in deployment.
+      // The entities.id default (gen_random_uuid) supplies it instead.
       const newEntityData = {
-        id: newId,
         name: entityFormData.name,
         entity_type_id: entityFormData.entity_type_id || null,
         tax_name: entityFormData.tax_name || null,
@@ -537,9 +538,15 @@ export function Entities() {
         contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
         current_balance: 0
       };
-      const { error } = await supabase.from('entities').insert(newEntityData);
+      const { data: inserted, error } = await supabase
+        .from('entities')
+        .insert(newEntityData)
+        .select('id')
+        .single();
 
       if (error) throw error;
+
+      const newId = inserted.id;
 
       if (user) {
         await logAudit({
@@ -549,10 +556,18 @@ export function Entities() {
           recordId: newId,
           newData: newEntityData
         });
-        await supabase.from('user_entity_access').insert({
-          user_id: user.id,
-          entity_id: newId
-        });
+        const { error: accessError } = await supabase
+          .from('user_entity_access')
+          .insert({
+            user_id: user.id,
+            entity_id: newId
+          });
+        // Self-granted entity access was revoked for non-admins
+        // (20260803050148_remove_self_granted_entity_access), so this is
+        // expected to fail for them — an admin grants access on Entity Access.
+        if (accessError) {
+          console.warn('Could not self-grant access to the new entity:', accessError);
+        }
         await refreshPermissions();
       }
 
@@ -576,7 +591,13 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      alert('Failed to create entity. Please try again.');
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'object' && error !== null && 'message' in error
+            ? String((error as { message: unknown }).message)
+            : String(error);
+      alert(`Failed to create entity: ${message}`);
     }
   }
 
