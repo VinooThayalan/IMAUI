@@ -1,6 +1,7 @@
 import { Plus, Search, CreditCard as Edit, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { errorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
@@ -193,7 +194,10 @@ export function Brokers() {
       handleCloseModal();
     } catch (error) {
       console.error('Error saving broker:', error);
-      alert('Error saving broker. Please try again.');
+      // Writes to brokers are admin-only
+      // (20260803060003_restrict_reference_table_writes_to_admins), so a
+      // non-admin sees a row-level security error here rather than a fault.
+      alert(`Error saving broker: ${errorMessage(error)}`);
     }
   }
 
@@ -208,7 +212,7 @@ export function Brokers() {
       await fetchBrokers();
     } catch (error) {
       console.error('Error deleting broker:', error);
-      alert('Error deleting broker. It may be in use by existing records.');
+      alert(`Error deleting broker: ${errorMessage(error)}. It may be in use by existing records.`);
     }
   }
 
@@ -261,7 +265,7 @@ export function Brokers() {
       if (error.code === '23505') {
         alert('This entity is already assigned to this broker.');
       } else {
-        alert('Failed to assign entity. Please try again.');
+        alert(`Failed to assign entity: ${errorMessage(error)}`);
       }
     }
   }
@@ -283,7 +287,7 @@ export function Brokers() {
       alert('Entity relationship removed successfully!');
     } catch (error) {
       console.error('Error removing entity:', error);
-      alert('Failed to remove entity relationship.');
+      alert(`Failed to remove entity relationship: ${errorMessage(error)}`);
     }
   }
 
