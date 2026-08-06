@@ -1,13 +1,14 @@
 import { LayoutDashboard, Building2, TrendingUp, Landmark, ArrowLeftRight, DollarSign, FileText, Settings, PieChart, Calendar, Wallet, BarChart3, CheckSquare, File as FileEdit, FileUp, ClipboardCheck, Percent, GitBranch, GitMerge, ShoppingCart, SplitSquareVertical, Rocket, Users, ChevronDown, ChevronRight, Wrench, Tag, Briefcase, Factory, Layers, Shield, Menu, MapPin, ClipboardList, Mail, MailOpen } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 interface NavItem {
   icon: React.ElementType;
   label: string;
   href: string;
   menuName: string;
-  badge?: string;
+  badgeKey?: 'pendingApprovals';
 }
 
 interface NavSection {
@@ -22,9 +23,9 @@ const navSections: NavSection[] = [
     title: 'Main',
     items: [
       { icon: LayoutDashboard, label: 'Dashboard', href: '#dashboard', menuName: 'dashboard' },
-      { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', menuName: 'transactions', badge: '3' },
+      { icon: ArrowLeftRight, label: 'Transactions', href: '#transactions', menuName: 'transactions', badgeKey: 'pendingApprovals' },
       { icon: Rocket, label: 'IPO Transactions', href: '#ipo-transactions', menuName: 'ipo-transactions' },
-      { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', menuName: 'transaction-approvals', badge: '2' },
+      { icon: CheckSquare, label: 'Transaction Approvals', href: '#transaction-approvals', menuName: 'transaction-approvals', badgeKey: 'pendingApprovals' },
       { icon: FileUp, label: 'Buy & Sell Notes', href: '#buy-sell-notes', menuName: 'buy-sell-notes' },
       { icon: ClipboardCheck, label: 'Buy & Sell Approvals', href: '#buy-sell-approvals', menuName: 'buy-sell-approvals' },
       { icon: Wallet, label: 'Cash Balance', href: '#cash-balance', menuName: 'cash-balance' },
@@ -87,7 +88,34 @@ const navSections: NavSection[] = [
 
 export function Sidebar() {
   const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const { appUser, isAdmin, hasMenuAccess } = useAuth();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPendingCount() {
+      const { count, error } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('approval_status', 'PENDING_APPROVAL');
+
+      if (!cancelled && !error) {
+        setPendingApprovals(count ?? 0);
+      }
+    }
+
+    loadPendingCount();
+    const interval = setInterval(loadPendingCount, 30_000);
+    const onFocus = () => loadPendingCount();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
 
   function toggleSection(title: string) {
     setCollapsedSections(prev =>
@@ -95,6 +123,13 @@ export function Sidebar() {
         ? prev.filter(t => t !== title)
         : [...prev, title]
     );
+  }
+
+  function getBadge(item: NavItem): string | null {
+    if (item.badgeKey === 'pendingApprovals' && pendingApprovals > 0) {
+      return String(pendingApprovals);
+    }
+    return null;
   }
 
   const filteredSections = navSections
@@ -145,23 +180,26 @@ export function Sidebar() {
             </button>
             {!collapsedSections.includes(section.title) && (
               <div className="mt-1 space-y-1">
-                {section.items.map((item) => (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    className="flex items-center justify-between px-4 py-2.5 text-gray-700 rounded-lg hover:bg-[#3e5a7d] hover:text-white transition-colors group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <item.icon className="w-5 h-5 text-gray-500 group-hover:text-white" />
-                      <span className="font-medium text-sm">{item.label}</span>
-                    </div>
-                    {item.badge && (
-                      <span className="px-2 py-1 text-xs font-semibold text-white bg-[#4a6a94] rounded-full group-hover:bg-white group-hover:text-[#3e5a7d]">
-                        {item.badge}
-                      </span>
-                    )}
-                  </a>
-                ))}
+                {section.items.map((item) => {
+                  const badge = getBadge(item);
+                  return (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      className="flex items-center justify-between px-4 py-2.5 text-gray-700 rounded-lg hover:bg-[#3e5a7d] hover:text-white transition-colors group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <item.icon className="w-5 h-5 text-gray-500 group-hover:text-white" />
+                        <span className="font-medium text-sm">{item.label}</span>
+                      </div>
+                      {badge && (
+                        <span className="px-2 py-1 text-xs font-semibold text-white bg-[#4a6a94] rounded-full group-hover:bg-white group-hover:text-[#3e5a7d]">
+                          {badge}
+                        </span>
+                      )}
+                    </a>
+                  );
+                })}
               </div>
             )}
           </div>

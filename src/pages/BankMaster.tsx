@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ExportButton } from '../components/ExportButton';
+import type { ExportColumn } from '../lib/exportData';
 
 interface BankMasterItem {
   id: string;
@@ -213,13 +215,27 @@ export function BankMaster() {
           <h1 className="text-3xl font-bold text-gray-900">Banks</h1>
           <p className="text-gray-500 mt-1">Manage bank master list and branch network</p>
         </div>
-        <button
-          onClick={openAddBankModal}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="font-medium">Add Bank</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <ExportButton
+            filename="bank_master"
+            data={filteredBanks}
+            columns={[
+              { header: 'Bank Name', accessor: (r) => r.bank_name },
+              { header: 'Bank Code', accessor: (r) => r.bank_code || '' },
+              { header: 'Branches', accessor: (r) => getBranches(r.id).length },
+              { header: 'Branch Names', accessor: (r) => getBranches(r.id).map((b) => b.branch_name).join('; ') },
+              { header: 'Branch Codes', accessor: (r) => getBranches(r.id).map((b) => b.branch_code || '').join('; ') },
+              { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
+            ] as ExportColumn<typeof filteredBanks[number]>[]}
+          />
+          <button
+            onClick={openAddBankModal}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="font-medium">Add Bank</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
