@@ -596,9 +596,13 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      alert(`Failed to create entity: ${errorMessage(error)}`);
-    } finally {
-      setIsSubmitting(false);
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'object' && error !== null && 'message' in error
+            ? String((error as { message: unknown }).message)
+            : String(error);
+      alert(`Failed to create entity: ${message}`);
     }
   }
 
@@ -668,87 +672,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error updating entity:', error);
-      alert(`Failed to update entity: ${errorMessage(error)}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function handleDeleteEntity(entity: Entity) {
-    if (!confirm(`Are you sure you want to delete "${entity.name}"? This action cannot be undone.`)) return;
-
-    setDeletingId(entity.id);
-
-    try {
-      const linkedTables = [
-        'transactions',
-        'dividends',
-        'banks',
-        'entity_brokers',
-        'scrip_entries',
-        'transaction_requests',
-        'cash_balance_ledger',
-        'entity_share_opening_balances',
-        'entity_approvers',
-        'user_entity_access',
-      ];
-
-      const linkedChecks = await Promise.all(
-        linkedTables.map(async (table) => {
-          const { count, error } = await supabase
-            .from(table)
-            .select('id', { count: 'exact', head: true })
-            .eq('entity_id', entity.id);
-          if (error) return { table, count: 0, error: true };
-          return { table, count: count ?? 0, error: false };
-        })
-      );
-
-      const linked = linkedChecks.filter((c) => c.count > 0 && !c.error);
-
-      if (linked.length > 0) {
-        const labels: Record<string, string> = {
-          transactions: 'Transactions',
-          dividends: 'Dividends',
-          banks: 'Bank Accounts',
-          entity_brokers: 'Brokers/Custodians',
-          scrip_entries: 'Scrip Entries',
-          transaction_requests: 'Transaction Requests',
-          cash_balance_ledger: 'Cash Balance Ledger',
-          entity_share_opening_balances: 'Opening Balances',
-          entity_approvers: 'Entity Approvers',
-          user_entity_access: 'User Access',
-        };
-        const linkedNames = linked.map((c) => labels[c.table] || c.table).join(', ');
-        alert(`Cannot delete "${entity.name}" because it is linked to: ${linkedNames}. Please remove those records first.`);
-        return;
-      }
-
-      const oldRecord = await fetchRecordForAudit('entities', entity.id);
-      const { error } = await supabase
-        .from('entities')
-        .delete()
-        .eq('id', entity.id);
-
-      if (error) throw error;
-
-      if (user) {
-        await logAudit({
-          userId: user.id,
-          action: 'DELETE',
-          tableName: 'entities',
-          recordId: entity.id,
-          oldData: oldRecord
-        });
-      }
-
-      alert('Entity deleted successfully!');
-      await fetchEntities();
-    } catch (error) {
-      console.error('Error deleting entity:', error);
-      alert(`Failed to delete entity: ${errorMessage(error)}. It may be linked to other records.`);
-    } finally {
-      setDeletingId(null);
+      alert('Failed to update entity. Please try again.');
     }
   }
 
