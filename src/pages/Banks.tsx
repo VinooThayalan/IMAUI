@@ -1,6 +1,7 @@
 import { Plus, Search, DollarSign, Eye, Pencil, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { errorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
@@ -69,6 +70,7 @@ export function Banks() {
   const [bankMasters, setBankMasters] = useState<BankMasterItem[]>([]);
   const [allBranches, setAllBranches] = useState<BankBranchItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingBank, setEditingBank] = useState<EntityBank | null>(null);
@@ -99,17 +101,31 @@ export function Banks() {
         supabase.from('bank_branches').select('id, bank_master_id, branch_name').eq('is_active', true).order('branch_name')
       ]);
 
-      if (banksRes.error) throw banksRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
-      if (masterRes.error) throw masterRes.error;
-      if (branchRes.error) throw branchRes.error;
-
+      // Apply every result that succeeded before reporting any failure. These
+      // four queries are independent, and bailing on the first error used to
+      // leave the Entity dropdown empty whenever the banks query failed for a
+      // reason of its own — an unresolvable embed, say.
       setBanks((banksRes.data as EntityBank[]) || []);
       setEntities(entitiesRes.data || []);
       setBankMasters(masterRes.data || []);
       setAllBranches(branchRes.data || []);
+
+      const failures = [
+        ['bank accounts', banksRes.error],
+        ['entities', entitiesRes.error],
+        ['bank master', masterRes.error],
+        ['bank branches', branchRes.error]
+      ].filter(([, err]) => err) as [string, { message: string }][];
+
+      setLoadError(
+        failures.length
+          ? failures.map(([what, err]) => `${what}: ${err.message}`).join(' | ')
+          : null
+      );
+      failures.forEach(([what, err]) => console.error(`Error loading ${what}:`, err));
     } catch (error) {
       console.error('Error loading entity banks:', error);
+      setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
@@ -180,7 +196,7 @@ export function Banks() {
       closeModal();
     } catch (error) {
       console.error('Error saving entity bank:', error);
-      alert('Failed to save entity bank account');
+      alert(`Failed to save entity bank account: ${errorMessage(error)}`);
     } finally {
       setSaving(false);
     }
@@ -236,6 +252,13 @@ export function Banks() {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3 text-sm">
+          <span className="font-semibold">Some data could not be loaded.</span>{' '}
+          {loadError}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white rounded-xl border border-gray-200 p-6">

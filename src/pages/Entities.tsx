@@ -1,6 +1,7 @@
 import { Plus, Search, Filter, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { errorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
@@ -95,6 +96,8 @@ export function Entities() {
   const [bankMasters, setBankMasters] = useState<BankMasterItem[]>([]);
   const [bankBranches, setBankBranches] = useState<BankBranchItem[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [entityFormData, setEntityFormData] = useState({
     name: '',
     entity_type_id: '',
@@ -504,7 +507,7 @@ export function Entities() {
       alert('Relationship removed successfully!');
     } catch (error) {
       console.error('Error removing broker:', error);
-      alert('Failed to remove relationship.');
+      alert(`Failed to remove relationship: ${errorMessage(error)}`);
     }
   }
 
@@ -517,6 +520,8 @@ export function Entities() {
       alert('Please fill in all required fields');
       return;
     }
+
+    setIsSubmitting(true);
 
     try {
       // No client-generated id: crypto.randomUUID() is undefined outside a
@@ -591,13 +596,9 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'object' && error !== null && 'message' in error
-            ? String((error as { message: unknown }).message)
-            : String(error);
-      alert(`Failed to create entity: ${message}`);
+      alert(`Failed to create entity: ${errorMessage(error)}`);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -608,6 +609,8 @@ export function Entities() {
       alert('Please fill in all required fields');
       return;
     }
+
+    setIsSubmitting(true);
 
     try {
       const oldRecord = await fetchRecordForAudit('entities', selectedEntity.id);
@@ -665,7 +668,87 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error updating entity:', error);
-      alert('Failed to update entity. Please try again.');
+      alert(`Failed to update entity: ${errorMessage(error)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDeleteEntity(entity: Entity) {
+    if (!confirm(`Are you sure you want to delete "${entity.name}"? This action cannot be undone.`)) return;
+
+    setDeletingId(entity.id);
+
+    try {
+      const linkedTables = [
+        'transactions',
+        'dividends',
+        'banks',
+        'entity_brokers',
+        'scrip_entries',
+        'transaction_requests',
+        'cash_balance_ledger',
+        'entity_share_opening_balances',
+        'entity_approvers',
+        'user_entity_access',
+      ];
+
+      const linkedChecks = await Promise.all(
+        linkedTables.map(async (table) => {
+          const { count, error } = await supabase
+            .from(table)
+            .select('id', { count: 'exact', head: true })
+            .eq('entity_id', entity.id);
+          if (error) return { table, count: 0, error: true };
+          return { table, count: count ?? 0, error: false };
+        })
+      );
+
+      const linked = linkedChecks.filter((c) => c.count > 0 && !c.error);
+
+      if (linked.length > 0) {
+        const labels: Record<string, string> = {
+          transactions: 'Transactions',
+          dividends: 'Dividends',
+          banks: 'Bank Accounts',
+          entity_brokers: 'Brokers/Custodians',
+          scrip_entries: 'Scrip Entries',
+          transaction_requests: 'Transaction Requests',
+          cash_balance_ledger: 'Cash Balance Ledger',
+          entity_share_opening_balances: 'Opening Balances',
+          entity_approvers: 'Entity Approvers',
+          user_entity_access: 'User Access',
+        };
+        const linkedNames = linked.map((c) => labels[c.table] || c.table).join(', ');
+        alert(`Cannot delete "${entity.name}" because it is linked to: ${linkedNames}. Please remove those records first.`);
+        return;
+      }
+
+      const oldRecord = await fetchRecordForAudit('entities', entity.id);
+      const { error } = await supabase
+        .from('entities')
+        .delete()
+        .eq('id', entity.id);
+
+      if (error) throw error;
+
+      if (user) {
+        await logAudit({
+          userId: user.id,
+          action: 'DELETE',
+          tableName: 'entities',
+          recordId: entity.id,
+          oldData: oldRecord
+        });
+      }
+
+      alert('Entity deleted successfully!');
+      await fetchEntities();
+    } catch (error) {
+      console.error('Error deleting entity:', error);
+      alert(`Failed to delete entity: ${errorMessage(error)}. It may be linked to other records.`);
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -767,6 +850,21 @@ export function Entities() {
                           title="Edit"
                         >
                           <Edit className="w-4 h-4 text-gray-600" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteEntity(entity)}
+                          disabled={deletingId === entity.id}
+                          className="p-1 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Delete"
+                        >
+                          {deletingId === entity.id ? (
+                            <svg className="animate-spin h-4 w-4 text-red-600" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                            </svg>
+                          ) : (
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          )}
                         </button>
                       </div>
                     </td>
@@ -935,8 +1033,18 @@ export function Entities() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                  Create Entity
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isSubmitting && (
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                  )}
+                  <span>{isSubmitting ? 'Creating...' : 'Create Entity'}</span>
                 </button>
               </div>
             </form>
@@ -1549,8 +1657,18 @@ export function Entities() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors">
-                  Update Entity
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isSubmitting && (
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                  )}
+                  <span>{isSubmitting ? 'Updating...' : 'Update Entity'}</span>
                 </button>
               </div>
             </form>
