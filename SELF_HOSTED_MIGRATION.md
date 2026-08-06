@@ -272,6 +272,37 @@ Their columns were taken from the `BankMasterItem` and `BankBranch` interfaces i
 hosted definition can't be confirmed and the app doesn't depend on one. Add them
 if the real schema had them.
 
+### Columns the app uses that no migration created
+
+The scan above checked *tables*. It did not check *columns*, and four were
+missing for the same reason the bank tables were — the bank master feature was
+built on the hosted database through the dashboard:
+
+| Column | Written by |
+| --- | --- |
+| `banks.bank_master_id` | `src/pages/Banks.tsx:157` |
+| `banks.bank_branch_id` | `src/pages/Banks.tsx:158` |
+| `entity_brokers.bank_master_id` | `src/pages/Entities.tsx:399` |
+| `entity_brokers.bank_branch_id` | `src/pages/Entities.tsx:400` |
+
+**Added:** `supabase/migrations/20260806060001_add_bank_master_links_to_banks_and_entity_brokers.sql`.
+
+This one presented as an unrelated bug: **the Entity dropdown on Entity - Bank
+was empty.** `Banks.tsx` embeds through the two foreign keys
+(`bank_master:bank_master_id(...)`), PostgREST needs the constraint to resolve
+an embed, and `loadData()` throws on the first failing result — so one broken
+query blanked the entity, bank-master and branch dropdowns together, with the
+cause visible only in the browser console.
+
+To re-check after any schema change, diff what the app references against what
+the migrations define, rather than trusting the table-level sweep:
+
+```bash
+grep -rhoE "\.(eq|order|select)\(\s*'[a-z_, ]+'" src/     # columns the app names
+psql "$DB_URL" -tAc "select table_name||'.'||column_name from information_schema.columns
+  where table_schema='public' order by 1;"                # columns that exist
+```
+
 ### anon grants on views — fixed
 
 `20260803060001_revoke_all_anon_access.sql` sweeps
@@ -455,6 +486,7 @@ All of this is on `main`, on top of `fff62bf`, and **uncommitted**.
 - `supabase/migrations/20260402053442_fix_entity_id_types_to_uuid.sql` — [§3.4](#34-wrong-column-types--entity_id-as-text-instead-of-uuid)
 - `supabase/migrations/20260724121430_create_bank_master_and_branches.sql` — [§5](#5-tables-the-app-uses-that-no-migration-created)
 - `supabase/migrations/20260803060006_revoke_anon_access_to_views.sql` — [§5](#anon-grants-on-views--fixed)
+- `supabase/migrations/20260806060001_add_bank_master_links_to_banks_and_entity_brokers.sql` — [§5](#columns-the-app-uses-that-no-migration-created)
 - `scripts/push-migrations-selfhosted.sh`
 - `scripts/strip-phantom-tables.py`
 - `SELF_HOSTED_MIGRATION.md`
