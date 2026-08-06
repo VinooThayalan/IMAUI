@@ -75,6 +75,7 @@ interface EntityBroker {
   bank_name?: string;
   currency?: string;
   broker_text?: string;
+  notes?: string | null;
   brokers: Broker;
   broker_name?: Broker;
 }
@@ -300,7 +301,7 @@ export function Entities() {
       broker_id: eb.broker_id || '',
       relationship_type: eb.relationship_type,
       assigned_date: eb.assigned_date || new Date().toISOString().split('T')[0],
-      notes: (eb as any).notes || '',
+      notes: eb.notes || '',
       custodian_account_number: eb.custodian_account_number || '',
       custodian_account_name: eb.custodian_account_name || '',
       custodian_account_fee: eb.custodian_account_fee != null ? String(eb.custodian_account_fee) : '',
@@ -392,7 +393,7 @@ export function Entities() {
     if (!selectedEntityId) return;
 
     try {
-      const insertData: any = {
+      const insertData: Record<string, unknown> = {
         entity_id: selectedEntityId,
         broker_id: brokerFormData.relationship_type === 'Custodian' ? null : (brokerFormData.broker_id || null),
         relationship_type: brokerFormData.relationship_type,
@@ -423,23 +424,25 @@ export function Entities() {
         ({ error, data } = await supabase.from('entity_brokers').update(insertData).eq('id', editingBrokerId).select('id').maybeSingle());
         if (!error && user) {
           await logAudit({
-            userId: user.id,
+            performedBy: user.email || 'system',
             action: 'UPDATE',
             tableName: 'entity_brokers',
             recordId: editingBrokerId,
-            oldData: oldRecord,
-            newData: insertData
+            entityId: selectedEntityId,
+            oldValues: oldRecord,
+            newValues: insertData
           });
         }
       } else {
         ({ error, data } = await supabase.from('entity_brokers').insert(insertData).select('id').maybeSingle());
         if (!error && data && user) {
           await logAudit({
-            userId: user.id,
+            performedBy: user.email || 'system',
             action: 'CREATE',
             tableName: 'entity_brokers',
             recordId: data.id,
-            newData: insertData
+            entityId: selectedEntityId,
+            newValues: insertData
           });
         }
       }
@@ -467,14 +470,18 @@ export function Entities() {
         broker_text: ''
       });
       alert(wasEditing ? 'Broker/Custodian updated successfully!' : 'Broker/Custodian assigned successfully!');
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error assigning broker:', error);
-      if (error.code === '23505') {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code: unknown }).code)
+          : '';
+      if (code === '23505') {
         alert('This broker is already assigned to this entity.');
-      } else if (error.code === '42501') {
+      } else if (code === '42501') {
         alert('Permission denied. You do not have access to assign brokers to this entity.');
       } else {
-        alert('Could not assign this broker. Please try again.');
+        alert(`Could not assign this broker: ${errorMessage(error)}`);
       }
     }
   }
@@ -493,11 +500,12 @@ export function Entities() {
 
       if (user) {
         await logAudit({
-          userId: user.id,
+          performedBy: user.email || 'system',
           action: 'DELETE',
           tableName: 'entity_brokers',
           recordId: relationshipId,
-          oldData: oldRecord
+          entityId: selectedEntityId,
+          oldValues: oldRecord
         });
       }
 
@@ -555,11 +563,12 @@ export function Entities() {
 
       if (user) {
         await logAudit({
-          userId: user.id,
+          performedBy: user.email || 'system',
           action: 'CREATE',
           tableName: 'entities',
           recordId: newId,
-          newData: newEntityData
+          entityId: newId,
+          newValues: newEntityData
         });
         const { error: accessError } = await supabase
           .from('user_entity_access')
@@ -596,13 +605,9 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === 'object' && error !== null && 'message' in error
-            ? String((error as { message: unknown }).message)
-            : String(error);
-      alert(`Failed to create entity: ${message}`);
+      alert(`Failed to create entity: ${errorMessage(error)}`);
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -642,12 +647,13 @@ export function Entities() {
 
       if (user) {
         await logAudit({
-          userId: user.id,
+          performedBy: user.email || 'system',
           action: 'UPDATE',
           tableName: 'entities',
           recordId: selectedEntity.id,
-          oldData: oldRecord,
-          newData: newData
+          entityId: selectedEntity.id,
+          oldValues: oldRecord,
+          newValues: newData
         });
       }
 
@@ -672,7 +678,88 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error updating entity:', error);
-      alert('Failed to update entity. Please try again.');
+      alert(`Failed to update entity: ${errorMessage(error)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDeleteEntity(entity: Entity) {
+    if (!confirm(`Are you sure you want to delete "${entity.name}"? This action cannot be undone.`)) return;
+
+    setDeletingId(entity.id);
+
+    try {
+      const linkedTables = [
+        'transactions',
+        'dividends',
+        'banks',
+        'entity_brokers',
+        'scrip_entries',
+        'transaction_requests',
+        'cash_balance_ledger',
+        'entity_share_opening_balances',
+        'entity_approvers',
+        'user_entity_access',
+      ];
+
+      const linkedChecks = await Promise.all(
+        linkedTables.map(async (table) => {
+          const { count, error } = await supabase
+            .from(table)
+            .select('id', { count: 'exact', head: true })
+            .eq('entity_id', entity.id);
+          if (error) return { table, count: 0, error: true };
+          return { table, count: count ?? 0, error: false };
+        })
+      );
+
+      const linked = linkedChecks.filter((c) => c.count > 0 && !c.error);
+
+      if (linked.length > 0) {
+        const labels: Record<string, string> = {
+          transactions: 'Transactions',
+          dividends: 'Dividends',
+          banks: 'Bank Accounts',
+          entity_brokers: 'Brokers/Custodians',
+          scrip_entries: 'Scrip Entries',
+          transaction_requests: 'Transaction Requests',
+          cash_balance_ledger: 'Cash Balance Ledger',
+          entity_share_opening_balances: 'Opening Balances',
+          entity_approvers: 'Entity Approvers',
+          user_entity_access: 'User Access',
+        };
+        const linkedNames = linked.map((c) => labels[c.table] || c.table).join(', ');
+        alert(`Cannot delete "${entity.name}" because it is linked to: ${linkedNames}. Please remove those records first.`);
+        return;
+      }
+
+      const oldRecord = await fetchRecordForAudit('entities', entity.id);
+      const { error } = await supabase
+        .from('entities')
+        .delete()
+        .eq('id', entity.id);
+
+      if (error) throw error;
+
+      if (user) {
+        await logAudit({
+          performedBy: user.email || 'system',
+          action: 'DELETE',
+          tableName: 'entities',
+          recordId: entity.id,
+          entityId: entity.id,
+          oldValues: oldRecord
+        });
+      }
+
+      alert('Entity deleted successfully!');
+      await fetchEntities();
+    } catch (error) {
+      console.error('Error deleting entity:', error);
+      alert(`Failed to delete entity: ${errorMessage(error)}. It may be linked to other records.`);
+    } finally {
+      setDeletingId(null);
     }
   }
 
