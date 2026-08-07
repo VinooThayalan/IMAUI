@@ -111,7 +111,24 @@ function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): nu
     if (Math.abs(nr - rate) < 1e-8) return nr;
     rate = Math.max(-0.999, nr);
   }
-  return rate;
+  // Out of iterations, or the derivative went flat: the last iterate is not a
+  // solution and can be astronomically large. Say so rather than returning it.
+  return NaN;
+}
+
+/**
+ * XIRR rate as an annualised percentage, or null when there is no meaningful
+ * answer — the solver failed, or it converged on a rate that only a rounding
+ * artefact could produce. A same-week round trip annualises into the millions
+ * of percent, which is arithmetic rather than performance, and it used to
+ * overflow share_analytics_cache.aer and fail the entire cache write.
+ */
+const AER_PERCENT_LIMIT = 1_000_000;
+
+function toAerPercent(rate: number): number | null {
+  if (!isFinite(rate)) return null;
+  const percent = rate * 100;
+  return Math.abs(percent) > AER_PERCENT_LIMIT ? null : percent;
 }
 
 // ── Core calculation ─────────────────────────────────────────────────────────
@@ -305,7 +322,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     if (cfs.length < 2) return null;
     try {
       const rate = xirr(cfs);
-      return isFinite(rate) ? rate * 100 : null;
+      return toAerPercent(rate);
     } catch { return null; }
   })();
 
@@ -1177,7 +1194,7 @@ export function ShareAnalytics() {
           if (groupCfs.length >= 2) {
             try {
               const rate = xirr(groupCfs);
-              groupAer = isFinite(rate) ? rate * 100 : null;
+              groupAer = toAerPercent(rate);
             } catch { groupAer = null; }
           }
 
@@ -1262,7 +1279,7 @@ export function ShareAnalytics() {
     if (cfs.length < 2) return null;
     try {
       const rate = xirr(cfs);
-      return isFinite(rate) ? rate * 100 : null;
+      return toAerPercent(rate);
     } catch {
       return null;
     }
