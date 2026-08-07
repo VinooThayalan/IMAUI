@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface ShareBuyback {
-  id: string;
+  id: string; 
   entity_id: string;
   share_id: string;
   broker_id?: string;
