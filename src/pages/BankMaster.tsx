@@ -104,12 +104,12 @@ export function BankMaster() {
         if (error) throw error;
         if (user) {
           await logAudit({
-            userId: user.id,
+            performedBy: user?.email || 'system',
             action: 'UPDATE',
             tableName: 'bank_master',
             recordId: editingBank.id,
-            oldData: oldRecord,
-            newData: payload
+            oldValues: oldRecord,
+            newValues: payload
           });
         }
       } else {
@@ -117,11 +117,11 @@ export function BankMaster() {
         if (error) throw error;
         if (user && data) {
           await logAudit({
-            userId: user.id,
+            performedBy: user?.email || 'system',
             action: 'CREATE',
             tableName: 'bank_master',
             recordId: data.id,
-            newData: payload
+            newValues: payload
           });
         }
       }
@@ -170,12 +170,12 @@ export function BankMaster() {
         if (error) throw error;
         if (user) {
           await logAudit({
-            userId: user.id,
+            performedBy: user?.email || 'system',
             action: 'UPDATE',
             tableName: 'bank_branches',
             recordId: editingBranch.id,
-            oldData: oldRecord,
-            newData: payload
+            oldValues: oldRecord,
+            newValues: payload
           });
         }
       } else {
@@ -183,11 +183,11 @@ export function BankMaster() {
         if (error) throw error;
         if (user && data) {
           await logAudit({
-            userId: user.id,
+            performedBy: user?.email || 'system',
             action: 'CREATE',
             tableName: 'bank_branches',
             recordId: data.id,
-            newData: payload
+            newValues: payload
           });
         }
       }

@@ -535,7 +535,6 @@ export function Transactions() {
     if (!balance) return 0;
 
     const newShares = parseFloat(formData.no_of_shares) || 0;
-    const newPrice = parseFloat(formData.price_per_share) || 0;
 
     if (formData.transaction_type === 'BUY') {
       const totalShares = balance.total_shares + newShares;

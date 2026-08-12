@@ -141,12 +141,13 @@ export function UserManagement() {
       if (error) throw error;
 
       // Log UPDATE audit for app_users
-      await logAudit('UPDATE', {
-        userId: currentUser?.id,
-        table: 'app_users',
+      await logAudit({
+        action: 'UPDATE',
+        performedBy: currentUser?.email || 'system',
+        tableName: 'app_users',
         recordId: userId,
-        oldRecord,
-        newRecord: {
+        oldValues: oldRecord,
+        newValues: {
           role: newRole,
           updated_at: updatedAt,
         },

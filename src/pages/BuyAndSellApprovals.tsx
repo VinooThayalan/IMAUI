@@ -376,12 +376,13 @@ export function BuyAndSellApprovals() {
       }
 
       // Log UPDATE audit for buy_sell_notes
-      await logAudit('UPDATE', {
-        userId: user?.id,
-        table: 'buy_sell_notes',
+      await logAudit({
+        action: 'UPDATE',
+        performedBy: user?.email || 'system',
+        tableName: 'buy_sell_notes',
         recordId: selectedNote.id,
-        oldRecord,
-        newRecord: {
+        oldValues: oldRecord,
+        newValues: {
           status: 'PROCESSED',
           approved_by: reviewerName,
           approved_at: reviewedAt,
@@ -423,11 +424,12 @@ export function BuyAndSellApprovals() {
 
       // Log CREATE audit for cash_balance_ledger
       if (ledgerData) {
-        await logAudit('CREATE', {
-          userId: user?.id,
-          table: 'cash_balance_ledger',
+        await logAudit({
+        action: 'CREATE',
+          performedBy: user?.email || 'system',
+          tableName: 'cash_balance_ledger',
           recordId: ledgerData.id,
-          newRecord: {
+          newValues: {
             type: transactionType,
             description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
             code: selectedNote.contract_no || selectedNote.note_number,
@@ -497,12 +499,13 @@ export function BuyAndSellApprovals() {
       }
 
       // Log UPDATE audit for buy_sell_notes
-      await logAudit('UPDATE', {
-        userId: user?.id,
-        table: 'buy_sell_notes',
+      await logAudit({
+        action: 'UPDATE',
+        performedBy: user?.email || 'system',
+        tableName: 'buy_sell_notes',
         recordId: selectedNote.id,
-        oldRecord,
-        newRecord: {
+        oldValues: oldRecord,
+        newValues: {
           status: 'REJECTED',
           approved_by: reviewerName,
           approved_at: approvedAt,
