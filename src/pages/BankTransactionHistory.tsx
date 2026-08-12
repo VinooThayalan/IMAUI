@@ -263,30 +263,22 @@ export function BankTransactionHistory() {
   async function loadLedger(bankId: string) {
     setLedgerLoading(true);
     try {
-      const bank = banks.find(b => b.id === bankId);
-
-      const [bankRes, entityRes] = await Promise.all([
-        supabase
-          .from('cash_balance_ledger')
-          .select('id, date, type, description, code, amount, running_balance, reference_id')
-          .eq('bank_id', bankId)
-          .order('date', { ascending: true }),
-        bank
-          ? supabase
-              .from('cash_balance_ledger')
-              .select('id, date, type, description, code, amount, running_balance, reference_id')
-              .eq('entity_id', bank.entity_id)
-              .is('bank_id', null)
-              .order('date', { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      // Only this bank's own entries. This used to also pull the entity's
+      // entries with bank_id IS NULL, which meant a manual ledger entry saved
+      // without a bank appeared under *every* bank belonging to that entity —
+      // and was counted into each one's transaction count and net movement, so
+      // an entity with three banks triple-counted it. Entries with no bank
+      // remain visible on the Cash Balance screen, which shows them whenever no
+      // bank filter is applied.
+      const bankRes = await supabase
+        .from('cash_balance_ledger')
+        .select('id, date, type, description, code, amount, running_balance, reference_id')
+        .eq('bank_id', bankId)
+        .order('date', { ascending: true });
 
       if (bankRes.error) throw bankRes.error;
 
-      const allEntries = [
-        ...(bankRes.data || []),
-        ...(entityRes.data || []),
-      ].sort((a, b) => {
+      const allEntries = [...(bankRes.data || [])].sort((a, b) => {
         if (!a.date && !b.date) return 0;
         if (!a.date) return -1;
         if (!b.date) return 1;
