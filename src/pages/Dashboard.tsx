@@ -583,6 +583,22 @@ export function Dashboard() {
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
+  // Keyed on ticker / sector name, not on list position — see the build helpers.
+  //
+  // Declared here, above every use. These are `const` arrow functions, so a
+  // reference before this point is a temporal-dead-zone throw, not undefined —
+  // "Cannot access 'sectorColor' before initialization", which took the whole
+  // page down. They only need `metrics`, so this is the earliest correct spot.
+  //
+  // Worth knowing why the compiler stayed quiet: the earlier uses were inside
+  // `.map()` callbacks, and TypeScript will not flag use-before-declaration
+  // through a function boundary because it cannot know when the function runs.
+  // `.map` runs immediately, so it threw on first render.
+  const shareColorMap = buildShareColorMap(metrics);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
+  const sectorColorMap = buildSectorColorMap(metrics);
+  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? SECTOR_COLOR_OTHER;
+
   // Top 5 contributors by net market value (held > 0)
   const top5 = metrics.filter(m => m.heldShares > 0).slice(0, 5);
 
@@ -608,12 +624,6 @@ export function Dashboard() {
   const sectorReturnsPie   = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.returns,     color: sectorColor(k) })));
   const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
   const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
-
-  // Keyed on ticker / sector name, not on list position — see the build helpers.
-  const shareColorMap = buildShareColorMap(metrics);
-  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
-  const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? SECTOR_COLOR_OTHER;
 
   // Top-5 pie charts
   const top5NetMktPie  = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(m.ticker) })));
