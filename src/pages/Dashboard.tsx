@@ -67,19 +67,37 @@ const SHARE_COLORS = [
 const SHARE_COLOR_OTHER = '#6B7280';
 
 /**
- * Every sector present gets its own colour, assigned over the sector names sorted
- * alphabetically so it depends on the sector universe rather than on the order
- * rows happen to arrive in — a sector keeps its colour as values move and across
- * every chart on the page. Built from the full metrics list by both callers, for
- * the same reason as buildShareColorMap.
+ * The colour stored on sector_types wins; anything without one is derived.
+ *
+ * The stored value (20260812060002) is what makes a sector's colour permanent. The
+ * derivation is only a fallback, and a weak one: it assigns slots over the sector
+ * names in sorted order, so adding a sector that sorts earlier shifts every later
+ * sector onto a different colour. It is kept for shares that carry only the
+ * free-text shares.sector and have no sector_types row to store a colour on.
+ *
+ * Derived slots skip the colours already taken by stored ones, so a fallback
+ * cannot collide with a sector that has a real colour assigned.
  */
-function buildSectorColorMap(metrics: { sector: string }[]): Map<string, string> {
+function buildSectorColorMap(
+  metrics: { sector: string; sectorColor?: string | null }[],
+): Map<string, string> {
   const map = new Map<string, string>();
+
+  for (const m of metrics) {
+    if (m.sectorColor && !map.has(m.sector)) map.set(m.sector, m.sectorColor);
+  }
+
+  const taken = new Set(map.values());
+  const spare = SECTOR_COLORS.filter(c => !taken.has(c));
+  let next = 0;
   Array.from(new Set(metrics.map(m => m.sector)))
     .sort()
-    .forEach((sector, i) => {
-      map.set(sector, i < SECTOR_COLORS.length ? SECTOR_COLORS[i] : SECTOR_COLOR_OTHER);
+    .forEach(sector => {
+      if (map.has(sector)) return;
+      map.set(sector, next < spare.length ? spare[next] : SECTOR_COLOR_OTHER);
+      next++;
     });
+
   return map;
 }
 
@@ -159,6 +177,7 @@ interface ShareRow {
   ticker: string;
   share_name: string;
   sector: string;
+  sectorColor: string | null;
 }
 
 interface ShareMetrics {
@@ -166,6 +185,7 @@ interface ShareMetrics {
   ticker: string;
   shareName: string;
   sector: string;
+  sectorColor: string | null;
   heldShares: number;
   cost: number;        // cumulative cost of held shares
   totalCostAll: number; // total cost ever (incl. sold)
@@ -352,7 +372,7 @@ export function Dashboard() {
 
       const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, openingRes] = await Promise.all([
         supabase.from('shares')
-          .select('id, ticker, share_name, sector, sector_types(sector_name)')
+          .select('id, ticker, share_name, sector, sector_types(sector_name, color)')
           .eq('is_active', true)
           .order('share_name'),
         txnsQ,
@@ -373,6 +393,10 @@ export function Dashboard() {
         share_name: s.share_name || s.ticker || '',
         // Prefer sector_types.sector_name, fall back to shares.sector column
         sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
+        // The colour stored against the sector, when there is one. Null for a share
+        // that has no sector_types row (it only carries the free-text shares.sector),
+        // which is what buildSectorColorMap's derived fallback is for.
+        sectorColor: (s.sector_types as { color: string | null } | null)?.color || null,
       }));
       setShares(shareRows);
 
@@ -497,6 +521,7 @@ export function Dashboard() {
 
         result.push({
           shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
+          sectorColor: sr.sectorColor,
           heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
           marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
           netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,
