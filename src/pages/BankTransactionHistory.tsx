@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X, Download, CalendarRange } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { exportData, type ExportColumn } from '../lib/exportData';
 
 interface Entity {
   id: string;
@@ -197,6 +198,8 @@ export function BankTransactionHistory() {
   const [ledger, setLedger]                   = useState<LedgerEntry[]>([]);
   const [ledgerLoading, setLedgerLoading]     = useState(false);
   const [sortAsc, setSortAsc]                 = useState(true);
+  const [periodFrom, setPeriodFrom]           = useState('');
+  const [periodTo, setPeriodTo]               = useState('');
   const [viewNote, setViewNote]               = useState<BuyAndSellNote | null>(null);
   const [noteLoading, setNoteLoading]         = useState<string | null>(null);
 
@@ -263,30 +266,22 @@ export function BankTransactionHistory() {
   async function loadLedger(bankId: string) {
     setLedgerLoading(true);
     try {
-      const bank = banks.find(b => b.id === bankId);
-
-      const [bankRes, entityRes] = await Promise.all([
-        supabase
-          .from('cash_balance_ledger')
-          .select('id, date, type, description, code, amount, running_balance, reference_id')
-          .eq('bank_id', bankId)
-          .order('date', { ascending: true }),
-        bank
-          ? supabase
-              .from('cash_balance_ledger')
-              .select('id, date, type, description, code, amount, running_balance, reference_id')
-              .eq('entity_id', bank.entity_id)
-              .is('bank_id', null)
-              .order('date', { ascending: true })
-          : Promise.resolve({ data: [], error: null }),
-      ]);
+      // Only this bank's own entries. This used to also pull the entity's
+      // entries with bank_id IS NULL, which meant a manual ledger entry saved
+      // without a bank appeared under *every* bank belonging to that entity —
+      // and was counted into each one's transaction count and net movement, so
+      // an entity with three banks triple-counted it. Entries with no bank
+      // remain visible on the Cash Balance screen, which shows them whenever no
+      // bank filter is applied.
+      const bankRes = await supabase
+        .from('cash_balance_ledger')
+        .select('id, date, type, description, code, amount, running_balance, reference_id')
+        .eq('bank_id', bankId)
+        .order('date', { ascending: true });
 
       if (bankRes.error) throw bankRes.error;
 
-      const allEntries = [
-        ...(bankRes.data || []),
-        ...(entityRes.data || []),
-      ].sort((a, b) => {
+      const allEntries = [...(bankRes.data || [])].sort((a, b) => {
         if (!a.date && !b.date) return 0;
         if (!a.date) return -1;
         if (!b.date) return 1;
@@ -386,7 +381,48 @@ export function BankTransactionHistory() {
 
   const totalBalance = filtered.reduce((s, b) => s + b.current_balance, 0);
   const activeCount  = filtered.filter(b => b.is_active).length;
-  const sortedLedger = sortAsc ? ledger : [...ledger].reverse();
+
+  // Period filter. Applied client-side on the already-loaded ledger rather than in
+  // the query, so changing a date does not re-fetch and an entry with no date is
+  // only dropped once a bound is actually set. `date` is a date column, so the
+  // ISO strings the date inputs produce compare correctly as strings.
+  const periodLedger = ledger.filter(r => {
+    if (periodFrom && (!r.date || r.date < periodFrom)) return false;
+    if (periodTo   && (!r.date || r.date > periodTo))   return false;
+    return true;
+  });
+  const periodActive = Boolean(periodFrom || periodTo);
+  const sortedLedger = sortAsc ? periodLedger : [...periodLedger].reverse();
+
+  // Totals follow the same filtered set as the table, so the footer always
+  // describes what is on screen rather than the whole ledger.
+  const periodNet = periodLedger.reduce(
+    (s, r) => s + (r.type === 'Addition' || r.type === 'addition' ? r.amount : -r.amount), 0);
+
+  const expandedBank = expandedBankId ? banks.find(b => b.id === expandedBankId) : undefined;
+
+  function handleExportLedger(format: 'csv' | 'excel') {
+    if (!expandedBank) return;
+    const columns: ExportColumn<LedgerEntry>[] = [
+      { header: 'Date',            accessor: r => r.date || '' },
+      { header: 'Code',            accessor: r => r.code || '' },
+      { header: 'Description',     accessor: r => r.description || '' },
+      { header: 'Type',            accessor: r => (r.type === 'Addition' || r.type === 'addition' ? 'Credit' : 'Debit') },
+      // Signed, so a spreadsheet can sum the column directly.
+      { header: 'Amount',          accessor: r => (r.type === 'Addition' || r.type === 'addition' ? r.amount : -r.amount) },
+      { header: 'Running Balance', accessor: r => r.running_balance },
+    ];
+    // Name the file after the account and the period, so exports taken for
+    // different ranges do not overwrite one another in the downloads folder.
+    const slug = (s: string) => s.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const period = periodActive ? `_${periodFrom || 'start'}_to_${periodTo || 'today'}` : '';
+    exportData(
+      `bank-transactions_${slug(expandedBank.entity_name)}_${slug(expandedBank.name)}${period}`,
+      columns,
+      sortedLedger,
+      format,
+    );
+  }
 
   return (
     <div className="p-6 space-y-5">
@@ -518,12 +554,78 @@ export function BankTransactionHistory() {
                         <tr key={`ledger-${bank.id}`} className="bg-blue-50/30">
                           <td colSpan={5} className="p-0">
                             <div className="border-t border-blue-100">
+                              {/* Period filter + export. One row above the table, and
+                                  outside the loading/empty branches so the range can be
+                                  cleared even when the current one matches nothing. */}
+                              {!ledgerLoading && ledger.length > 0 && (
+                                <div
+                                  className="flex flex-wrap items-end gap-3 px-6 py-3 bg-white border-b border-blue-100"
+                                  onClick={e => e.stopPropagation()}
+                                >
+                                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                    <CalendarRange className="w-4 h-4 text-gray-400" />
+                                    Period
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">From</label>
+                                    <input
+                                      type="date"
+                                      value={periodFrom}
+                                      max={periodTo || undefined}
+                                      onChange={e => setPeriodFrom(e.target.value)}
+                                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">To</label>
+                                    <input
+                                      type="date"
+                                      value={periodTo}
+                                      min={periodFrom || undefined}
+                                      onChange={e => setPeriodTo(e.target.value)}
+                                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                  </div>
+                                  {periodActive && (
+                                    <button
+                                      onClick={() => { setPeriodFrom(''); setPeriodTo(''); }}
+                                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                    >
+                                      <X className="w-3 h-3" /> Clear
+                                    </button>
+                                  )}
+                                  <div className="ml-auto flex items-center gap-2">
+                                    <span className="text-xs text-gray-500">
+                                      {periodLedger.length} of {ledger.length} shown
+                                    </span>
+                                    <button
+                                      onClick={() => handleExportLedger('csv')}
+                                      disabled={periodLedger.length === 0}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" /> CSV
+                                    </button>
+                                    <button
+                                      onClick={() => handleExportLedger('excel')}
+                                      disabled={periodLedger.length === 0}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                      <Download className="w-3.5 h-3.5" /> Excel
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
                               {ledgerLoading ? (
                                 <div className="flex items-center justify-center py-8">
                                   <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-blue-600" />
                                 </div>
                               ) : ledger.length === 0 ? (
                                 <div className="py-6 text-center text-gray-400 text-sm">No transactions recorded for this account.</div>
+                              ) : periodLedger.length === 0 ? (
+                                <div className="py-6 text-center text-gray-400 text-sm">
+                                  No transactions in the selected period.
+                                </div>
                               ) : (
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-sm whitespace-nowrap">
@@ -600,14 +702,12 @@ export function BankTransactionHistory() {
                                     <tfoot className="bg-gray-100 border-t-2 border-gray-200 text-xs font-bold">
                                       <tr>
                                         <td colSpan={4} className="pl-12 pr-3 py-2 text-gray-500 uppercase">
-                                          {ledger.length} transaction{ledger.length !== 1 ? 's' : ''}
+                                          {periodLedger.length} transaction{periodLedger.length !== 1 ? 's' : ''}
+                                          {periodActive && <span className="normal-case font-medium text-gray-400"> in period</span>}
                                         </td>
                                         <td className="px-3 py-2 text-right font-mono text-gray-700">
-                                          Net: <span className={
-                                            ledger.reduce((s, r) => s + (r.type === 'Addition' || r.type === 'addition' ? r.amount : -r.amount), 0) >= 0
-                                              ? 'text-green-700' : 'text-red-600'
-                                          }>
-                                            {fmt(ledger.reduce((s, r) => s + (r.type === 'Addition' || r.type === 'addition' ? r.amount : -r.amount), 0))}
+                                          Net: <span className={periodNet >= 0 ? 'text-green-700' : 'text-red-600'}>
+                                            {fmt(periodNet)}
                                           </span>
                                         </td>
                                         <td className="pr-6 pl-3 py-2 text-right font-mono">
