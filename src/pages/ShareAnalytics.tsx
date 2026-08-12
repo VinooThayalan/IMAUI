@@ -353,8 +353,6 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
       const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
       const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
       const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
-      const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
-      const realizedSurplus = totalSV + totalDiv - totalPC;
       const today           = new Date().toISOString().split('T')[0];
       // Cost row
       rows.push([
@@ -1126,8 +1124,7 @@ export function ShareAnalytics() {
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
             cds_account: txn.cds_account_id ?? null,
           };
-        })
-        .filter((n: RawNote) => true);
+        });
 
       const allRaw = raw;
 

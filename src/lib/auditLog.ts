@@ -25,9 +25,13 @@ async function isAuditEnabled(): Promise<boolean> {
       .select('audit_enabled')
       .limit(1)
       .maybeSingle();
-    cachedAuditEnabled = data?.audit_enabled ?? true;
+    // Held in a local first: cachedAuditEnabled is declared `boolean | null` for
+    // the cache-miss case, and returning it directly leaks that null into the
+    // Promise<boolean> signature.
+    const enabled: boolean = data?.audit_enabled ?? true;
+    cachedAuditEnabled = enabled;
     cacheTimestamp = Date.now();
-    return cachedAuditEnabled;
+    return enabled;
   } catch {
     return true;
   }
