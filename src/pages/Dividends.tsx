@@ -63,7 +63,6 @@ const EMPTY_FORM = {
   quantity: '',
   gross_dividend_per_share: '',
   withholding_tax_rate: '10',
-  net_dividend_per_share: '',
   announcement_date: '',
   payment_date: '',
   payment_date_cse: '',
@@ -95,15 +94,16 @@ export function Dividends() {
 
   useEffect(() => { loadData(); }, []);
 
-  useEffect(() => {
-    const gross = parseFloat(formData.gross_dividend_per_share) || 0;
-    const rate = parseFloat(formData.withholding_tax_rate) || 0;
-    const net = gross * (1 - rate / 100);
-    setFormData(prev => ({
-      ...prev,
-      net_dividend_per_share: gross > 0 ? net.toFixed(4) : '',
-    }));
-  }, [formData.gross_dividend_per_share, formData.withholding_tax_rate]);
+  // Net per share is derived, never stored in form state. It used to be kept in
+  // formData as net.toFixed(4), which meant the modal's Total Net was computed
+  // from a 4dp value while handleSubmit recomputed net at full precision and
+  // saved that — so the total you approved was not the amount_net written. On
+  // 1.2345678 gross at 14% over 1,000,000 shares the two disagreed by Rs. 28.31.
+  // One value, used by the field, the preview and the payload alike.
+  const grossPerShare = parseFloat(formData.gross_dividend_per_share) || 0;
+  const whtRate = parseFloat(formData.withholding_tax_rate) || 0;
+  const netPerShare = grossPerShare * (1 - whtRate / 100);
+  const quantityNum = parseFloat(formData.quantity) || 0;
 
   async function loadData() {
     try {
@@ -159,7 +159,6 @@ export function Dividends() {
       quantity: String(d.quantity ?? ''),
       gross_dividend_per_share: String(d.gross_dividend_per_share ?? ''),
       withholding_tax_rate: String(d.withholding_tax_rate ?? '10'),
-      net_dividend_per_share: String(d.net_dividend_per_share ?? ''),
       announcement_date: d.announcement_date || '',
       payment_date: d.payment_date || '',
       payment_date_cse: d.payment_date_cse || '',
@@ -215,10 +214,11 @@ export function Dividends() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const gross = parseFloat(formData.gross_dividend_per_share) || 0;
-      const rate = parseFloat(formData.withholding_tax_rate) || 0;
-      const net = gross * (1 - rate / 100);
-      const qty = parseFloat(formData.quantity) || 0;
+      // Same derived values the form displayed — see the note by their declaration.
+      const gross = grossPerShare;
+      const rate = whtRate;
+      const net = netPerShare;
+      const qty = quantityNum;
       const selectedBank = banks.find(b => b.id === formData.selected_bank_id);
 
       // Resolve CDS: prefer entity_brokers auto-fill, fall back to manual input
@@ -337,6 +337,17 @@ export function Dividends() {
 
   const fmtRs = (v: number) =>
     `Rs. ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // Per-share values are stored at full precision, so showing them at a fixed 4dp
+  // made a row fail to reconcile against its own total: a gross of 1.2345678 read
+  // as 1.2346, which over 1,000,000 shares implies Rs. 1,234,600 against the
+  // Rs. 1,234,567.80 actually stored. Keeps the familiar 4dp for ordinary values
+  // and only widens when the extra digits are real.
+  // 8dp also keeps binary-float artifacts out of the UI: 1.2345678 * 0.86 is not
+  // exactly representable, and String() on it can surface a trailing ...0000002.
+  const perShareStr = (v: number) =>
+    v.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 8 });
+  const fmtPerShare = (v: number) => `Rs. ${perShareStr(v)}`;
 
   return (
     <div className="p-6 space-y-6">
@@ -499,9 +510,9 @@ export function Dividends() {
                     </div>
                   </td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.quantity || 0).toLocaleString()}</td>
-                  <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.gross_dividend_per_share || 0).toFixed(4)}</td>
+                  <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{fmtPerShare(d.gross_dividend_per_share || 0)}</td>
                   <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{(d.withholding_tax_rate || 0).toFixed(1)}%</td>
-                  <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">Rs. {(d.net_dividend_per_share || 0).toFixed(4)}</td>
+                  <td className="px-4 py-4 text-sm text-gray-900 text-right whitespace-nowrap">{fmtPerShare(d.net_dividend_per_share || 0)}</td>
                   <td className="px-4 py-4 text-sm text-gray-700 text-right whitespace-nowrap">{fmtRs(d.amount_gross || 0)}</td>
                   <td className="px-4 py-4 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">{fmtRs(d.amount_net || 0)}</td>
                   <td className="px-4 py-4 whitespace-nowrap">
@@ -626,11 +637,14 @@ export function Dividends() {
                     <label className="block text-sm font-semibold text-red-600 mb-1.5">
                       Gross Dividend per Share <span className="text-red-500">*</span>
                     </label>
+                    {/* step="any": the value is stored at full precision, so
+                        step="0.0001" only made the browser reject the very
+                        precision the save path accepts. */}
                     <input
                       type="number"
                       required
                       min="0"
-                      step="0.0001"
+                      step="any"
                       value={formData.gross_dividend_per_share}
                       onChange={e => setFormData({ ...formData, gross_dividend_per_share: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
@@ -663,9 +677,9 @@ export function Dividends() {
                   <div>
                     <label className="block text-sm font-semibold text-gray-500 mb-1.5">Net Dividend per Share (auto)</label>
                     <input
-                      type="number"
+                      type="text"
                       readOnly
-                      value={formData.net_dividend_per_share}
+                      value={grossPerShare > 0 ? perShareStr(netPerShare) : ''}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 cursor-not-allowed"
                       placeholder="Auto-calculated"
                     />
@@ -678,13 +692,13 @@ export function Dividends() {
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Total Gross</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">
-                        {fmtRs((parseFloat(formData.quantity) || 0) * (parseFloat(formData.gross_dividend_per_share) || 0))}
+                        {fmtRs(quantityNum * grossPerShare)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Total Net</p>
                       <p className="text-sm font-semibold text-emerald-700 mt-0.5">
-                        {fmtRs((parseFloat(formData.quantity) || 0) * (parseFloat(formData.net_dividend_per_share) || 0))}
+                        {fmtRs(quantityNum * netPerShare)}
                       </p>
                     </div>
                   </div>
