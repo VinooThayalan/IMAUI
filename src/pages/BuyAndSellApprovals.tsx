@@ -119,7 +119,13 @@ export function BuyAndSellApprovals() {
         supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date, fees, brokerage_fee, cse_fee, cds_fee, clearing_fee, sec_cess, share_transaction_levy'),
         supabase.from('entities').select('id, entity_id, name, cc_email').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
-        supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation').eq('is_active', true),
+        // No is_active filter. This list is only ever used to look up the broker on
+        // an existing note (see resolveNoteRefs), never to populate a picker, so
+        // filtering it meant a note whose broker had since been deactivated
+        // resolved to null and the screen reported "No broker email configured"
+        // even though the broker record held a perfectly good address. The other
+        // two senders (TransactionApprovals, Transactions) never filtered here.
+        supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation'),
         supabase.from('entity_brokers').select('id, entity_id, broker_id, broker_account_number, custodian_account_number'),
       ]);
       if (notesRes.error) throw notesRes.error;
@@ -196,14 +202,17 @@ export function BuyAndSellApprovals() {
     rows: Array<{ label: string; txnVal: string; noteVal: string; mismatch?: boolean }>,
   ) {
     const brokerEmail = broker?.contact_person_email;
-    if (!brokerEmail) return;
+    // Throws rather than returning quietly: the only caller reports success to the
+    // user straight afterwards, so a silent return was indistinguishable from a
+    // send.
+    if (!brokerEmail) throw new Error('No email address on file for this broker.');
 
     const fmtDate = (d?: string | null) =>
       d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
-    await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${await getAccessToken()}`,
@@ -231,7 +240,17 @@ export function BuyAndSellApprovals() {
           remarks: note.remarks || undefined,
         },
       }),
-    }).catch(err => console.error('Broker comparison email failed:', err));
+    });
+
+    // fetch only rejects on a network error, so without this a 4xx/5xx from the
+    // function -- a missing BREVO_API_KEY, an address Brevo refuses -- resolved
+    // successfully and the caller told the user the email had been sent.
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(
+        `Email service returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+      );
+    }
   }
 
   async function sendBrokerNotification(
@@ -243,9 +262,19 @@ export function BuyAndSellApprovals() {
     broker: Broker | null,
     withCcEntity: boolean,
     transaction?: Transaction | null,
-  ) {
+  ): Promise<{ sent: boolean; reason?: string }> {
+    // Reports its outcome instead of throwing. It runs after the approval has
+    // already been written, so a throw would land in the caller's catch and tell
+    // the user "Could not approve this note" about a note that was approved.
     const brokerEmail = broker?.contact_person_email;
-    if (!brokerEmail) return;
+    if (!brokerEmail) {
+      return {
+        sent: false,
+        reason: broker
+          ? `No email address on file for ${broker.broker_name}.`
+          : 'This note has no broker on record.',
+      };
+    }
     const ccEmails: string[] = [];
     if (withCcEntity && entity?.cc_email) ccEmails.push(entity.cc_email);
 
@@ -255,7 +284,7 @@ export function BuyAndSellApprovals() {
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
-    await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
+    const request: RequestInit = {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${await getAccessToken()}`,
@@ -293,7 +322,22 @@ export function BuyAndSellApprovals() {
           txn_total_amount: transaction?.total_amount != null ? fmt(transaction.total_amount) : undefined,
         },
       }),
-    }).catch(err => console.error('Email notification failed:', err));
+    };
+
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, request);
+      // fetch resolves on 4xx/5xx, so without this check a failing email service
+      // looked identical to a successful send.
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        console.error('Email notification failed:', response.status, detail);
+        return { sent: false, reason: `Email service returned ${response.status}.` };
+      }
+      return { sent: true };
+    } catch (err) {
+      console.error('Email notification failed:', err);
+      return { sent: false, reason: 'Could not reach the email service.' };
+    }
   }
 
   async function handleApprove() {
@@ -400,10 +444,18 @@ export function BuyAndSellApprovals() {
         });
       }
 
-      if (sendEmail) await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail);
+      const emailResult = sendEmail
+        ? await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail)
+        : null;
 
       await loadData();
       closeModal();
+
+      // After the close, so it is clearly a note about the email and not about the
+      // approval, which has already been written at this point.
+      if (emailResult && !emailResult.sent) {
+        alert(`Note approved, but the broker email was not sent. ${emailResult.reason ?? ''}`.trim());
+      }
     } catch (err) {
       console.error('Approve failed:', err);
       alert('Could not approve this note. Please refresh and try again.');
@@ -459,10 +511,16 @@ export function BuyAndSellApprovals() {
       });
 
       const linkedTxn = transactions.find(t => t.id === selectedNote.transaction_id) ?? null;
-      if (sendEmail) await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn);
+      const emailResult = sendEmail
+        ? await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn)
+        : null;
 
       await loadData();
       closeModal();
+
+      if (emailResult && !emailResult.sent) {
+        alert(`Note rejected, but the broker email was not sent. ${emailResult.reason ?? ''}`.trim());
+      }
     } catch (err) {
       console.error('Reject failed:', err);
       alert('Could not reject this note. Please refresh and try again.');
@@ -879,8 +937,15 @@ const displayNotes = notes.filter(n => {
         ];
 
         async function handleSendEmailFromModal() {
-          if (!broker?.contact_person_email) {
-            alert('No broker email configured for this note.');
+          // Distinguishes the two ways this can be empty. They need different
+          // fixes -- add a broker to the note, or add an address to the broker --
+          // and the old single message named neither.
+          if (!broker) {
+            alert('This note has no broker on record, so there is no address to send to.');
+            return;
+          }
+          if (!broker.contact_person_email) {
+            alert(`No email address on file for ${broker.broker_name}. Add one on the Brokers screen.`);
             return;
           }
           setIsSendingEmail(true);
@@ -890,7 +955,9 @@ const displayNotes = notes.filter(n => {
             setEmailModalNote(null);
           } catch (err) {
             console.error('Broker email failed:', err);
-            alert('Could not send the email. Please try again.');
+            // Show the real reason. This used to say "please try again" for every
+            // failure, including ones retrying cannot fix.
+            alert(`Could not send the email. ${err instanceof Error ? err.message : 'Please try again.'}`);
           } finally {
             setIsSendingEmail(false);
           }
