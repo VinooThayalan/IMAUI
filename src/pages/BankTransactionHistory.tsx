@@ -559,46 +559,74 @@ export function BankTransactionHistory() {
                                   cleared even when the current one matches nothing. */}
                               {!ledgerLoading && ledger.length > 0 && (
                                 <div
-                                  className="flex flex-wrap items-end gap-3 px-6 py-3 bg-white border-b border-blue-100"
+                                  className="flex flex-wrap items-center gap-x-4 gap-y-2 px-6 py-2.5 bg-white border-b border-blue-100"
                                   onClick={e => e.stopPropagation()}
                                 >
+                                  {/* One line: label and field sit side by side rather than
+                                      stacked, which is what let the row align on a single
+                                      baseline with the export buttons opposite.
+
+                                      htmlFor/id gives each input a real accessible name. The
+                                      labels used to be <label> elements that neither wrapped
+                                      the input nor carried htmlFor, so they were associated
+                                      with nothing: clicking them did nothing and a screen
+                                      reader announced a bare date field. The ids carry the
+                                      bank id because this block renders inside a row and
+                                      duplicate ids would point every label at the first
+                                      input on the page. */}
                                   <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                                     <CalendarRange className="w-4 h-4 text-gray-400" />
                                     Period
                                   </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">From</label>
+
+                                  <div className="flex items-center gap-2">
+                                    <label
+                                      htmlFor={`period-from-${bank.id}`}
+                                      className="text-xs font-medium text-gray-500"
+                                    >
+                                      From
+                                    </label>
                                     <input
+                                      id={`period-from-${bank.id}`}
                                       type="date"
                                       value={periodFrom}
                                       max={periodTo || undefined}
                                       onChange={e => setPeriodFrom(e.target.value)}
-                                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      className="px-2.5 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">To</label>
+                                    <label
+                                      htmlFor={`period-to-${bank.id}`}
+                                      className="text-xs font-medium text-gray-500 ml-1"
+                                    >
+                                      To
+                                    </label>
                                     <input
+                                      id={`period-to-${bank.id}`}
                                       type="date"
                                       value={periodTo}
                                       min={periodFrom || undefined}
                                       onChange={e => setPeriodTo(e.target.value)}
-                                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      className="px-2.5 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     />
+                                    {periodActive && (
+                                      <button
+                                        type="button"
+                                        onClick={() => { setPeriodFrom(''); setPeriodTo(''); }}
+                                        className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                      >
+                                        <X className="w-3 h-3" /> Clear
+                                      </button>
+                                    )}
                                   </div>
-                                  {periodActive && (
-                                    <button
-                                      onClick={() => { setPeriodFrom(''); setPeriodTo(''); }}
-                                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                                    >
-                                      <X className="w-3 h-3" /> Clear
-                                    </button>
-                                  )}
+
                                   <div className="ml-auto flex items-center gap-2">
-                                    <span className="text-xs text-gray-500">
+                                    {/* aria-live so the count is announced when the range
+                                        changes; without it the only feedback is visual. */}
+                                    <span className="text-xs text-gray-500 tabular-nums" aria-live="polite">
                                       {periodLedger.length} of {ledger.length} shown
                                     </span>
                                     <button
+                                      type="button"
                                       onClick={() => handleExportLedger('csv')}
                                       disabled={periodLedger.length === 0}
                                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -606,6 +634,7 @@ export function BankTransactionHistory() {
                                       <Download className="w-3.5 h-3.5" /> CSV
                                     </button>
                                     <button
+                                      type="button"
                                       onClick={() => handleExportLedger('excel')}
                                       disabled={periodLedger.length === 0}
                                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
