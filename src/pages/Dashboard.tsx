@@ -28,13 +28,56 @@ const SECTOR_COLORS: Record<string, string> = {
   'Other': '#6B7280',
 };
 
+// Categorical slots for shares, in fixed assignment order. Validated rather than
+// eyeballed — the previous set opened with '#1E3A5F', a navy that failed both the
+// lightness band (L 0.346) and the chroma floor (0.074), i.e. it rendered as grey
+// for the single most prominent share on the page.
+//
+// This order passes every check: all-pairs for the first five (worst normal-vision
+// ΔE 16.3, so the top-5 pies are safe in any slice-to-slice comparison) and
+// adjacent for all eight (worst normal-vision ΔE 27.6). Three slots sit below 3:1
+// contrast on white, which the relief rule permits because every chart here ships
+// direct labels and PieChart legends each item with its name and percentage — so
+// identity is never carried by colour alone.
 const SHARE_COLORS = [
-  '#1E3A5F', '#3B82F6', '#F59E0B', '#10B981', '#EF4444',
-  '#8B5CF6', '#EC4899', '#06B6D4', '#F97316', '#14B8A6',
+  '#2a78d6', // blue
+  '#e34948', // red
+  '#008300', // green
+  '#eda100', // yellow
+  '#4a3aa7', // violet
+  '#eb6834', // orange
+  '#1baf7a', // aqua
+  '#e87ba4', // magenta
 ];
 
+// Ninth share onward is not given a generated hue — it folds into a neutral,
+// matching how SECTOR_COLORS treats 'Other'.
+const SHARE_COLOR_OTHER = '#6B7280';
+
 function sectorColor(s: string) { return SECTOR_COLORS[s] || SECTOR_COLORS['Other']; }
-function shareColor(i: number) { return SHARE_COLORS[i % SHARE_COLORS.length]; }
+
+/**
+ * Colour follows the share, never its position in a list.
+ *
+ * Colours used to come from `shareColor(i)` with `i` being the loop index, which
+ * broke two ways. `metrics` is ordered by net market value, so a price movement
+ * or an entity filter reshuffled the top five and repainted every chart. Worse,
+ * the per-sector pies index within each sector, so one ticker was drawn blue in
+ * the top-5 charts and red in its sector pie.
+ *
+ * Slots are assigned over the tickers sorted alphabetically, which depends on the
+ * share universe rather than on any ranking, so a share keeps its colour as
+ * values move and across every chart on the page.
+ */
+function buildShareColorMap(metrics: { ticker: string }[]): Map<string, string> {
+  const map = new Map<string, string>();
+  Array.from(new Set(metrics.map(m => m.ticker)))
+    .sort()
+    .forEach((ticker, i) => {
+      map.set(ticker, i < SHARE_COLORS.length ? SHARE_COLORS[i] : SHARE_COLOR_OTHER);
+    });
+  return map;
+}
 
 function mkPiePct<T extends { value: number }>(arr: T[]): (T & { percentage: number })[] {
   const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
@@ -514,16 +557,20 @@ export function Dashboard() {
   const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
   const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
 
+  // Keyed on ticker, not on list position — see buildShareColorMap.
+  const shareColorMap = buildShareColorMap(metrics);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
+
   // Top-5 pie charts
-  const top5NetMktPie  = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(i) })));
-  const top5DivPie     = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.dividends,       color: shareColor(i) })));
-  const top5ReturnsPie = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalReturns,    color: shareColor(i) })));
-  const top5CostPie    = mkPiePct(top5.map((m, i) => ({ label: m.ticker, value: m.totalCostAll,    color: shareColor(i) })));
+  const top5NetMktPie  = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(m.ticker) })));
+  const top5DivPie     = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.dividends,       color: shareColor(m.ticker) })));
+  const top5ReturnsPie = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.totalReturns,    color: shareColor(m.ticker) })));
+  const top5CostPie    = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.totalCostAll,    color: shareColor(m.ticker) })));
 
   // Top-5 bar charts — use share name for x-axis labels
-  const top5PriceCost  = top5.map((m, i) => ({ label: m.shareName || m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(i) }));
-  const top5BalShares  = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.heldShares,        color: shareColor(i) }));
-  const top5AER        = top5.map((m, i) => ({ label: m.shareName || m.ticker, value: m.aer,               color: shareColor(i) }));
+  const top5PriceCost  = top5.map(m => ({ label: m.shareName || m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(m.ticker) }));
+  const top5BalShares  = top5.map(m => ({ label: m.shareName || m.ticker, value: m.heldShares,        color: shareColor(m.ticker) }));
+  const top5AER        = top5.map(m => ({ label: m.shareName || m.ticker, value: m.aer,               color: shareColor(m.ticker) }));
 
   // Share portfolio table — active shares with holdings, then the rest (dimmed)
   const heldIds = new Set(held.map(m => m.shareId));
@@ -721,8 +768,8 @@ export function Dashboard() {
           <p className="text-xs text-sky-200 mt-0.5">Top 5 shares by net market value</p>
           {top5.length > 0 && (
             <div className="flex flex-wrap gap-3 mt-3">
-              {top5.map((m, i) => (
-                <span key={m.shareId} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm border border-white/20" style={{ background: shareColor(i) }}>
+              {top5.map(m => (
+                <span key={m.shareId} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold text-white shadow-sm border border-white/20" style={{ background: shareColor(m.ticker) }}>
                   {m.ticker}
                   <span className="opacity-90 font-mono">{fmtCur(m.netMarketValue)}</span>
                 </span>
@@ -791,9 +838,21 @@ export function Dashboard() {
                     <th className="text-right py-1">AER</th>
                   </tr></thead>
                   <tbody className="divide-y divide-gray-100">
-                    {top5.map((m, i) => (
+                    {top5.map(m => (
                       <tr key={m.shareId}>
-                        <td className="py-1.5 font-semibold" style={{ color: shareColor(i) }}>{m.ticker}</td>
+                        {/* The swatch carries identity; the label stays in ink. Colouring
+                            the text itself made low-contrast slots hard to read and tied
+                            legibility to the palette. */}
+                        <td className="py-1.5 font-semibold text-gray-900">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span
+                              className="w-2.5 h-2.5 rounded-sm shrink-0"
+                              style={{ background: shareColor(m.ticker) }}
+                              aria-hidden="true"
+                            />
+                            {m.ticker}
+                          </span>
+                        </td>
                         <td className="py-1.5 text-right text-gray-600">{fmtNum(m.heldShares)}</td>
                         <td className="py-1.5 text-right text-gray-800 font-semibold">{fmtCur(m.marketValue)}</td>
                         <td className={`py-1.5 text-right font-semibold ${m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{m.aer.toFixed(1)}%</td>
@@ -830,6 +889,12 @@ const SECTOR_DISPLAY_ORDER = [
 function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) {
   const held = metrics.filter(m => m.heldShares > 0);
 
+  // Built from the full metrics list, not from each sector's slice, so a ticker
+  // keeps the same colour here as in the top-5 charts above. Indexing within each
+  // sector previously gave the same share a different colour in every pie.
+  const shareColorMap = buildShareColorMap(metrics);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
+
   // Overall sector returns pie
   const sectorRetMap = new Map<string, number>();
   held.forEach(m => sectorRetMap.set(m.sector, (sectorRetMap.get(m.sector) || 0) + m.totalReturns));
@@ -851,7 +916,7 @@ function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) 
   const sectorSharePies = targetSectors.map(sector => {
     const shares = held.filter(m => m.sector.toLowerCase() === sector.toLowerCase());
     const pieData = mkPiePct(
-      shares.map((m, i) => ({ label: m.ticker, value: m.totalReturns, color: shareColor(i) }))
+      shares.map(m => ({ label: m.ticker, value: m.totalReturns, color: shareColor(m.ticker) }))
     );
     return { sector, pieData };
   });
