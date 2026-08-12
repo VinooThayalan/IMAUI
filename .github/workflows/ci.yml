@@ -1,0 +1,42 @@
+name: CI
+
+# Runs on every push and pull request to the branches that get deployed. The point
+# is that `vite build` does no type checking, so a build could go green while tsc
+# had 31 errors — which is exactly how a temporal-dead-zone crash reached
+# production. Types are checked here, and again by `npm run build` itself.
+on:
+  push:
+    branches: [main, migrations, prod, 'fix/**']
+  pull_request:
+    branches: [main, migrations, prod]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Kept as its own step rather than relying on the one inside `npm run build`,
+      # so a failure is labelled "Typecheck" in the checks list instead of hiding
+      # inside a build log.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # Informational only. The project carries 129 pre-existing lint problems
+      # (mostly no-explicit-any); failing on them would block every PR without
+      # telling anyone anything new. Once that backlog is cleared, drop
+      # continue-on-error and this becomes a real gate.
+      - name: Lint (non-blocking)
+        run: npm run lint
+        continue-on-error: true

@@ -117,7 +117,9 @@ export function DailyPrices() {
       setFeedback(null);
 
       const newRecords = toUpsert.filter((r) => !r.id).map(({ id: _id, ...rest }) => rest);
-      const updates = toUpsert.filter((r) => r.id);
+      // Type predicate, not a plain truthiness filter: the latter narrows nothing,
+      // so `id` stayed string|undefined and every use downstream had to be widened.
+      const updates = toUpsert.filter((r): r is typeof r & { id: string } => Boolean(r.id));
 
       if (newRecords.length > 0) {
         const { data: insertedData, error } = await supabase.from('daily_share_prices').insert(newRecords).select('id');
@@ -127,11 +129,11 @@ export function DailyPrices() {
             const insertedId = insertedData[i]?.id;
             if (insertedId) {
               await logAudit({
-                userId: user.id,
+                performedBy: user?.email || 'system',
                 action: 'CREATE',
                 tableName: 'daily_share_prices',
                 recordId: insertedId,
-                newData: newRecords[i]
+                newValues: newRecords[i]
               });
             }
           }
@@ -145,12 +147,12 @@ export function DailyPrices() {
         if (error) throw error;
         if (user) {
           await logAudit({
-            userId: user.id,
+            performedBy: user?.email || 'system',
             action: 'UPDATE',
             tableName: 'daily_share_prices',
             recordId: id,
-            oldData: oldRecord,
-            newData: rest
+            oldValues: oldRecord,
+            newValues: rest
           });
         }
       }
