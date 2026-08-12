@@ -2,6 +2,18 @@ import { PieChart, TrendingUp, TrendingDown, Wallet, Percent, Download } from 'l
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
+/**
+ * supabase-js types a to-one embed as an array; PostgREST returns a single object
+ * (or null). Accept either so the code is correct whichever shape the client hands
+ * back, instead of asserting one and being wrong about the other.
+ */
+type Embedded<T> = T | T[] | null | undefined;
+
+function embeddedOne<T>(rel: Embedded<T>): T | undefined {
+  return Array.isArray(rel) ? rel[0] : rel ?? undefined;
+}
+
+
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
     const s = String(v ?? '');
@@ -237,9 +249,12 @@ export function Portfolio() {
         (sharesData || []).forEach((s: {
           id: string;
           sector?: string;
-          sector_types?: { sector_name: string } | null;
+          sector_types?: Embedded<{ sector_name: string }>;
         }) => {
-          shareSectorMap.set(s.id, s.sector_types?.sector_name || s.sector || 'Other');
+          shareSectorMap.set(
+            s.id,
+            embeddedOne(s.sector_types)?.sector_name || s.sector || 'Other',
+          );
         });
 
         const { data: entData } = await supabase.from('entities').select('id, name, current_balance');
@@ -343,12 +358,12 @@ export function Portfolio() {
         ticker: string;
         share_name: string;
         sector?: string;
-        sector_types?: { sector_name: string } | null;
+        sector_types?: Embedded<{ sector_name: string }>;
       }) => {
         shareMap.set(s.id, {
           ticker: s.ticker || '—',
           name: s.share_name || s.ticker || '—',
-          sector: s.sector_types?.sector_name || s.sector || 'Other',
+          sector: embeddedOne(s.sector_types)?.sector_name || s.sector || 'Other',
         });
       });
 
@@ -435,18 +450,19 @@ export function Portfolio() {
         transaction_type: string;
         no_of_shares: number;
         total_amount: number;
-        shares?: {
+        shares?: Embedded<{
           ticker: string;
           share_name: string;
           sector?: string;
-          sector_types?: { sector_name: string } | null;
-        } | null;
+          sector_types?: Embedded<{ sector_name: string }>;
+        }>;
       }) => {
-        if (!shareMap.has(tx.share_id) && tx.shares) {
+        const txShare = embeddedOne(tx.shares);
+        if (!shareMap.has(tx.share_id) && txShare) {
           shareMap.set(tx.share_id, {
-            ticker: tx.shares.ticker || '—',
-            name: tx.shares.share_name || tx.shares.ticker || '—',
-            sector: tx.shares.sector_types?.sector_name || tx.shares.sector || 'Other',
+            ticker: txShare.ticker || '—',
+            name: txShare.share_name || txShare.ticker || '—',
+            sector: embeddedOne(txShare.sector_types)?.sector_name || txShare.sector || 'Other',
           });
         }
 

@@ -173,6 +173,15 @@ interface ExtractedData {
   security?: string;
 }
 
+/**
+ * Keys of T whose value is a number. Used so the fee-permutation search can only
+ * ever target numeric columns: the previous `keyof ExtractedRow` allowed
+ * contract_no or security to be listed by mistake and assigned a number.
+ */
+type NumericKeyOf<T> = {
+  [K in keyof T]-?: NonNullable<T[K]> extends number ? K : never
+}[keyof T];
+
 interface ExtractedRow {
   contract_no: string;
   qty: number;
@@ -1218,7 +1227,7 @@ export function BuyAndSellNotes() {
     "clearing_fee",
   ];
 
-  const FEE_COLUMN_ORDERS: Array<Array<keyof ExtractedRow>> = [
+  const FEE_COLUMN_ORDERS: Array<Array<NumericKeyOf<ExtractedRow>>> = [
     ["brokerage", "cds_fees", "cse_fees", "sec", "stl", "clearing_fee"],
     ["brokerage", "sec", "cse_fees", "cds_fees", "stl", "clearing_fee"],
   ];
@@ -1293,12 +1302,13 @@ export function BuyAndSellNotes() {
 
   function applyFeeAssignment(
     row: ExtractedRow,
-    order: Array<keyof ExtractedRow>,
+    order: Array<NumericKeyOf<ExtractedRow>>,
     values: number[],
   ): ExtractedRow {
     const next = { ...row };
     for (let i = 0; i < order.length; i++) {
-      (next as Record<string, number>)[order[i] as string] = values[i] ?? 0;
+      // No cast needed now that order is numeric-only.
+      next[order[i]] = values[i] ?? 0;
     }
     return next;
   }
@@ -2173,7 +2183,7 @@ export function BuyAndSellNotes() {
 
       // Try to match broker from PDF header text if the transaction doesn't carry one
       const resolvedBrokerId = bestCandidate?.broker_id || (() => {
-        const pdfBroker = extracted.broker_name.toLowerCase();
+        const pdfBroker = (extracted.broker_name ?? '').toLowerCase();
         if (!pdfBroker) return null;
         const matched = brokers.find((b) => {
           const bn = b.broker_name.toLowerCase();
@@ -2700,7 +2710,7 @@ export function BuyAndSellNotes() {
 
       // Audit log for buy_sell_notes insert
       await logAudit({
-        table: 'buy_sell_notes',
+        tableName: 'buy_sell_notes',
         recordId: insertedNote?.id,
         action: 'CREATE',
         newValues: payload,
@@ -2746,7 +2756,7 @@ export function BuyAndSellNotes() {
 
       // Audit log for cash_balance_ledger insert
       await logAudit({
-        table: 'cash_balance_ledger',
+        tableName: 'cash_balance_ledger',
         recordId: insertedLedger?.id,
         action: 'CREATE',
         newValues: ledgerPayload,
@@ -2799,7 +2809,7 @@ export function BuyAndSellNotes() {
 
       // Audit log for buy_sell_notes insert
       await logAudit({
-        table: 'buy_sell_notes',
+        tableName: 'buy_sell_notes',
         recordId: insertedNote2?.id,
         action: 'CREATE',
         newValues: payload,
@@ -2892,7 +2902,7 @@ export function BuyAndSellNotes() {
 
         // Audit log for transactions insert
         await logAudit({
-          table: 'transactions',
+          tableName: 'transactions',
           recordId: insertedTxn?.id,
           action: 'CREATE',
           newValues: txnPayload,
@@ -2924,7 +2934,7 @@ export function BuyAndSellNotes() {
 
         // Audit log for buy_sell_notes insert
         await logAudit({
-          table: 'buy_sell_notes',
+          tableName: 'buy_sell_notes',
           recordId: insertedNote?.id,
           action: 'CREATE',
           newValues: notePayload,
@@ -2971,7 +2981,7 @@ export function BuyAndSellNotes() {
 
         // Audit log for cash_balance_ledger insert
         await logAudit({
-          table: 'cash_balance_ledger',
+          tableName: 'cash_balance_ledger',
           recordId: insertedLedger2?.id,
           action: 'CREATE',
           newValues: ledgerPayload2,
@@ -3073,7 +3083,7 @@ export function BuyAndSellNotes() {
 
       // Audit log for buy_sell_notes update
       await logAudit({
-        table: 'buy_sell_notes',
+        tableName: 'buy_sell_notes',
         recordId: editNote.id,
         action: 'UPDATE',
         oldValues: oldRecord,
@@ -3130,7 +3140,7 @@ export function BuyAndSellNotes() {
 
       // Audit log for buy_sell_notes delete
       await logAudit({
-        table: 'buy_sell_notes',
+        tableName: 'buy_sell_notes',
         recordId: id,
         action: 'DELETE',
         oldValues: oldNote,
@@ -3146,7 +3156,7 @@ export function BuyAndSellNotes() {
 
         // Audit log for transactions delete
         await logAudit({
-          table: 'transactions',
+          tableName: 'transactions',
           recordId: linkedTransactionId,
           action: 'DELETE',
           oldValues: oldTransaction,
@@ -3164,7 +3174,7 @@ export function BuyAndSellNotes() {
 
         // Audit log for cash_balance_ledger delete
         await logAudit({
-          table: 'cash_balance_ledger',
+          tableName: 'cash_balance_ledger',
           recordId: ledgerEntry.id,
           action: 'DELETE',
           oldValues: oldLedger,
@@ -3207,7 +3217,7 @@ export function BuyAndSellNotes() {
 
             // Audit log for cash_balance_ledger update
             await logAudit({
-              table: 'cash_balance_ledger',
+              tableName: 'cash_balance_ledger',
               recordId: entry.id,
               action: 'UPDATE',
               oldValues: oldEntryRecord,
