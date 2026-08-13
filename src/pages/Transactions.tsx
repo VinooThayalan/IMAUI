@@ -1129,7 +1129,9 @@ export function Transactions() {
 
   function handleEmailTransaction(transaction: Transaction) {
     setSelectedTransaction(transaction);
-    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    // Resolve through entity_brokers, not transactions.broker_id, which is null on
+    // every row -- see resolveTransactionBroker.
+    const { broker } = resolveTransactionBroker(transaction);
     setEmailAddress(broker?.contact_person_email || '');
     setCcAddresses([]);
     setCcInput('');
@@ -1139,7 +1141,9 @@ export function Transactions() {
 
   function handleCancelNotifyBroker(transaction: Transaction) {
     setSelectedTransaction(transaction);
-    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    // Resolve through entity_brokers, not transactions.broker_id, which is null on
+    // every row -- see resolveTransactionBroker.
+    const { broker } = resolveTransactionBroker(transaction);
     setEmailAddress(broker?.contact_person_email || '');
     const entity = entities.find(e => e.id === transaction.entity_id);
     const autoCc: string[] = [];
@@ -1254,15 +1258,28 @@ export function Transactions() {
     }
   }
 
-  function getTransactionEmailData(transaction: Transaction) {
-    const entityName = getEntityName(transaction.entity_id);
-    const share = shares.find(s => s.id === transaction.share_id);
-    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
-    const brokerageFeeType = transaction.brokerage_fee_type_id
-      ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
-      : null;
-
-    // Match entity broker by broker_id first, then fall back to CDS account number
+  /**
+   * The broker behind a transaction, as a row rather than just a name.
+   *
+   * transactions.broker_id is null on every row in production (477/477) -- the
+   * broker is recorded only through entity_brokers, so it has to be resolved
+   * through that link. The chain, widest-to-narrowest:
+   *
+   *   1. transactions.broker_id, when a row ever carries one
+   *   2. the entity_brokers row for this entity whose broker/custodian account
+   *      number matches transactions.cds_account_id
+   *   3. any entity_brokers row for this entity that names a broker
+   *
+   * This exists because the email modal used to do its own, much shorter lookup:
+   *   brokers.find(b => b.id === transaction.broker_id)
+   * With broker_id always null that returned nothing, so the modal showed the
+   * broker's name (resolved through the chain) while claiming it had no email
+   * address for it, and the "To" field stayed empty for every transaction.
+   *
+   * Both the displayed name and the email address now come from here, so they
+   * cannot disagree again.
+   */
+  function resolveTransactionBroker(transaction: Transaction) {
     const entityBroker = entityBrokers.find(eb =>
       eb.entity_id === transaction.entity_id && (
         (transaction.broker_id && eb.broker_id === transaction.broker_id) ||
@@ -1271,19 +1288,35 @@ export function Transactions() {
           eb.custodian_account_number === transaction.cds_account_id
         ))
       )
-    );
+    ) ?? null;
+
     const fallbackEntityBroker = !transaction.broker_id && !entityBroker?.broker_id
-      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
+      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id) ?? null
       : null;
 
-    // Resolve broker name: direct FK → entity_broker FK → any entity broker → broker_text fallback
-    const brokerName = transaction.broker_id
-      ? getBrokerName(transaction.broker_id)
-      : entityBroker?.broker_id
-        ? getBrokerName(entityBroker.broker_id)
-        : fallbackEntityBroker?.broker_id
-          ? getBrokerName(fallbackEntityBroker.broker_id)
-          : (entityBroker as any)?.broker_text || 'N/A';
+    const brokerId = transaction.broker_id
+      || entityBroker?.broker_id
+      || fallbackEntityBroker?.broker_id
+      || null;
+
+    return {
+      broker: brokerId ? brokers.find(b => b.id === brokerId) ?? null : null,
+      entityBroker: entityBroker ?? fallbackEntityBroker,
+    };
+  }
+
+  function getTransactionEmailData(transaction: Transaction) {
+    const entityName = getEntityName(transaction.entity_id);
+    const share = shares.find(s => s.id === transaction.share_id);
+    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
+    const brokerageFeeType = transaction.brokerage_fee_type_id
+      ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
+      : null;
+
+    const { broker: resolvedBroker, entityBroker } = resolveTransactionBroker(transaction);
+    const brokerName = resolvedBroker?.broker_name
+      || (entityBroker as { broker_text?: string } | null)?.broker_text
+      || 'N/A';
 
     return {
       entity: entityName,
@@ -2702,7 +2735,9 @@ export function Transactions() {
 
       {showEmailModal && selectedTransaction && (() => {
         const data = getTransactionEmailData(selectedTransaction);
-        const broker = selectedTransaction.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
+        // Same resolver the displayed name uses, so the address always belongs to
+        // the broker shown above it.
+        const { broker } = resolveTransactionBroker(selectedTransaction);
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2799,11 +2834,27 @@ export function Transactions() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       disabled={sendingEmail}
                     />
-                    {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
-                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-0.5 text-xs text-blue-600 hover:underline">
-                        Use {broker.broker_name}: {broker.contact_person_email}
-                      </button>
-                    )}
+                    {/* The address is prefilled on open, so this only appears if it was
+                        edited away. When there is no address to offer, say which of the
+                        two reasons applies -- the field being silently empty gave no
+                        clue whether the broker was unknown or just had no email. */}
+                    {broker?.contact_person_email
+                      ? broker.contact_person_email !== emailAddress && (
+                          <button
+                            type="button"
+                            onClick={() => setEmailAddress(broker.contact_person_email!)}
+                            className="mt-0.5 text-xs text-blue-600 hover:underline"
+                          >
+                            Use {broker.broker_name}: {broker.contact_person_email}
+                          </button>
+                        )
+                      : (
+                        <p className="mt-0.5 text-xs text-amber-600">
+                          {broker
+                            ? `No email on file for ${broker.broker_name} — add one on the Brokers screen.`
+                            : 'No broker resolved for this transaction — assign one to the entity on Brokers > Manage Entities.'}
+                        </p>
+                      )}
                   </div>
                 </div>
 
