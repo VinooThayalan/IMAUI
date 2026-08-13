@@ -111,7 +111,49 @@ function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): nu
     if (Math.abs(nr - rate) < 1e-8) return nr;
     rate = Math.max(-0.999, nr);
   }
-  return rate;
+  // Out of iterations, or the derivative went flat: the last iterate is not a
+  // solution and can be astronomically large. Say so rather than returning it.
+  return NaN;
+}
+
+/**
+ * XIRR rate as an annualised percentage, or null when there is no meaningful
+ * answer — the solver failed, or it converged on a rate that only a rounding
+ * artefact could produce. A same-week round trip annualises into the millions
+ * of percent, which is arithmetic rather than performance, and it used to
+ * overflow share_analytics_cache.aer and fail the entire cache write.
+ */
+const AER_PERCENT_LIMIT = 1_000_000;
+
+function toAerPercent(rate: number): number | null {
+  if (!isFinite(rate)) return null;
+  const percent = rate * 100;
+  return Math.abs(percent) > AER_PERCENT_LIMIT ? null : percent;
+}
+
+/**
+ * Everything an error actually carries, in one line.
+ *
+ * A Supabase/PostgREST failure is a plain object with code, details and hint
+ * alongside message, and those are the parts that identify the cause — an RLS
+ * refusal, a numeric overflow, a missing column all look alike by message. A
+ * ReferenceError, meanwhile, only makes sense with its name. Reducing either to
+ * `err.message` is how an error surfaces to a user as an unattributable fragment
+ * that cannot be traced back to the call that produced it.
+ */
+function describeDbError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown; name?: unknown };
+    const parts = [
+      typeof e.name === 'string' && e.name && e.name !== 'Error' ? e.name : null,
+      typeof e.message === 'string' ? e.message : null,
+      typeof e.code === 'string' && e.code ? `code ${e.code}` : null,
+      typeof e.details === 'string' && e.details ? e.details : null,
+      typeof e.hint === 'string' && e.hint ? `hint: ${e.hint}` : null,
+    ].filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+  }
+  return String(err);
 }
 
 // ── Core calculation ─────────────────────────────────────────────────────────
@@ -305,7 +347,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
     if (cfs.length < 2) return null;
     try {
       const rate = xirr(cfs);
-      return isFinite(rate) ? rate * 100 : null;
+      return toAerPercent(rate);
     } catch { return null; }
   })();
 
@@ -1174,7 +1216,7 @@ export function ShareAnalytics() {
           if (groupCfs.length >= 2) {
             try {
               const rate = xirr(groupCfs);
-              groupAer = isFinite(rate) ? rate * 100 : null;
+              groupAer = toAerPercent(rate);
             } catch { groupAer = null; }
           }
 
@@ -1199,17 +1241,71 @@ export function ShareAnalytics() {
           }
         }
         if (cacheRows.length > 0) {
-          const { error: delErr } = await supabase.from('share_analytics_cache').delete().neq('source_hash', '');
-          if (delErr) throw new Error(`delete: ${delErr.message}`);
-          for (let i = 0; i < cacheRows.length; i += 500) {
-            const { error: insErr } = await supabase.from('share_analytics_cache').insert(cacheRows.slice(i, i + 500));
-            if (insErr) throw new Error(`insert: ${insErr.message}`);
+          /*
+            Written one entity at a time, rather than "delete everything, then
+            insert everything".
+
+            The old shape deleted every row the caller could see and then inserted
+            the whole batch. Two ways that hurt, and there is no transaction across
+            PostgREST calls to save it:
+
+              - INSERT is gated by has_entity_access(entity_id), so a report
+                spanning an entity the user cannot write fails the batch. The
+                delete had already succeeded, so the cache was left EMPTY and every
+                later visit recomputed from scratch — worse than before the write
+                was attempted.
+              - any other single bad row (an out-of-range number, a constraint)
+                took down the whole cache the same way.
+
+            Scoping delete+insert to one entity keeps the damage local: entities
+            that can be written are cached, the rest are reported, and nobody's
+            existing cache is destroyed by a failure that belongs to someone else.
+          */
+          const byEntity = new Map<string, Record<string, unknown>[]>();
+          for (const row of cacheRows) {
+            const key = String(row.entity_id);
+            if (!byEntity.has(key)) byEntity.set(key, []);
+            byEntity.get(key)!.push(row);
+          }
+
+          const failures: string[] = [];
+          for (const [entityId, rows] of byEntity) {
+            const label = String(rows[0]?.entity_name ?? entityId);
+            try {
+              const { error: delErr } = await supabase
+                .from('share_analytics_cache')
+                .delete()
+                .eq('entity_id', entityId);
+              if (delErr) throw new Error(`delete: ${describeDbError(delErr)}`);
+
+              for (let i = 0; i < rows.length; i += 500) {
+                const { error: insErr } = await supabase
+                  .from('share_analytics_cache')
+                  .insert(rows.slice(i, i + 500));
+                if (insErr) throw new Error(`insert: ${describeDbError(insErr)}`);
+              }
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error(`[analytics cache] ${label}:`, err);
+              failures.push(`${label} — ${msg}`);
+            }
+          }
+
+          if (failures.length > 0) {
+            const cached = byEntity.size - failures.length;
+            setCacheError(
+              `${failures.length} of ${byEntity.size} entities could not be cached` +
+                (cached > 0 ? ` (${cached} cached)` : '') +
+                `: ${failures.join('; ')}`,
+            );
           }
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error('[analytics cache] write failed:', msg);
-        setCacheError(msg);
+        // Keep whatever the error actually carries. This used to reduce everything
+        // to err.message, which is how "Cache write failed: <bare message>" reached
+        // users with no code, no hint, and no clue which call produced it.
+        console.error('[analytics cache] write failed:', err);
+        setCacheError(describeDbError(err));
       }
 
     } catch (err) {
@@ -1259,7 +1355,7 @@ export function ShareAnalytics() {
     if (cfs.length < 2) return null;
     try {
       const rate = xirr(cfs);
-      return isFinite(rate) ? rate * 100 : null;
+      return toAerPercent(rate);
     } catch {
       return null;
     }
