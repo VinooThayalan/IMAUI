@@ -1294,13 +1294,40 @@ export function Transactions() {
       ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id) ?? null
       : null;
 
-    const brokerId = transaction.broker_id
-      || entityBroker?.broker_id
-      || fallbackEntityBroker?.broker_id
-      || null;
+    // Every broker assigned to this entity, deduplicated, in a stable order. An
+    // entity commonly has several (Metrocorp has 4), and the caller needs all of
+    // them rather than one.
+    const candidates = Array.from(new Set(
+      entityBrokers
+        .filter(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
+        .map(eb => eb.broker_id),
+    ))
+      .map(id => brokers.find(b => b.id === id))
+      .filter((b): b is typeof brokers[number] => Boolean(b))
+      .sort((a, b) => a.broker_name.localeCompare(b.broker_name));
+
+    // An exact match: the transaction's own FK, or the assignment whose account
+    // number matches its CDS account.
+    const exactId = transaction.broker_id || entityBroker?.broker_id || null;
+    const exact = exactId ? brokers.find(b => b.id === exactId) ?? null : null;
+
+    /*
+      `broker` is only set when the answer is unambiguous — an exact match, or a
+      single assigned broker. It is deliberately NOT the old
+      `fallbackEntityBroker` guess.
+
+      With several brokers assigned and no account number to match on, that guess
+      returned whichever happened to be first in the array. For a transaction
+      confirmation that is not a cosmetic problem: it would address a client's
+      trade details to an unrelated brokerage. Ambiguity is surfaced for the user
+      to resolve instead, via `candidates`.
+    */
+    const broker = exact ?? (candidates.length === 1 ? candidates[0] : null);
 
     return {
-      broker: brokerId ? brokers.find(b => b.id === brokerId) ?? null : null,
+      broker,
+      candidates,
+      ambiguous: !exact && candidates.length > 1,
       entityBroker: entityBroker ?? fallbackEntityBroker,
     };
   }
@@ -1313,8 +1340,12 @@ export function Transactions() {
       ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
       : null;
 
-    const { broker: resolvedBroker, entityBroker } = resolveTransactionBroker(transaction);
+    const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
+      resolveTransactionBroker(transaction);
+    // Display may name every assigned broker; addressing an email may not guess
+    // among them. Hence candidates here but only `broker` for the To field.
     const brokerName = resolvedBroker?.broker_name
+      || (brokerCandidates.length > 0 ? brokerCandidates.map(b => b.broker_name).join(', ') : null)
       || (entityBroker as { broker_text?: string } | null)?.broker_text
       || 'N/A';
 
@@ -2737,7 +2768,8 @@ export function Transactions() {
         const data = getTransactionEmailData(selectedTransaction);
         // Same resolver the displayed name uses, so the address always belongs to
         // the broker shown above it.
-        const { broker } = resolveTransactionBroker(selectedTransaction);
+        const { candidates: brokerCandidates, ambiguous: ambiguousBroker } =
+          resolveTransactionBroker(selectedTransaction);
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2834,27 +2866,71 @@ export function Transactions() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       disabled={sendingEmail}
                     />
-                    {/* The address is prefilled on open, so this only appears if it was
-                        edited away. When there is no address to offer, say which of the
-                        two reasons applies -- the field being silently empty gave no
-                        clue whether the broker was unknown or just had no email. */}
-                    {broker?.contact_person_email
-                      ? broker.contact_person_email !== emailAddress && (
-                          <button
-                            type="button"
-                            onClick={() => setEmailAddress(broker.contact_person_email!)}
-                            className="mt-0.5 text-xs text-blue-600 hover:underline"
-                          >
-                            Use {broker.broker_name}: {broker.contact_person_email}
-                          </button>
-                        )
-                      : (
-                        <p className="mt-0.5 text-xs text-amber-600">
-                          {broker
-                            ? `No email on file for ${broker.broker_name} — add one on the Brokers screen.`
-                            : 'No broker resolved for this transaction — assign one to the entity on Brokers > Manage Entities.'}
-                        </p>
-                      )}
+                    {/* Every broker assigned to this entity, each usable as the
+                        recipient or addable to CC — so several brokers can be
+                        emailed without typing addresses by hand.
+
+                        When more than one is assigned and none matches the
+                        transaction's CDS account, nothing is prefilled on purpose:
+                        guessing would address a client's trade details to an
+                        unrelated brokerage. */}
+                    {brokerCandidates.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {ambiguousBroker && (
+                          <p className="text-xs text-amber-600">
+                            {brokerCandidates.length} brokers are assigned to this entity and none matches
+                            this transaction&apos;s CDS account — pick the recipient.
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          {brokerCandidates.map(b => (
+                            <span key={b.id} className="inline-flex items-center gap-1.5 text-xs">
+                              {b.contact_person_email ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEmailAddress(b.contact_person_email!)}
+                                    disabled={sendingEmail || b.contact_person_email === emailAddress}
+                                    className="text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
+                                  >
+                                    {b.contact_person_email === emailAddress ? '✓ ' : ''}
+                                    {b.broker_name}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const addr = b.contact_person_email!;
+                                      if (addr !== emailAddress && !ccAddresses.includes(addr)) {
+                                        setCcAddresses([...ccAddresses, addr]);
+                                      }
+                                    }}
+                                    disabled={
+                                      sendingEmail
+                                      || b.contact_person_email === emailAddress
+                                      || ccAddresses.includes(b.contact_person_email)
+                                    }
+                                    className="text-gray-400 hover:text-blue-600 disabled:text-gray-300 disabled:cursor-default"
+                                    title={`Add ${b.contact_person_email} to CC`}
+                                  >
+                                    +CC
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-amber-600" title="No email on file for this broker">
+                                  {b.broker_name} (no email)
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {brokerCandidates.length === 0 && (
+                      <p className="mt-0.5 text-xs text-amber-600">
+                        No broker assigned to this entity — assign one on Brokers &gt; Manage Entities.
+                      </p>
+                    )}
                   </div>
                 </div>
 
