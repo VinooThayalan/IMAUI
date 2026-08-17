@@ -1,6 +1,7 @@
 import { PieChart, TrendingUp, TrendingDown, Wallet, Percent, Download } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 
 /**
  * supabase-js types a to-one embed as an array; PostgREST returns a single object
@@ -55,28 +56,19 @@ interface PerformerRow {
   percentage: number;
 }
 
-const SECTOR_BAR_COLORS: Record<string, string> = {
-  'Banking': 'bg-blue-600',
-  'Diversified Financials': 'bg-green-600',
-  'Telecommunications': 'bg-yellow-600',
-  'Telecommunication': 'bg-yellow-600',
-  'Hotels': 'bg-purple-600',
-  'Industries': 'bg-pink-600',
-  'Manufacturing': 'bg-gray-600',
-  'Power & Energy': 'bg-orange-600',
-  'Energy': 'bg-orange-600',
-  'Beverages Food & Tobacco': 'bg-teal-600',
-  'Insurance': 'bg-indigo-600',
-  'Other': 'bg-slate-600',
-};
-
-const FALLBACK_COLORS = [
-  'bg-blue-600', 'bg-green-600', 'bg-yellow-600', 'bg-red-600',
-  'bg-gray-600', 'bg-orange-600', 'bg-teal-600', 'bg-purple-600',
-];
-
-function sectorBarColor(sector: string, index: number): string {
-  return SECTOR_BAR_COLORS[sector] || FALLBACK_COLORS[index % FALLBACK_COLORS.length];
+/**
+ * Paint the sector rows from the shared chart palette, so a sector reads the same
+ * here as it does on the dashboard.
+ *
+ * Replaces a sector-name -> Tailwind-class table plus an index-keyed fallback.
+ * Sector names are user data, maintained on the Sector Types screen and never
+ * seeded, so the table only ever matched the handful of names its author wrote
+ * down; everything else landed on the fallback list, which itself contained two
+ * greys. The rows are also sorted by value, so the fallback's index key repainted
+ * the list whenever a price moved.
+ */
+function sectorBarColors(sectors: string[]): Map<string, string> {
+  return buildSectorColorMap(sectors.map(sector => ({ sector })));
 }
 
 function fmtSignedCurrency(value: number): string {
@@ -166,10 +158,11 @@ export function Portfolio() {
               if (c.label === 'percentChange') percentChange = Number(c.value) || 0;
               if (c.label === 'cashBalance') cashBalance = Number(c.value) || 0;
             } else if (c.section === 'sector') {
+              // Colour is filled in below, once every sector name is known.
               sectors.push({
                 sector: c.label, value: Number(c.value) || 0,
                 percentage: Number(c.percentage) || 0,
-                color: sectorBarColor(c.label, c.sort_order),
+                color: CHART_COLOR_FALLBACK,
               });
             } else if (c.section === 'entity') {
               entities_.push({
@@ -188,8 +181,12 @@ export function Portfolio() {
             }
           }
 
+          const cachedSectorColors = sectorBarColors(sectors.map(s => s.sector));
           setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
-          setSectorAllocation(sectors);
+          setSectorAllocation(sectors.map(s => ({
+            ...s,
+            color: cachedSectorColors.get(s.sector) ?? CHART_COLOR_FALLBACK,
+          })));
           setEntityBreakdown(entities_);
           setTopPerformers(tops);
           setBottomPerformers(bottoms);
@@ -284,11 +281,12 @@ export function Portfolio() {
         const percentChange = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
         setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
 
+        const analyticsSectorColors = sectorBarColors(Array.from(sectorMap.keys()));
         const sectors: SectorRow[] = Array.from(sectorMap.entries())
-          .map(([sector, value], index) => ({
+          .map(([sector, value]) => ({
             sector, value,
             percentage: totalValue > 0 ? (value / totalValue) * 100 : 0,
-            color: sectorBarColor(sector, index),
+            color: analyticsSectorColors.get(sector) ?? CHART_COLOR_FALLBACK,
           }))
           .sort((a, b) => b.value - a.value);
         setSectorAllocation(sectors);
@@ -513,12 +511,13 @@ export function Portfolio() {
         [...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3)
       );
 
+      const liveSectorColors = sectorBarColors(Array.from(sectorMap.keys()));
       const sectors: SectorRow[] = Array.from(sectorMap.entries())
-        .map(([sector, value], index) => ({
+        .map(([sector, value]) => ({
           sector,
           value,
           percentage: totalValue > 0 ? (value / totalValue) * 100 : 0,
-          color: sectorBarColor(sector, index),
+          color: liveSectorColors.get(sector) ?? CHART_COLOR_FALLBACK,
         }))
         .sort((a, b) => b.value - a.value);
       setSectorAllocation(sectors);
@@ -728,7 +727,7 @@ export function Portfolio() {
                 <div key={sector.sector} className="space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className={`w-3 h-3 rounded-full ${sector.color}`} />
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sector.color }} />
                       <span className="text-sm font-medium text-gray-900">{sector.sector}</span>
                     </div>
                     <div className="text-right">
@@ -740,8 +739,8 @@ export function Portfolio() {
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div
-                      className={`${sector.color} h-2 rounded-full transition-all duration-300`}
-                      style={{ width: `${sector.percentage}%` }}
+                      className="h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${sector.percentage}%`, backgroundColor: sector.color }}
                     />
                   </div>
                 </div>
