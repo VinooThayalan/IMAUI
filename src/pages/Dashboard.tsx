@@ -485,9 +485,18 @@ export function Dashboard() {
   // top-5 pies came out mostly grey.
   const shareColorMap = buildShareColorMap(held);
   const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
-  // Sectors stay keyed off all of `metrics`: the portfolio table below lists
-  // sold-out shares too, and each row is tinted by its sector.
-  const sectorColorMap = buildSectorColorMap(metrics);
+
+  // Sectors are keyed off `shares`, not `metrics`. `metrics` is built from
+  // `holdMap`, so it only covers shares that have a transaction or an opening
+  // balance — the portfolio table below lists every active share, including ones
+  // that have never traded, and those would miss the map and come out grey.
+  // `shares` is the safe superset: `metrics` is derived from it and drops any
+  // share it cannot find there, so it can never hold a sector `shares` lacks.
+  //
+  // Both functions are handed to Sections 5 and 6 rather than rebuilt there. A
+  // section that derives its own map from a narrower list assigns different slots
+  // and paints the same sector two colours on one page.
+  const sectorColorMap = buildSectorColorMap(shares);
   const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Top 5 contributors by net market value (held > 0)
@@ -819,10 +828,10 @@ export function Dashboard() {
       </div>
 
       {/* ── Section 5: Total Returns by Sector ────────────────────────────── */}
-      <Section5TotalReturnsBySector metrics={metrics} />
+      <Section5TotalReturnsBySector metrics={metrics} shareColor={shareColor} sectorColor={sectorColor} />
 
       {/* ── Section 6: Share Name Cards ───────────────────────────────────── */}
-      <Section6ShareCards metrics={metrics} entityName={selectedEntityName} />
+      <Section6ShareCards metrics={metrics} entityName={selectedEntityName} sectorColor={sectorColor} />
 
     </div>
   );
@@ -838,16 +847,16 @@ const SECTOR_DISPLAY_ORDER = [
   'Industries',
 ];
 
-function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) {
+function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
+  metrics: ShareMetrics[];
+  shareColor: (ticker: string) => string;
+  sectorColor: (sector: string) => string;
+}) {
   const held = metrics.filter(m => m.heldShares > 0);
 
-  // Built from every held share, not from each sector's slice, so a ticker keeps
-  // the same colour here as in the top-5 charts above. Indexing within each
-  // sector previously gave the same share a different colour in every pie.
-  const shareColorMap = buildShareColorMap(held);
-  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
-  const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
+  // Colours come from the parent, so a ticker keeps the same colour here as in
+  // the top-5 charts above. Deriving them per sector slice previously gave the
+  // same share a different colour in every pie.
 
   // Overall sector returns pie
   const sectorRetMap = new Map<string, number>();
@@ -915,13 +924,12 @@ function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) 
 
 // ── Section 6 component ───────────────────────────────────────────────────────
 
-function Section6ShareCards({ metrics, entityName }: { metrics: ShareMetrics[]; entityName: string }) {
+function Section6ShareCards({ metrics, entityName, sectorColor }: {
+  metrics: ShareMetrics[];
+  entityName: string;
+  sectorColor: (sector: string) => string;
+}) {
   const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
-
-  // From the unsorted metrics, so the colour does not follow the market-value
-  // ordering applied just below.
-  const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Shares ordered descending by total market value
   const allMetrics = [...metrics].sort((a, b) => b.marketValue - a.marketValue);
