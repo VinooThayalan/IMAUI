@@ -2,109 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
-
-// ── Color palettes ────────────────────────────────────────────────────────────
-
-// Sector slots, in fixed assignment order.
-//
-// This replaces a hard-coded sector-name -> hex lookup. Sector names are user
-// data — they come from sector_types.sector_name, maintained on the Sector Types
-// screen, and no migration seeds them. So the old table could only ever colour
-// the names its author happened to write down: the live data uses GICS names
-// (Consumer Discretionary, Consumer Staples, Utilities, Industrials, Materials),
-// none of which were keys, so all of them fell through to the '#6B7280' 'Other'
-// grey. Hence a legend where most rows were grey. Adding more names would not
-// have fixed it — the next sector anyone creates would go grey too.
-//
-// 16 slots, ordered so that every adjacent pair clears the gates: worst adjacent
-// CVD ΔE 12.9 (protan, target >= 8), worst normal-vision ΔE 16.4 (floor 15), all
-// 16 inside the lightness band and above the chroma floor. Three sit below 3:1
-// contrast on white, which the relief rule allows because PieChart legends every
-// item with its name and value.
-const SECTOR_COLORS = [
-  '#15803d', '#eda100', '#0369a1', '#b45309',
-  '#2a78d6', '#eb6834', '#b91c6b', '#e87ba4',
-  '#a16207', '#0891b2', '#4a3aa7', '#e34948',
-  '#9a3412', '#1baf7a', '#6d28d9', '#008300',
-];
-
-// 17th sector onward folds into a neutral rather than getting a generated hue.
-const SECTOR_COLOR_OTHER = '#6B7280';
-
-// The two series of the price-vs-cost chart. Was '#1E3A5F' / '#F59E0B', where the
-// navy failed the lightness band and the chroma floor exactly as it did in the
-// share palette. Blue/orange is the canonical two-series pair and passes every
-// check outright, contrast included (worst normal-vision ΔE 33.6, CVD 24.7).
-// Deliberately not red — red is reserved for status and would read as a verdict
-// on cost rather than as a second series.
-const PRICE_SERIES_COLOR = '#2a78d6';
-const COST_SERIES_COLOR  = '#eb6834';
-
-// Categorical slots for shares, in fixed assignment order. Validated rather than
-// eyeballed — the previous set opened with '#1E3A5F', a navy that failed both the
-// lightness band (L 0.346) and the chroma floor (0.074), i.e. it rendered as grey
-// for the single most prominent share on the page.
-//
-// This order passes every check: all-pairs for the first five (worst normal-vision
-// ΔE 16.3, so the top-5 pies are safe in any slice-to-slice comparison) and
-// adjacent for all eight (worst normal-vision ΔE 27.6). Three slots sit below 3:1
-// contrast on white, which the relief rule permits because every chart here ships
-// direct labels and PieChart legends each item with its name and percentage — so
-// identity is never carried by colour alone.
-const SHARE_COLORS = [
-  '#2a78d6', // blue
-  '#e34948', // red
-  '#008300', // green
-  '#eda100', // yellow
-  '#4a3aa7', // violet
-  '#eb6834', // orange
-  '#1baf7a', // aqua
-  '#e87ba4', // magenta
-];
-
-// Ninth share onward is not given a generated hue — it folds into a neutral,
-// matching how SECTOR_COLORS treats 'Other'.
-const SHARE_COLOR_OTHER = '#6B7280';
-
-/**
- * Every sector present gets its own colour, assigned over the sector names sorted
- * alphabetically so it depends on the sector universe rather than on the order
- * rows happen to arrive in — a sector keeps its colour as values move and across
- * every chart on the page. Built from the full metrics list by both callers, for
- * the same reason as buildShareColorMap.
- */
-function buildSectorColorMap(metrics: { sector: string }[]): Map<string, string> {
-  const map = new Map<string, string>();
-  Array.from(new Set(metrics.map(m => m.sector)))
-    .sort()
-    .forEach((sector, i) => {
-      map.set(sector, i < SECTOR_COLORS.length ? SECTOR_COLORS[i] : SECTOR_COLOR_OTHER);
-    });
-  return map;
-}
-
-/**
- * Colour follows the share, never its position in a list.
- *
- * Colours used to come from `shareColor(i)` with `i` being the loop index, which
- * broke two ways. `metrics` is ordered by net market value, so a price movement
- * or an entity filter reshuffled the top five and repainted every chart. Worse,
- * the per-sector pies index within each sector, so one ticker was drawn blue in
- * the top-5 charts and red in its sector pie.
- *
- * Slots are assigned over the tickers sorted alphabetically, which depends on the
- * share universe rather than on any ranking, so a share keeps its colour as
- * values move and across every chart on the page.
- */
-function buildShareColorMap(metrics: { ticker: string }[]): Map<string, string> {
-  const map = new Map<string, string>();
-  Array.from(new Set(metrics.map(m => m.ticker)))
-    .sort()
-    .forEach((ticker, i) => {
-      map.set(ticker, i < SHARE_COLORS.length ? SHARE_COLORS[i] : SHARE_COLOR_OTHER);
-    });
-  return map;
-}
+import {
+  CHART_COLOR_FALLBACK,
+  COST_SERIES_COLOR,
+  PRICE_SERIES_COLOR,
+  buildSectorColorMap,
+  buildShareColorMap,
+} from '../lib/chartColors';
 
 function mkPiePct<T extends { value: number }>(arr: T[]): (T & { percentage: number })[] {
   const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
@@ -558,27 +462,36 @@ export function Dashboard() {
 
   // ── Derived data ─────────────────────────────────────────────────────────────
 
+  // KPI aggregates (all shares with holdings)
+  const held = metrics.filter(m => m.heldShares > 0);
+
   // Keyed on ticker / sector name, not on list position — see the build helpers.
   //
   // Declared here, above every use. These are `const` arrow functions, so a
   // reference before this point is a temporal-dead-zone throw, not undefined —
   // "Cannot access 'sectorColor' before initialization", which took the whole
-  // page down. They only need `metrics`, so this is the earliest correct spot.
+  // page down. They only need `metrics` and `held`, so this is the earliest
+  // correct spot.
   //
   // Worth knowing why the compiler stayed quiet: the earlier uses were inside
   // `.map()` callbacks, and TypeScript will not flag use-before-declaration
   // through a function boundary because it cannot know when the function runs.
   // `.map` runs immediately, so it threw on first render.
-  const shareColorMap = buildShareColorMap(metrics);
-  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
+  //
+  // Shares are keyed off `held`, not off all of `metrics`. Every chart that
+  // colours by share plots held shares only, and `metrics` carries the whole
+  // universe including shares long since sold — feeding it the full list pushed
+  // most of the plotted shares past the end of the palette, which is why the
+  // top-5 pies came out mostly grey.
+  const shareColorMap = buildShareColorMap(held);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
+  // Sectors stay keyed off all of `metrics`: the portfolio table below lists
+  // sold-out shares too, and each row is tinted by its sector.
   const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? SECTOR_COLOR_OTHER;
+  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Top 5 contributors by net market value (held > 0)
-  const top5 = metrics.filter(m => m.heldShares > 0).slice(0, 5);
-
-  // KPI aggregates (all shares with holdings)
-  const held = metrics.filter(m => m.heldShares > 0);
+  const top5 = held.slice(0, 5);
   const totalReturnsSinceInception = held.reduce((s, m) => s + m.totalReturns, 0);
   const totalReturnsBalShares      = held.reduce((s, m) => s + m.netMarketValue, 0);
   const totalDividendsSinceInc     = held.reduce((s, m) => s + m.dividends, 0);
@@ -928,13 +841,13 @@ const SECTOR_DISPLAY_ORDER = [
 function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) {
   const held = metrics.filter(m => m.heldShares > 0);
 
-  // Built from the full metrics list, not from each sector's slice, so a ticker
-  // keeps the same colour here as in the top-5 charts above. Indexing within each
+  // Built from every held share, not from each sector's slice, so a ticker keeps
+  // the same colour here as in the top-5 charts above. Indexing within each
   // sector previously gave the same share a different colour in every pie.
-  const shareColorMap = buildShareColorMap(metrics);
-  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? SHARE_COLOR_OTHER;
+  const shareColorMap = buildShareColorMap(held);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
   const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? SECTOR_COLOR_OTHER;
+  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Overall sector returns pie
   const sectorRetMap = new Map<string, number>();
@@ -1008,7 +921,7 @@ function Section6ShareCards({ metrics, entityName }: { metrics: ShareMetrics[]; 
   // From the unsorted metrics, so the colour does not follow the market-value
   // ordering applied just below.
   const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? SECTOR_COLOR_OTHER;
+  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Shares ordered descending by total market value
   const allMetrics = [...metrics].sort((a, b) => b.marketValue - a.marketValue);
