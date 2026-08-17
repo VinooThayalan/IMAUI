@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { PieChart } from './PieChart';
+import { CHART_COLOR_FALLBACK, buildShareColorMap } from '../lib/chartColors';
 
 interface ShareData {
   ticker: string;
@@ -9,19 +10,6 @@ interface ShareData {
   totalReturns: number;
   totalCost: number;
 }
-
-const SHARE_COLORS = [
-  '#1E293B',
-  '#3B82F6',
-  '#F59E0B',
-  '#10B981',
-  '#EF4444',
-  '#8B5CF6',
-  '#EC4899',
-  '#06B6D4',
-  '#F97316',
-  '#14B8A6'
-];
 
 function formatCurrency(value: number): string {
   if (value >= 1_000_000_000) {
@@ -136,10 +124,16 @@ export function MainContributors() {
     );
   }
 
-  const netMarketData = shareData.map((d, i) => ({
+  // Colour follows the ticker, not its rank: `shareData` is ordered by net market
+  // value, so keying off the loop index repainted every chart whenever a price
+  // moved, and gave one share four different colours across the four pies.
+  const shareColorMap = buildShareColorMap(shareData);
+  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
+
+  const netMarketData = shareData.map(d => ({
     label: d.ticker,
     value: d.netMarketValue,
-    color: SHARE_COLORS[i % SHARE_COLORS.length],
+    color: shareColor(d.ticker),
     percentage: 0
   }));
 
@@ -148,10 +142,10 @@ export function MainContributors() {
     d.percentage = totalNetMarket > 0 ? (d.value / totalNetMarket) * 100 : 0;
   });
 
-  const dividendsData = shareData.map((d, i) => ({
+  const dividendsData = shareData.map(d => ({
     label: d.ticker,
     value: d.totalDividends,
-    color: SHARE_COLORS[i % SHARE_COLORS.length],
+    color: shareColor(d.ticker),
     percentage: 0
   }));
 
@@ -160,10 +154,10 @@ export function MainContributors() {
     d.percentage = totalDividends > 0 ? (d.value / totalDividends) * 100 : 0;
   });
 
-  const returnsData = shareData.map((d, i) => ({
+  const returnsData = shareData.map(d => ({
     label: d.ticker,
     value: d.totalReturns,
-    color: SHARE_COLORS[i % SHARE_COLORS.length],
+    color: shareColor(d.ticker),
     percentage: 0
   }));
 
@@ -172,10 +166,10 @@ export function MainContributors() {
     d.percentage = totalReturns > 0 ? (d.value / totalReturns) * 100 : 0;
   });
 
-  const costData = shareData.map((d, i) => ({
+  const costData = shareData.map(d => ({
     label: d.ticker,
     value: d.totalCost,
-    color: SHARE_COLORS[i % SHARE_COLORS.length],
+    color: shareColor(d.ticker),
     percentage: 0
   }));
 

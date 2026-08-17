@@ -1,35 +1,13 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { PieChart } from './PieChart';
+import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 
 interface SectorData {
   sector: string;
   totalReturns: number;
   totalDividends: number;
   marketValue: number;
-}
-
-const SECTOR_COLORS: Record<string, string> = {
-  'Banking': '#3B82F6',
-  'Diversified Financials': '#10B981',
-  'Hotels': '#F59E0B',
-  'Industries': '#EC4899',
-  'Construction Materials': '#8B5CF6',
-  'Automobile Components': '#EF4444',
-  'Telecommunication': '#06B6D4',
-  'Manufacturing': '#F97316',
-  'Technology': '#6366F1',
-  'Healthcare': '#14B8A6',
-  'Energy': '#F43F5E',
-  'Consumer Goods': '#84CC16',
-  'Retail': '#A855F7',
-  'Insurance': '#0EA5E9',
-  'Real Estate': '#22C55E',
-  'Other': '#6B7280'
-};
-
-function getColorForSector(sector: string): string {
-  return SECTOR_COLORS[sector] || SECTOR_COLORS['Other'];
 }
 
 export function SectorAnalytics() {
@@ -142,10 +120,18 @@ export function SectorAnalytics() {
     );
   }
 
+  // This used to be a sector-name -> hex lookup. Sector names are user data, kept
+  // on the Sector Types screen and never seeded, so the table could only colour
+  // the names its author happened to write down — the live GICS names matched
+  // nothing and every slice fell through to grey. Assigning slots over the
+  // sectors actually present colours all of them, whatever they are called.
+  const sectorColorMap = buildSectorColorMap(sectorData);
+  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
+
   const totalReturnsData = sectorData.map(d => ({
     label: d.sector,
     value: d.totalReturns,
-    color: getColorForSector(d.sector),
+    color: sectorColor(d.sector),
     percentage: 0
   }));
 
@@ -157,7 +143,7 @@ export function SectorAnalytics() {
   const totalDividendsData = sectorData.map(d => ({
     label: d.sector,
     value: d.totalDividends,
-    color: getColorForSector(d.sector),
+    color: sectorColor(d.sector),
     percentage: 0
   }));
 
@@ -169,7 +155,7 @@ export function SectorAnalytics() {
   const marketValueData = sectorData.map(d => ({
     label: d.sector,
     value: d.marketValue,
-    color: getColorForSector(d.sector),
+    color: sectorColor(d.sector),
     percentage: 0
   }));
 

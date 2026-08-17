@@ -213,6 +213,16 @@ interface ManualRow {
   no_of_shares: string;
   settlement_date: string;
   total_cost: string;
+  /**
+   * The chosen broker's brokers.id. Kept separate from the CDS account, which is
+   * an account number rather than an identity.
+   *
+   * This field is why transactions.broker_id was null on all 477 production rows:
+   * manual entry only ever captured free text, which went to cds_account_id and to
+   * the note's broker text column. Nothing set the foreign key, so every downstream
+   * broker lookup had to be inferred through entity_brokers.
+   */
+  broker_id: string;
   broker_cds_account: string;
 }
 
@@ -247,6 +257,7 @@ function emptyManualRow(): ManualRow {
     no_of_shares: "",
     settlement_date: new Date().toISOString().split("T")[0],
     total_cost: "",
+    broker_id: "",
     broker_cds_account: "",
   };
 }
@@ -2840,6 +2851,71 @@ export function BuyAndSellNotes() {
     );
   }
 
+  /**
+   * Brokers offered for a row, narrowed to those assigned to the chosen entity.
+   *
+   * entity_brokers is the entity-to-broker link, so it is the correct source: a
+   * row should not be able to name a broker the entity does not deal with. With no
+   * entity picked yet, or none assigned, every broker is offered rather than an
+   * empty dropdown that looks broken -- the UI says which case applies.
+   */
+  function brokersForEntity(entityId: string): Broker[] {
+    if (!entityId) return brokers;
+    const assigned = Array.from(new Set(
+      entityBrokers.filter((eb) => eb.entity_id === entityId && eb.broker_id)
+        .map((eb) => eb.broker_id),
+    ));
+    if (assigned.length === 0) return brokers;
+    return brokers.filter((b) => assigned.includes(b.id));
+  }
+
+  /**
+   * Picking a broker also fills the CDS account from that entity-broker link, when
+   * the link records one. That is the number the transaction's cds_account_id is
+   * matched against later, so capturing it here is what lets a broker be resolved
+   * exactly rather than guessed among an entity's several brokers.
+   *
+   * An account number already typed by hand is left alone.
+   */
+  /**
+   * Changing the entity drops a broker that the new entity does not deal with.
+   *
+   * Without this the select falls back to showing "Select broker..." — because the
+   * held id is no longer among the options — while row.broker_id still carries the
+   * previous entity's broker, and Save All would write it. A silently wrong
+   * foreign key is worse than an empty one.
+   */
+  function selectManualEntity(idx: number, entityId: string) {
+    setManualRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const stillAssigned =
+          r.broker_id &&
+          entityBrokers.some((eb) => eb.entity_id === entityId && eb.broker_id === r.broker_id);
+        return stillAssigned
+          ? { ...r, entity_id: entityId }
+          : { ...r, entity_id: entityId, broker_id: "", broker_cds_account: "" };
+      }),
+    );
+  }
+
+  function selectManualBroker(idx: number, brokerId: string) {
+    setManualRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const link = entityBrokers.find(
+          (eb) => eb.entity_id === r.entity_id && eb.broker_id === brokerId,
+        );
+        const account = link?.broker_account_number || link?.custodian_account_number || "";
+        return {
+          ...r,
+          broker_id: brokerId,
+          broker_cds_account: r.broker_cds_account || account,
+        };
+      }),
+    );
+  }
+
   function addManualRow() {
     setManualRows((prev) => [...prev, emptyManualRow()]);
   }
@@ -2890,6 +2966,10 @@ export function BuyAndSellNotes() {
           net_price_per_share: pricePerShare,
           total_amount: totalCost,
           approval_status: "MANUAL_APPROVED",
+          // The foreign key, at last. Without it every later broker lookup had to
+          // be inferred through entity_brokers, and with several brokers on one
+          // entity that inference is ambiguous.
+          broker_id: row.broker_id || null,
           cds_account_id: row.broker_cds_account || null,
         };
         const { data: insertedTxn, error: txnError } = await supabase
@@ -2915,7 +2995,12 @@ export function BuyAndSellNotes() {
           transaction_id: insertedTxn!.id,
           note_type: row.note_type,
           note_number: `MAN-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${String(Date.now()).slice(-5)}`,
-          broker: row.broker_cds_account || "Manual Entry",
+          // The note's broker column is display text; name the chosen broker rather
+          // than echoing an account number.
+          broker:
+            brokers.find((b) => b.id === row.broker_id)?.broker_name
+            || row.broker_cds_account
+            || "Manual Entry",
           settlement_date: row.settlement_date,
           transaction_date: row.settlement_date,
           trade_date: row.settlement_date,
@@ -4955,13 +5040,7 @@ export function BuyAndSellNotes() {
                           <td className="px-1 py-1">
                             <select
                               value={row.entity_id}
-                              onChange={(e) =>
-                                updateManualRow(
-                                  idx,
-                                  "entity_id",
-                                  e.target.value,
-                                )
-                              }
+                              onChange={(e) => selectManualEntity(idx, e.target.value)}
                               className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
                             >
                               <option value="">Select entity...</option>
@@ -5065,19 +5144,55 @@ export function BuyAndSellNotes() {
 
                           {/* Broker / CDS account */}
                           <td className="px-1 py-1">
-                            <input
-                              type="text"
-                              value={row.broker_cds_account}
-                              onChange={(e) =>
-                                updateManualRow(
-                                  idx,
-                                  "broker_cds_account",
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Broker or CDS account no."
-                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                            />
+                            {/* A dropdown rather than free text, so the row records a
+                                real brokers.id. The CDS account stays as its own
+                                input because it is an account number, not an
+                                identity -- picking a broker fills it in from the
+                                entity-broker link when that link has one. */}
+                            {(() => {
+                              const options = brokersForEntity(row.entity_id);
+                              const assignedCount = row.entity_id
+                                ? new Set(
+                                    entityBrokers
+                                      .filter((eb) => eb.entity_id === row.entity_id && eb.broker_id)
+                                      .map((eb) => eb.broker_id),
+                                  ).size
+                                : 0;
+                              return (
+                                <div className="space-y-1">
+                                  <select
+                                    value={row.broker_id}
+                                    onChange={(e) => selectManualBroker(idx, e.target.value)}
+                                    className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  >
+                                    <option value="">Select broker...</option>
+                                    {options.map((b) => (
+                                      <option key={b.id} value={b.id}>
+                                        {b.broker_name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {row.entity_id && assignedCount === 0 && (
+                                    <p className="text-[10px] leading-tight text-amber-600">
+                                      No brokers assigned to this entity — showing all.
+                                    </p>
+                                  )}
+                                  <input
+                                    type="text"
+                                    value={row.broker_cds_account}
+                                    onChange={(e) =>
+                                      updateManualRow(
+                                        idx,
+                                        "broker_cds_account",
+                                        e.target.value,
+                                      )
+                                    }
+                                    placeholder="CDS account no."
+                                    className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  />
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           {/* Delete */}
