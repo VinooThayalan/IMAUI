@@ -1,0 +1,19 @@
+# Shell scripts must be checked out with LF, on every platform.
+#
+# The blobs in this repo are LF. The problem is checkout: with core.autocrlf=true
+# (the Windows default, and what this project's Windows clones use) git smudges
+# them to CRLF on the way out, and that breaks
+# scripts/push-migrations-selfhosted.sh in a way that is not obvious from reading
+# it. Bash matches a quoted here-doc terminator literally, so `SQL\r` does not
+# close a block opened with <<'SQL': the here-doc runs to end of file, swallowing
+# the rest of the script. The migration runner then feeds its own source to psql
+# instead of the history-table DDL, reports "FATAL: could not create history
+# table", and exits before applying anything.
+#
+# --dry-run skips that here-doc, so the script looks healthy right up until the
+# moment it is used for real.
+#
+# eol=lf overrides autocrlf per file, so a Windows checkout gets LF here while
+# everything else keeps the existing behaviour. Deliberately narrow: a repo-wide
+# `* text=auto` would renormalise every file and bury this in the churn.
+*.sh text eol=lf
