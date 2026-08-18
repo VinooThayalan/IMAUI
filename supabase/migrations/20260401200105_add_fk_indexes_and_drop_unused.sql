@@ -25,13 +25,28 @@
 -- ADD MISSING FOREIGN KEY INDEXES
 -- ============================================
 
-CREATE INDEX IF NOT EXISTS idx_fk_amalgamations_new_share_id ON amalgamations(new_share_id);
-CREATE INDEX IF NOT EXISTS idx_fk_amalgamations_old_share_id ON amalgamations(old_share_id);
+-- amalgamations and corporate_action_history are not created by any migration:
+-- they existed only on the original hosted database (added out-of-band) when
+-- this index list was generated. The app reads amalgamations from scrip_entries,
+-- so guard these on the table actually being present instead of failing.
+DO $$
+BEGIN
+  IF to_regclass('public.amalgamations') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_fk_amalgamations_new_share_id ON amalgamations(new_share_id);
+    CREATE INDEX IF NOT EXISTS idx_fk_amalgamations_old_share_id ON amalgamations(old_share_id);
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_fk_banks_entity_id ON banks(entity_id);
 CREATE INDEX IF NOT EXISTS idx_fk_banks_share_id ON banks(share_id);
 CREATE INDEX IF NOT EXISTS idx_fk_cash_balance_ledger_bank_id ON cash_balance_ledger(bank_id);
 CREATE INDEX IF NOT EXISTS idx_fk_cash_balance_ledger_entity_id ON cash_balance_ledger(entity_id);
-CREATE INDEX IF NOT EXISTS idx_fk_corporate_action_history_corporate_action_id ON corporate_action_history(corporate_action_id);
+DO $$
+BEGIN
+  IF to_regclass('public.corporate_action_history') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_fk_corporate_action_history_corporate_action_id ON corporate_action_history(corporate_action_id);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_fk_daily_share_prices_share_id ON daily_share_prices(share_id);
 CREATE INDEX IF NOT EXISTS idx_fk_dividends_entity_id ON dividends(entity_id);
 CREATE INDEX IF NOT EXISTS idx_fk_dividends_share_id ON dividends(share_id);

@@ -156,7 +156,7 @@ function emptyBulkRow(): BulkRow {
 }
 
 export function Transactions() {
-  const { user } = useAuth();
+  const { user, appUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'all' | 'pending'>('all');
   const [showModal, setShowModal] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
@@ -977,6 +977,16 @@ export function Transactions() {
           : (entityBroker as any)?.broker_text || 'N/A';
     const currentDate = new Date().toLocaleDateString();
 
+    // Who generated this document. Falls back to a signature line when the
+    // signed-in user has no name on record, so the field is never blank-and-
+    // unsignable. Escaped because full_name is user-entered and this is
+    // interpolated straight into markup.
+    const escapeHtml = (v: string) =>
+      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const preparedByName = appUser?.full_name?.trim() || appUser?.email || user?.email || '';
+    const preparedBy = preparedByName ? escapeHtml(preparedByName) : '..........................';
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -1091,6 +1101,10 @@ export function Transactions() {
               </tr>
               <tr>
                 <td colspan="9" style="border: none; padding: 20px 8px;"></td>
+              </tr>
+              <tr>
+                <td colspan="3" style="border-right: none; font-weight: normal;">Prepared by</td>
+                <td colspan="6" style="border-left: none;">${preparedBy}</td>
               </tr>
               <tr>
                 <td colspan="3" style="border-right: none; font-weight: normal;">Authorized by</td>

@@ -1,6 +1,8 @@
 import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { selectAll } from '../lib/selectAll';
+import { formatAer, portfolioAer, type CashFlow, type PortfolioAerResult } from '../lib/aer';
 
 function fmtCompact(v: number) {
   const abs = Math.abs(v);
@@ -39,10 +41,21 @@ interface PortfolioRow {
   market_value_net: number;
   div: number;
   total_returns: number;
-  aer: number;
+  /** null when the XIRR has no solution — must not be flattened to 0%. */
+  aer: number | null;
   cash_dps_last_fy: number;
   cash_div: number;
   remarks: string;
+}
+
+/** Everything the portfolio-level AER needs from one cached holding. */
+interface AerInput {
+  entity_id: string;
+  ticker: string;
+  cashFlows: CashFlow[];
+  heldShares: number;
+  marketPrice: number;
+  brokerageFeeRate: number;
 }
 
 type SortField = Exclude<keyof PortfolioRow, 'cds_accounts'>;
@@ -50,6 +63,7 @@ type SortDirection = 'asc' | 'desc';
 
 export function PortfolioSummary() {
   const [data, setData] = useState<PortfolioRow[]>([]);
+  const [aerInputs, setAerInputs] = useState<AerInput[]>([]);
   const [loading, setLoading] = useState(false);
   const [sortField, setSortField] = useState<SortField>('entity_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -89,18 +103,29 @@ export function PortfolioSummary() {
       ].join('|');
       const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
 
-      const { data: cacheRows, error: cacheError } = await supabase
-        .from('share_analytics_cache')
-        .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, source_hash')
-        .eq('source_hash', sourceHash)
-        .order('entity_name', { ascending: true })
-        .order('share_ticker', { ascending: true })
-        .order('trade_date', { ascending: true });
-
-      if (cacheError) throw cacheError;
+      // Paged, and ordered by row_index rather than trade_date.
+      //
+      // Unbounded, this select was capped at db-max-rows and quietly dropped
+      // whole entities off the end of the table. Ordering by trade_date was the
+      // second half of the problem: Postgres sorts NULLs last, so a share with
+      // one undated note had its *earliest* event read as the closing position,
+      // while Share Analytics — sorting in JS, where NULL became '' — read the
+      // latest. row_index is the order the rows were actually computed in, so
+      // both screens now land on the same row.
+      const cacheRows = await selectAll(() =>
+        supabase
+          .from('share_analytics_cache')
+          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, cash_flow, source_hash')
+          .eq('source_hash', sourceHash)
+          .order('entity_name', { ascending: true })
+          .order('share_ticker', { ascending: true })
+          .order('row_index', { ascending: true })
+          .order('id', { ascending: true }),
+      );
 
       if (!cacheRows || cacheRows.length === 0) {
         setData([]);
+        setAerInputs([]);
         return;
       }
 
@@ -112,8 +137,19 @@ export function PortfolioSummary() {
         market_price: number; brokerage_fee_rate: number; cds_accounts: string[];
         aer: number | null;
       }>();
+      // Cash flows per holding, kept so this report can compute its own
+      // portfolio-level AER instead of only showing per-share figures.
+      const cashFlowMap = new Map<string, CashFlow[]>();
+
       for (const r of cacheRows) {
         const key = `${r.entity_id}_${r.share_id}`;
+
+        const flow = Number(r.cash_flow) || 0;
+        if (flow !== 0 && r.trade_date) {
+          if (!cashFlowMap.has(key)) cashFlowMap.set(key, []);
+          cashFlowMap.get(key)!.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: flow });
+        }
+
         lastRowMap.set(key, {
           entity_id: r.entity_id, share_id: r.share_id,
           entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
@@ -152,7 +188,21 @@ export function PortfolioSummary() {
       });
 
       const portfolioData: PortfolioRow[] = [];
+      // Built from every holding, including fully-exited ones: a portfolio
+      // return has to carry the positions that were bought and sold, not just
+      // what happens to be held today.
+      const aerRows: AerInput[] = [];
+
       lastRowMap.forEach((h, key) => {
+        aerRows.push({
+          entity_id: h.entity_id,
+          ticker: h.share_ticker || 'N/A',
+          cashFlows: cashFlowMap.get(key) ?? [],
+          heldShares: h.share_cum_bal,
+          marketPrice: h.market_price,
+          brokerageFeeRate: h.brokerage_fee_rate,
+        });
+
         if (h.share_cum_bal <= 0) return;
         const feeRate = h.brokerage_fee_rate / 100;
         const marketValueNet = h.market_value * (1 - feeRate);
@@ -173,7 +223,10 @@ export function PortfolioSummary() {
           market_value_net: marketValueNet,
           div: h.cum_dividend,
           total_returns: totalReturns,
-          aer: h.aer ?? 0,
+          // Left null when there is no solution. Coercing it to 0 rendered an
+          // uncomputable return as a green 0.00%, indistinguishable from a real
+          // flat return — which is how broken inputs stayed invisible here.
+          aer: h.aer,
           cash_dps_last_fy: dps,
           cash_div: h.share_cum_bal * dps,
           remarks: '',
@@ -182,6 +235,7 @@ export function PortfolioSummary() {
 
       portfolioData.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.ticker.localeCompare(b.ticker));
       setData(portfolioData);
+      setAerInputs(aerRows);
     } catch (error) {
       console.error('Error fetching portfolio data:', error);
       alert('Failed to fetch portfolio data');
@@ -206,6 +260,13 @@ export function PortfolioSummary() {
     return [...filtered].sort((a, b) => {
       const aVal = a[sortField];
       const bVal = b[sortField];
+
+      // Rows with no computable AER sort to the bottom either way, rather than
+      // being string-compared as "null".
+      if (aVal === null || bVal === null) {
+        if (aVal === null && bVal === null) return 0;
+        return aVal === null ? 1 : -1;
+      }
 
       if (typeof aVal === 'number' && typeof bVal === 'number') {
         return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
@@ -238,6 +299,22 @@ export function PortfolioSummary() {
   const totalDiv = filteredData.reduce((sum, row) => sum + row.div, 0);
   const totalCashDiv = filteredData.reduce((sum, row) => sum + row.cash_div, 0);
 
+  // Portfolio-level AER, computed through the same helper Share Analytics uses
+  // so the two screens can be compared like for like. The column above is a
+  // per-share XIRR; this pools every holding's cash flows into one rate, and
+  // the two are not expected to be equal.
+  const portfolioAerResult: PortfolioAerResult = portfolioAer(
+    (selectedEntityId ? aerInputs.filter(a => a.entity_id === selectedEntityId) : aerInputs)
+      .map(a => ({
+        label: a.ticker,
+        cashFlows: a.cashFlows,
+        heldShares: a.heldShares,
+        marketPrice: a.marketPrice,
+        brokerageFeeRate: a.brokerageFeeRate,
+      })),
+    new Date(),
+  );
+
   if (loading) {
     return (
       <div className="p-6 flex items-center justify-center h-96">
@@ -269,7 +346,7 @@ export function PortfolioSummary() {
                 r.entity_name, r.sector, r.ticker, r.balance_shares,
                 r.cost.toFixed(2), r.cost_per_share.toFixed(2), r.market_price_per_share.toFixed(2),
                 r.market_value_net.toFixed(2), r.div.toFixed(2), r.total_returns.toFixed(2),
-                r.aer.toFixed(2) + '%', dps.toFixed(2),
+                formatAer(r.aer), dps.toFixed(2),
                 r.cds_accounts.join('; '), editedRemarks.get(key) ?? r.remarks ?? '', cashDiv.toFixed(2),
               ];
             })
@@ -322,8 +399,32 @@ export function PortfolioSummary() {
                 {fmtCompact(totalReturns)}
               </p>
             </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-500 uppercase">Portfolio AER</p>
+              <p className={`text-lg font-bold ${
+                portfolioAerResult.percent === null ? 'text-gray-400'
+                  : portfolioAerResult.percent >= 0 ? 'text-green-600'
+                  : 'text-red-600'
+              }`}>
+                {formatAer(portfolioAerResult.percent)}
+              </p>
+            </div>
           </div>
         </div>
+
+        {/* Held positions with no market price have no terminal value and cannot
+            enter the pooled XIRR. Naming them here is what makes a missing price
+            upload visible instead of silently distorting the return. */}
+        {portfolioAerResult.excluded.length > 0 && (
+          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+            <span className="font-semibold">
+              {portfolioAerResult.excluded.length} held share
+              {portfolioAerResult.excluded.length === 1 ? ' has' : 's have'} no market price and
+              {portfolioAerResult.excluded.length === 1 ? ' is' : ' are'} excluded from the portfolio AER:
+            </span>{' '}
+            {portfolioAerResult.excluded.join(', ')}. Upload their latest prices for a complete figure.
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -375,8 +476,13 @@ export function PortfolioSummary() {
                   <td className={`px-4 py-3 text-sm text-right font-bold border-r border-gray-200 ${row.total_returns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     Rs. {row.total_returns.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
-                  <td className={`px-4 py-3 text-sm text-right font-semibold border-r border-gray-200 ${row.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {row.aer.toFixed(2)}%
+                  <td
+                    className={`px-4 py-3 text-sm text-right font-semibold border-r border-gray-200 ${
+                      row.aer === null ? 'text-gray-400' : row.aer >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}
+                    title={row.aer === null ? 'No annualised return can be computed — the holding has no market price, or all its cash flows fall on one day' : undefined}
+                  >
+                    {formatAer(row.aer)}
                   </td>
                   {/* Editable: Cash DPS (Net) Last FY */}
                   <td className="px-2 py-1 text-sm text-right border-r border-gray-200 bg-blue-50/40">
@@ -437,8 +543,19 @@ export function PortfolioSummary() {
                 <td className={`px-4 py-3 text-sm text-right border-r border-gray-200 ${totalReturns >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   Rs. {totalReturns.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </td>
-                {/* cols 11-14: AER%, Cash DPS, CDS Account, Remarks */}
-                <td colSpan={4} className="px-4 py-3 border-r border-gray-200"></td>
+                {/* col 11: portfolio AER — one pooled XIRR, not a total of the column above */}
+                <td
+                  className={`px-4 py-3 text-sm text-right border-r border-gray-200 ${
+                    portfolioAerResult.percent === null ? 'text-gray-400'
+                      : portfolioAerResult.percent >= 0 ? 'text-green-600'
+                      : 'text-red-600'
+                  }`}
+                  title="Portfolio AER — XIRR over every holding's pooled cash flows. Not the sum or average of the per-share column."
+                >
+                  {formatAer(portfolioAerResult.percent)}
+                </td>
+                {/* cols 12-14: Cash DPS, CDS Account, Remarks */}
+                <td colSpan={3} className="px-4 py-3 border-r border-gray-200"></td>
                 {/* col 15: Cash Div */}
                 <td className="px-4 py-3 text-sm text-right text-gray-900 border-r border-gray-200">
                   Rs. {totalCashDiv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -466,7 +583,8 @@ export function PortfolioSummary() {
               <li><strong>Market price per share:</strong> Latest updated market value from CSE</li>
               <li><strong>Market Value (Net):</strong> Balance shares × market price × (1 − brokerage fee rate)</li>
               <li><strong>Total Returns:</strong> Market value (net) + Total sale proceeds + Dividends − Total cost paid (includes realized gains from sells)</li>
-              <li><strong>AER:</strong> Annual Equivalent Return — XIRR of all cash flows (buys as outflows, sells &amp; dividends as inflows, net market value as terminal inflow)</li>
+              <li><strong>AER (column):</strong> Annual Equivalent Return for that one share — XIRR of its cash flows (buys as outflows, sells &amp; dividends as inflows, market value net of brokerage as terminal inflow). Shows <strong>—</strong> when no rate solves, e.g. the holding has no market price</li>
+              <li><strong>Portfolio AER (total row):</strong> a single XIRR over every holding's pooled cash flows, including positions already sold in full. It is <em>not</em> the sum or the average of the column above, and it will not equal any individual share's AER</li>
               <li><strong>Cash DPS (Net) Last FY:</strong> Editable — enter the cash dividend per share for the last financial year. Cash Div column = Balance Shares × Cash DPS entered.</li>
               <li><strong>Remarks:</strong> Editable — free-text remarks per holding. Click the cell to type.</li>
             </ul>

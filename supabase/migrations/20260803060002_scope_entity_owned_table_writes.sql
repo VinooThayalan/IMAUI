@@ -39,24 +39,38 @@ END $$;
 CREATE POLICY "Users can insert scrip entries for their entities" ON public.scrip_entries FOR INSERT TO authenticated WITH CHECK (public.has_entity_access(entity_id));
 CREATE POLICY "Users can update scrip entries for their entities" ON public.scrip_entries FOR UPDATE TO authenticated USING (public.has_entity_access(entity_id)) WITH CHECK (public.has_entity_access(entity_id));
 CREATE POLICY "Users can delete scrip entries for their entities" ON public.scrip_entries FOR DELETE TO authenticated USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- -- corporate_actions
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='corporate_actions' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.corporate_actions', p.policyname); END LOOP;
+-- END $$;
 
--- corporate_actions
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='corporate_actions' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.corporate_actions', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Users can insert corporate actions for their entities" ON public.corporate_actions FOR INSERT TO authenticated WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can update corporate actions for their entities" ON public.corporate_actions FOR UPDATE TO authenticated USING (public.has_entity_access(entity_id)) WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can delete corporate actions for their entities" ON public.corporate_actions FOR DELETE TO authenticated USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can insert corporate actions for their entities" ON public.corporate_actions FOR INSERT TO authenticated WITH CHECK (public.has_entity_access(entity_id));
 
--- corporate_action_history
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='corporate_action_history' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.corporate_action_history', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Users can insert corporate action history for their entities" ON public.corporate_action_history FOR INSERT TO authenticated WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can update corporate action history for their entities" ON public.corporate_action_history FOR UPDATE TO authenticated USING (public.has_entity_access(entity_id)) WITH CHECK (public.has_entity_access(entity_id));
-CREATE POLICY "Users can delete corporate action history for their entities" ON public.corporate_action_history FOR DELETE TO authenticated USING (public.has_entity_access(entity_id));
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can update corporate actions for their entities" ON public.corporate_actions FOR UPDATE TO authenticated USING (public.has_entity_access(entity_id)) WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Users can delete corporate actions for their entities" ON public.corporate_actions FOR DELETE TO authenticated USING (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- -- corporate_action_history
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='corporate_action_history' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.corporate_action_history', p.policyname); END LOOP;
+-- END $$;
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can insert corporate action history for their entities" ON public.corporate_action_history FOR INSERT TO authenticated WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can update corporate action history for their entities" ON public.corporate_action_history FOR UPDATE TO authenticated USING (public.has_entity_access(entity_id)) WITH CHECK (public.has_entity_access(entity_id));
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Users can delete corporate action history for their entities" ON public.corporate_action_history FOR DELETE TO authenticated USING (public.has_entity_access(entity_id));
+
 
 -- transaction_requests
 DO $$ DECLARE p record; BEGIN

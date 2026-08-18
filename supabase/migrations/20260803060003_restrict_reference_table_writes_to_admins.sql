@@ -1,44 +1,74 @@
-/*
-  Restrict writes on reference/config tables to admins. These are shared
-  lookup tables (shares, brokers, banks, fees, sectors, etc.) with no
-  entity_id. Any signed-in user can read them; only admins can change them.
-*/
 
--- amalgamations
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='amalgamations' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.amalgamations', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Admins can insert amalgamations" ON public.amalgamations FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update amalgamations" ON public.amalgamations FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete amalgamations" ON public.amalgamations FOR DELETE TO authenticated USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- /*
+--   Restrict writes on reference/config tables to admins. These are shared
+--   lookup tables (shares, brokers, banks, fees, sectors, etc.) with no
+--   entity_id. Any signed-in user can read them; only admins can change them.
+-- */
+-- 
+-- -- amalgamations
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='amalgamations' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.amalgamations', p.policyname); END LOOP;
+-- END $$;
 
--- rights_issues
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='rights_issues' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.rights_issues', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Admins can insert rights issues" ON public.rights_issues FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update rights issues" ON public.rights_issues FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete rights issues" ON public.rights_issues FOR DELETE TO authenticated USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can insert amalgamations" ON public.amalgamations FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
 
--- share_buybacks
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='share_buybacks' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.share_buybacks', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Admins can insert share buybacks" ON public.share_buybacks FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update share buybacks" ON public.share_buybacks FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete share buybacks" ON public.share_buybacks FOR DELETE TO authenticated USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can update amalgamations" ON public.amalgamations FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
 
--- share_subdivisions
-DO $$ DECLARE p record; BEGIN
-  FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='share_subdivisions' AND cmd IN ('INSERT','UPDATE','DELETE')
-  LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.share_subdivisions', p.policyname); END LOOP;
-END $$;
-CREATE POLICY "Admins can insert share subdivisions" ON public.share_subdivisions FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update share subdivisions" ON public.share_subdivisions FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete share subdivisions" ON public.share_subdivisions FOR DELETE TO authenticated USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can delete amalgamations" ON public.amalgamations FOR DELETE TO authenticated USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- -- rights_issues
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='rights_issues' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.rights_issues', p.policyname); END LOOP;
+-- END $$;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can insert rights issues" ON public.rights_issues FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can update rights issues" ON public.rights_issues FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can delete rights issues" ON public.rights_issues FOR DELETE TO authenticated USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- -- share_buybacks
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='share_buybacks' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.share_buybacks', p.policyname); END LOOP;
+-- END $$;
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can insert share buybacks" ON public.share_buybacks FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can update share buybacks" ON public.share_buybacks FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can delete share buybacks" ON public.share_buybacks FOR DELETE TO authenticated USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- -- share_subdivisions
+-- DO $$ DECLARE p record; BEGIN
+--   FOR p IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='share_subdivisions' AND cmd IN ('INSERT','UPDATE','DELETE')
+--   LOOP EXECUTE format('DROP POLICY IF EXISTS %I ON public.share_subdivisions', p.policyname); END LOOP;
+-- END $$;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can insert share subdivisions" ON public.share_subdivisions FOR INSERT TO authenticated WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can update share subdivisions" ON public.share_subdivisions FOR UPDATE TO authenticated USING (public.is_app_admin()) WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can delete share subdivisions" ON public.share_subdivisions FOR DELETE TO authenticated USING (public.is_app_admin());
+
 
 -- bank_branches
 DO $$ DECLARE p record; BEGIN

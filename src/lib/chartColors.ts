@@ -115,6 +115,44 @@ export function buildShareColorMap(rows: { ticker: string }[]): Map<string, stri
   return buildColorMap(rows.map(r => r.ticker), SHARE_COLORS);
 }
 
-export function buildSectorColorMap(rows: { sector: string }[]): Map<string, string> {
-  return buildColorMap(rows.map(r => r.sector), SECTOR_COLORS);
+/**
+ * The colour stored on sector_types wins; anything without one is derived.
+ *
+ * The stored value (migration 20260812060002) is what makes a sector's colour
+ * permanent. Derivation is only a fallback, and a weak one: it assigns slots over
+ * the sector names in sorted order, so adding a sector that sorts earlier shifts
+ * every later sector onto a different colour. It is kept for shares carrying only
+ * the free-text shares.sector, which have no sector_types row to store a colour
+ * on — and for callers that do not read the column at all, where `sectorColor` is
+ * simply absent and every sector is derived exactly as before.
+ *
+ * Derived slots skip the colours already taken by stored ones, so a fallback
+ * cannot collide with a sector that has a real colour assigned.
+ */
+export function buildSectorColorMap(
+  rows: { sector: string; sectorColor?: string | null }[],
+): Map<string, string> {
+  const map = new Map<string, string>();
+
+  for (const r of rows) {
+    if (r.sectorColor && !map.has(r.sector)) map.set(r.sector, r.sectorColor);
+  }
+
+  // Nothing stored: the plain sorted assignment, unchanged.
+  if (map.size === 0) return buildColorMap(rows.map(r => r.sector), SECTOR_COLORS);
+
+  const taken = new Set(map.values());
+  const spare = SECTOR_COLORS.filter(c => !taken.has(c));
+  let next = 0;
+  Array.from(new Set(rows.map(r => r.sector)))
+    .sort()
+    .forEach(sector => {
+      if (map.has(sector)) return;
+      // Wraps rather than falling to grey, matching buildColorMap: a grey slice
+      // reads as "no data" instead of as one more category.
+      map.set(sector, spare.length > 0 ? spare[next % spare.length] : CHART_COLOR_FALLBACK);
+      next++;
+    });
+
+  return map;
 }
