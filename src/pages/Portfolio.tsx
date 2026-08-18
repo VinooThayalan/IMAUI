@@ -96,11 +96,15 @@ export function Portfolio() {
   const [bottomPerformers, setBottomPerformers] = useState<PerformerRow[]>([]);
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   const fetchPortfolioData = useCallback(async (entityId?: string) => {
     setLoading(true);
     try {
-      const scope = entityId || 'all';
+      // The window is part of the cache identity. Without it a batch computed
+      // for one date range would be served for another, silently.
+      const scope = [entityId || 'all', fromDate || '-', toDate || '-'].join('|');
 
       // ── Compute source hash (same fingerprint as ShareAnalytics) ─────────
       const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
@@ -212,7 +216,7 @@ export function Portfolio() {
       const analyticsRows = await selectAll(() =>
         supabase
           .from('share_analytics_cache')
-          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, source_hash')
+          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, trade_date, source_hash')
           .order('entity_name', { ascending: true })
           .order('share_ticker', { ascending: true })
           .order('row_index', { ascending: true })
@@ -227,15 +231,35 @@ export function Portfolio() {
       if (cacheValid) {
         // Build holdings from the last row of each entity-share group
         const lastRowMap = new Map<string, { held: number; cost: number; marketValue: number; dividends: number; entity_id: string; share_id: string; entity_name: string; share_ticker: string; share_name: string }>();
+        /*
+          The end date truncates; the start date does not.
+
+          Every row carries the cumulative state after it, so ignoring rows
+          traded after the end date leaves the last surviving row holding the
+          position exactly as it stood that day. Skipping rows *before* a start
+          date would instead hide the purchases the position is built from, and
+          the holding would report a balance it has no record of acquiring.
+
+          The one figure a start date can honestly scope is dividends, which
+          accumulate: period dividends are the running total at the end of the
+          window minus the total already banked before it opened.
+        */
+        const dividendsBefore = new Map<string, number>();
         for (const r of analyticsRows) {
           if (entityId && r.entity_id !== entityId) continue;
+          if (toDate && r.trade_date && r.trade_date > toDate) continue;
           const key = `${r.entity_id}__${r.share_id}`;
+
+          if (fromDate && r.trade_date && r.trade_date < fromDate) {
+            dividendsBefore.set(key, Number(r.cum_dividend) || 0);
+          }
+
           // Ordered by row_index, so the last entry is the final computed state
           lastRowMap.set(key, {
             held: Number(r.share_cum_bal) || 0,
             cost: Number(r.av_cost) || 0,
             marketValue: Number(r.market_value) || 0,
-            dividends: Number(r.cum_dividend) || 0,
+            dividends: (Number(r.cum_dividend) || 0) - (dividendsBefore.get(key) ?? 0),
             entity_id: r.entity_id, share_id: r.share_id,
             entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
           });
@@ -343,6 +367,9 @@ export function Portfolio() {
           .in('approval_status', ['MANUAL_APPROVED'])
           .order('transaction_date', { ascending: true });
         if (entityId) txnQuery.eq('entity_id', entityId);
+        // As-of only. A start date must not filter here: the position is built
+        // from these rows, and dropping the early buys would break it.
+        if (toDate) txnQuery.lte('transaction_date', toDate);
 
       const openingQuery = supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost');
         if (entityId) openingQuery.eq('entity_id', entityId);
@@ -583,11 +610,11 @@ export function Portfolio() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     fetchPortfolioData(selectedEntityId || undefined);
-  }, [fetchPortfolioData, selectedEntityId]);
+  }, [fetchPortfolioData, selectedEntityId, fromDate, toDate]);
 
   function handleExport() {
     const date = new Date().toISOString().split('T')[0];
@@ -626,8 +653,43 @@ export function Portfolio() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Portfolio Overview</h1>
           <p className="text-gray-500 mt-1">Comprehensive view of your investment portfolio</p>
+          {/* The two dates do different jobs here, and only one of them can
+              honestly move the valuation. Say so rather than implying both do. */}
+          {(fromDate || toDate) && (
+            <p className="mt-2 text-xs text-blue-900 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 max-w-2xl">
+              {toDate && <>Holdings, cost and value are <strong>as at {new Date(toDate + 'T00:00:00').toLocaleDateString('en-GB')}</strong>. </>}
+              {fromDate && <>The start date scopes <strong>dividends</strong> to the period; holdings still include everything bought before it, or the position would not add up. </>}
+              Shares are valued at the latest market price on file, not the price on the as-at date.
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label htmlFor="pf-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
+          <input
+            id="pf-from"
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          />
+          <label htmlFor="pf-to" className="text-xs font-semibold text-gray-500 uppercase">To (as of)</label>
+          <input
+            id="pf-to"
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          />
+          {(fromDate || toDate) && (
+            <button
+              onClick={() => { setFromDate(''); setToDate(''); }}
+              className="px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              Clear dates
+            </button>
+          )}
           <select
             value={selectedEntityId}
             onChange={(e) => setSelectedEntityId(e.target.value)}
