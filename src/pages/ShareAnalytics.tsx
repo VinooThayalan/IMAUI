@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { selectAll } from '../lib/selectAll';
+import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
@@ -88,47 +90,28 @@ interface ShareGroup {
   rows: ComputedRow[];
 }
 
-// ── XIRR ─────────────────────────────────────────────────────────────────────
+// ── AER ──────────────────────────────────────────────────────────────────────
+// xirr / aerPercent / netMarketValue / portfolioAer now live in ../lib/aer so
+// that this screen, Portfolio Summary, the Dashboard and Reports all answer the
+// same question the same way.
 
-function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
-  if (cashFlows.length < 2) return 0;
-  const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
-  const d0 = sorted[0].date.getTime();
-  const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-  let rate = guess;
-  for (let iter = 0; iter < 200; iter++) {
-    let f = 0, df = 0;
-    for (const cf of sorted) {
-      const t = (cf.date.getTime() - d0) / MS_PER_YEAR;
-      const base = 1 + rate;
-      if (base <= 0) break;
-      const pv = Math.pow(base, t);
-      f  += cf.amount / pv;
-      df -= (t * cf.amount) / (pv * base);
-    }
-    if (Math.abs(df) < 1e-12) break;
-    const nr = rate - f / df;
-    if (Math.abs(nr - rate) < 1e-8) return nr;
-    rate = Math.max(-0.999, nr);
-  }
-  // Out of iterations, or the derivative went flat: the last iterate is not a
-  // solution and can be astronomically large. Say so rather than returning it.
-  return NaN;
+/** Cash flows for one group, in the form the AER helpers want. */
+function groupCashFlows(rows: ComputedRow[]): Array<{ date: Date; amount: number }> {
+  return rows
+    .filter(r => r.cash_flow !== 0 && r.trade_date)
+    .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
 }
 
 /**
- * XIRR rate as an annualised percentage, or null when there is no meaningful
- * answer — the solver failed, or it converged on a rate that only a rounding
- * artefact could produce. A same-week round trip annualises into the millions
- * of percent, which is arithmetic rather than performance, and it used to
- * overflow share_analytics_cache.aer and fail the entire cache write.
+ * AER for a single share holding: every dated cash flow, plus the net market
+ * value of whatever is still held as a terminal inflow.
  */
-const AER_PERCENT_LIMIT = 1_000_000;
-
-function toAerPercent(rate: number): number | null {
-  if (!isFinite(rate)) return null;
-  const percent = rate * 100;
-  return Math.abs(percent) > AER_PERCENT_LIMIT ? null : percent;
+function groupAerPercent(group: ShareGroup, asOf: Date): number | null {
+  const last = group.rows[group.rows.length - 1];
+  const cfs = groupCashFlows(group.rows);
+  const terminal = netMarketValue(last.share_cum_bal, group.market_price, group.brokerage_fee_rate);
+  if (terminal > 0) cfs.push({ date: asOf, amount: terminal });
+  return aerPercent(cfs);
 }
 
 /**
@@ -334,22 +317,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
 
   // XIRR for this group — terminal value uses market value after brokerage fees
-  const groupAer = (() => {
-    const today = new Date();
-    const feeRateG = group.brokerage_fee_rate / 100;
-    const mvAfterFeesG = group.market_price > 0
-      ? last.share_cum_bal * (group.market_price - group.market_price * feeRateG)
-      : 0;
-    const cfs = group.rows
-      .filter(r => r.cash_flow !== 0 && r.trade_date)
-      .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
-    if (mvAfterFeesG > 0) cfs.push({ date: today, amount: mvAfterFeesG });
-    if (cfs.length < 2) return null;
-    try {
-      const rate = xirr(cfs);
-      return toAerPercent(rate);
-    } catch { return null; }
-  })();
+  const groupAer = groupAerPercent(group, new Date());
 
   function exportDetail() {
     const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Sale Cost','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus','Cum surplus','CDS Account','Note'];
@@ -592,14 +560,12 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                 <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
               )}
             </div>
-            {groupAer !== null && (
-              <div className="text-center">
-                <div className="text-xs text-gray-400">AER (XIRR)</div>
-                <div className={`font-bold ${groupAer >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                  {groupAer >= 0 ? '+' : ''}{groupAer.toFixed(2)}%
-                </div>
+            <div className="text-center">
+              <div className="text-xs text-gray-400">AER (XIRR)</div>
+              <div className={`font-bold ${groupAer === null ? 'text-gray-400' : groupAer >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                {formatAer(groupAer)}
               </div>
-            )}
+            </div>
           </div>
 
           <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
@@ -890,30 +856,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                   </>
                 );
               })()}
-              <tr className="bg-gray-100">
-                <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-orange-700">{fmt(group.rows.filter(r => r.row_type === 'sell').reduce((s, r) => s + r.no_of_shares * r.av_price, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-300">—</td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
-                    {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0 ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span> : '—'}
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0
-                    ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span>
-                    : <span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span>}
-                </td>
-                <td />
-              </tr>
+              {/* The "Totals / Final" row was removed here — reported as not
+                  required. The Market Value and Cost per share rows above stay:
+                  they are the closing position, not a column summary. */}
             </tfoot>
           </table>
         </div>
@@ -981,15 +926,22 @@ export function ShareAnalytics() {
 
       if (existingBatch) {
         // ── Cache hit — read from cache table ──────────────────────────────
-        const { data: cached, error: cacheErr } = await supabase
-          .from('share_analytics_cache')
-          .select('*')
-          .eq('source_hash', sourceHash)
-          .order('entity_name', { ascending: true })
-          .order('share_ticker', { ascending: true });
-        if (cacheErr) throw cacheErr;
+        // Paged: this select used to run unbounded and was silently truncated
+        // at db-max-rows, which left groups missing their closing rows.
+        const cached = await selectAll(() =>
+          supabase
+            .from('share_analytics_cache')
+            .select('*')
+            .eq('source_hash', sourceHash)
+            .order('entity_name', { ascending: true })
+            .order('share_ticker', { ascending: true })
+            .order('row_index', { ascending: true })
+            .order('id', { ascending: true }),
+        );
 
-        if (cached) {
+        // An empty paged read means there is nothing to serve, so fall through
+        // and recompute rather than showing an empty report.
+        if (cached.length > 0) {
           // Reconstruct groups from cached rows
           const groupMap = new Map<string, ShareGroup>();
           for (const c of cached) {
@@ -1043,10 +995,10 @@ export function ShareAnalytics() {
             grp.rows.push(row);
           }
           const cachedGroups = Array.from(groupMap.values());
-          // Sort rows within each group by trade_date
-          for (const g of cachedGroups) {
-            g.rows.sort((a, b) => (a.trade_date ?? '') < (b.trade_date ?? '') ? -1 : 1);
-          }
+          // Rows arrive ordered by row_index, so they are already in compute
+          // order and must not be re-sorted here. The old trade_date sort put
+          // undated rows first while Portfolio Summary's SQL sort put them last,
+          // so the two screens read a different row as the closing position.
           cachedGroups.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
           setGroups(cachedGroups);
           return; // Skip full recompute
@@ -1054,20 +1006,32 @@ export function ShareAnalytics() {
       }
 
       // ── Cache miss — recompute from source tables ─────────────────────────
-      const [entitiesRes, sharesRes, txnsRes, openingRes, dividendsRes, pricesRes, scripsRes, feeTypesRes] = await Promise.all([
-        supabase.from('entities').select('id, name'),
-        supabase.from('shares').select('id, ticker, share_name'),
-        supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date'),
-        supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net'),
-        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('scrip_entries').select('entity_id, share_id, no_of_shares, effective_date, entry_date').eq('status', 'RECEIVED'),
-        supabase.from('brokerage_fee_types').select('rate, min_price').eq('is_active', true).order('min_price', { ascending: true, nullsFirst: true }),
+      // Every one of these is paged. Run unbounded they were capped at
+      // db-max-rows: the price query in particular is ordered newest-first, so
+      // any share whose latest price fell past the cap resolved to a market
+      // price of zero and lost its terminal value.
+      const [entitiesData, sharesData, txnsData, openingData, dividendsData, pricesData, scripsData, feeTypesData] = await Promise.all([
+        selectAll(() => supabase.from('entities').select('id, name').order('id', { ascending: true })),
+        selectAll(() => supabase.from('shares').select('id, ticker, share_name').order('id', { ascending: true })),
+        selectAll(() => supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }).order('id', { ascending: true })),
+        selectAll(() => supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date').order('id', { ascending: true })),
+        selectAll(() => supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net').order('id', { ascending: true })),
+        selectAll(() => supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }).order('id', { ascending: true })),
+        selectAll(() => supabase.from('scrip_entries').select('entity_id, share_id, no_of_shares, effective_date, entry_date').eq('status', 'RECEIVED').order('id', { ascending: true })),
+        selectAll(() => supabase.from('brokerage_fee_types').select('rate, min_price').eq('is_active', true).order('min_price', { ascending: true, nullsFirst: true }).order('id', { ascending: true })),
       ]);
 
+      const entitiesRes   = { data: entitiesData };
+      const sharesRes     = { data: sharesData };
+      const txnsRes       = { data: txnsData };
+      const openingRes    = { data: openingData };
+      const dividendsRes  = { data: dividendsData };
+      const pricesRes     = { data: pricesData };
+      const scripsRes     = { data: scripsData };
+
       // Default fee rate = lowest tier's rate (used when a group has no transaction-level rate stored)
-      const defaultFeeRate = feeTypesRes.data && feeTypesRes.data.length > 0
-        ? Number(feeTypesRes.data[0].rate)
+      const defaultFeeRate = feeTypesData.length > 0
+        ? Number(feeTypesData[0].rate)
         : 0;
 
       const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
@@ -1122,12 +1086,14 @@ export function ShareAnalytics() {
         }
       }
 
-      const { data: notesData, error: notesError } = await supabase
-        .from('buy_sell_notes')
-        .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, net_amount, transaction_id')
-        .eq('status', 'PROCESSED')
-        .order('trade_date', { ascending: true });
-      if (notesError) throw notesError;
+      const notesData = await selectAll(() =>
+        supabase
+          .from('buy_sell_notes')
+          .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, net_amount, transaction_id')
+          .eq('status', 'PROCESSED')
+          .order('trade_date', { ascending: true })
+          .order('id', { ascending: true }),
+      );
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
@@ -1203,25 +1169,11 @@ export function ShareAnalytics() {
         const cacheRows: Record<string, unknown>[] = [];
         const today = new Date();
         for (const g of result) {
-          const lastRow = g.rows[g.rows.length - 1];
-          const feeRateG = g.brokerage_fee_rate / 100;
-          const mvAfterFeesG = g.market_price > 0
-            ? lastRow.share_cum_bal * (g.market_price - g.market_price * feeRateG)
-            : 0;
-          const groupCfs = g.rows
-            .filter(r => r.cash_flow !== 0 && r.trade_date)
-            .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
-          if (mvAfterFeesG > 0) groupCfs.push({ date: today, amount: mvAfterFeesG });
-          let groupAer: number | null = null;
-          if (groupCfs.length >= 2) {
-            try {
-              const rate = xirr(groupCfs);
-              groupAer = toAerPercent(rate);
-            } catch { groupAer = null; }
-          }
+          const groupAer = groupAerPercent(g, today);
 
-          for (const r of g.rows) {
+          for (const [rowIndex, r] of g.rows.entries()) {
             cacheRows.push({
+              row_index: rowIndex,
               entity_id: g.entity_id, share_id: g.share_id,
               entity_name: g.entity_name, share_ticker: g.share_ticker, share_name: g.share_name,
               market_price: g.market_price, market_price_date: g.market_price_date,
@@ -1339,27 +1291,25 @@ export function ShareAnalytics() {
     };
   }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
-  // Portfolio-level XIRR — terminal date is always today to match Portfolio Summary
-  const portfolioAer = (() => {
-    const today = new Date();
-    const cfs: Array<{ date: Date; amount: number }> = [];
-    for (const g of filtered) {
+  // Portfolio-level XIRR — terminal date is always today to match Portfolio Summary.
+  // Terminal value is net of brokerage, the same basis the per-share AER uses;
+  // it used to discount the gross market value, which flattered this card
+  // against every other screen.
+  const portfolioAerResult = portfolioAer(
+    filtered.map(g => {
       const last = g.rows[g.rows.length - 1];
-      for (const r of g.rows) {
-        if (r.cash_flow !== 0 && r.trade_date) {
-          cfs.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: r.cash_flow });
-        }
-      }
-      if (last.market_value > 0) cfs.push({ date: today, amount: last.market_value });
-    }
-    if (cfs.length < 2) return null;
-    try {
-      const rate = xirr(cfs);
-      return toAerPercent(rate);
-    } catch {
-      return null;
-    }
-  })();
+      return {
+        label: g.share_ticker,
+        cashFlows: groupCashFlows(g.rows),
+        heldShares: last.share_cum_bal,
+        marketPrice: g.market_price,
+        brokerageFeeRate: g.brokerage_fee_rate,
+      };
+    }),
+    new Date(),
+  );
+  const portfolioAerPct = portfolioAerResult.percent;
+  const unpricedShares  = portfolioAerResult.excluded;
 
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
@@ -1470,15 +1420,34 @@ export function ShareAnalytics() {
             />
             <SummaryCard label="Total Av Cost (Held)" value={`Rs. ${fmt(totals.av_cost)}`}      color="text-blue-700" />
             <SummaryCard label="Total Cash Flow"      value={`Rs. ${fmt(totals.cash_flow)}`}    color={totals.cash_flow >= 0 ? 'text-green-700' : 'text-red-600'} />
-            {portfolioAer !== null && (
-              <SummaryCard
-                label="AER (XIRR)"
-                value={`${portfolioAer >= 0 ? '+' : ''}${portfolioAer.toFixed(2)}%`}
-                color={portfolioAer >= 0 ? 'text-green-700' : 'text-red-600'}
-                sub="Annualised portfolio return"
-              />
-            )}
+            <SummaryCard
+              label="AER (XIRR)"
+              value={formatAer(portfolioAerPct)}
+              color={
+                portfolioAerPct === null ? 'text-gray-400'
+                  : portfolioAerPct >= 0 ? 'text-green-700'
+                  : 'text-red-600'
+              }
+              sub={
+                unpricedShares.length > 0
+                  ? `Excludes ${unpricedShares.length} share${unpricedShares.length === 1 ? '' : 's'} with no market price`
+                  : 'Annualised portfolio return'
+              }
+            />
           </div>
+
+          {/* A held position with no market price has no terminal value, so it
+              cannot enter the portfolio XIRR. Name them — left silent, they used
+              to sit in the pool as pure outflows and drag the number negative. */}
+          {unpricedShares.length > 0 && (
+            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+              <span className="font-semibold">
+                {unpricedShares.length} held share{unpricedShares.length === 1 ? ' has' : 's have'} no market price
+                {' '}and {unpricedShares.length === 1 ? 'is' : 'are'} excluded from the portfolio AER:
+              </span>{' '}
+              {unpricedShares.join(', ')}. Upload their latest prices for a complete figure.
+            </div>
+          )}
         </div>
       )}
 

@@ -11,6 +11,7 @@ interface SectorType {
   sector_id: string;
   sector_name: string;
   industry_id: string | null;
+  color: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -27,6 +28,10 @@ export function SectorTypes() {
   const [formData, setFormData] = useState({
     sector_name: '',
     industry_id: '',
+    // Blank means "let the database choose". The trigger only fills color when it
+    // is null, so leaving this empty gets the next unused palette colour and
+    // setting it keeps the choice.
+    color: '',
     is_active: true
   });
   const [loading, setLoading] = useState(true);
@@ -59,6 +64,7 @@ export function SectorTypes() {
       setFormData({
         sector_name: sector.sector_name,
         industry_id: sector.industry_id || '',
+        color: sector.color || '',
         is_active: sector.is_active
       });
     } else {
@@ -66,6 +72,7 @@ export function SectorTypes() {
       setFormData({
         sector_name: '',
         industry_id: '',
+        color: '',
         is_active: true
       });
     }
@@ -78,6 +85,7 @@ export function SectorTypes() {
     setFormData({
       sector_name: '',
       industry_id: '',
+      color: '',
       is_active: true
     });
   }
@@ -89,6 +97,9 @@ export function SectorTypes() {
       const dataToSubmit = {
         sector_name: formData.sector_name,
         industry_id: formData.industry_id || null,
+        // null rather than '' so the trigger fires and assigns the next unused
+        // colour; '' would fail the #rrggbb check constraint.
+        color: formData.color ? formData.color.toLowerCase() : null,
         is_active: formData.is_active,
         updated_at: new Date().toISOString()
       };
@@ -160,6 +171,7 @@ export function SectorTypes() {
               { header: 'Sector ID', accessor: (r) => r.sector_id },
               { header: 'Sector Name', accessor: (r) => r.sector_name },
               { header: 'Industry', accessor: (r) => r.industry_types?.industry_name || '' },
+              { header: 'Chart Colour', accessor: (r) => r.color || '' },
               { header: 'Status', accessor: (r) => (r.is_active ? 'Active' : 'Inactive') },
             ] as ExportColumn<typeof filteredSectors[number]>[]}
           />
@@ -196,6 +208,7 @@ export function SectorTypes() {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sector ID</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Sector Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chart Colour</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
@@ -203,7 +216,7 @@ export function SectorTypes() {
               <tbody className="divide-y divide-gray-200">
                 {filteredSectors.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
                       No sectors found
                     </td>
                   </tr>
@@ -215,6 +228,20 @@ export function SectorTypes() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="text-sm font-bold text-gray-900">{sector.sector_name}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {sector.color ? (
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="w-5 h-5 rounded border border-gray-200 shrink-0"
+                              style={{ background: sector.color }}
+                              aria-hidden="true"
+                            />
+                            <span className="text-xs font-mono text-gray-500">{sector.color}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">Not set</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -283,6 +310,42 @@ export function SectorTypes() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter sector name"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Chart Colour</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={formData.color || '#15803d'}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                    className="w-12 h-10 border border-gray-300 rounded-lg cursor-pointer p-1"
+                    aria-label="Chart colour"
+                  />
+                  <input
+                    type="text"
+                    value={formData.color}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                    pattern="^#[0-9a-fA-F]{6}$"
+                    className="w-32 px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="auto"
+                  />
+                  {formData.color && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, color: '' })}
+                      className="px-3 py-2 text-xs font-medium text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Auto
+                    </button>
+                  )}
+                </div>
+                {/* Leaving it blank is the normal case: the database picks the
+                    lowest colour no other sector is using, from a palette checked
+                    for colourblind separation and contrast. A hand-picked colour
+                    has neither guarantee, so it is opt-in rather than the default. */}
+                <p className="text-xs text-gray-500 mt-1.5">
+                  Leave blank to get the next unused colour automatically. Used on the dashboard charts.
+                </p>
               </div>
               <div className="flex items-center">
                 <input

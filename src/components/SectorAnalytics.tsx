@@ -25,7 +25,7 @@ export function SectorAnalytics() {
       const [transactionsRes, pricesRes, sharesRes, dividendsRes] = await Promise.all([
         supabase.from('transactions').select('share_id, transaction_type, no_of_shares, total_amount'),
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('shares').select('id, sector'),
+        supabase.from('shares').select('id, sector, sector_types(sector_name)'),
         supabase.from('dividends').select('share_id, amount_net')
       ]);
 
@@ -40,9 +40,20 @@ export function SectorAnalytics() {
         }
       });
 
+      // `sector_types.sector_name` is the live sector, maintained on the Sector
+      // Types screen and reached through shares.sector_id. `shares.sector` is the
+      // legacy free-text column and defaults to '' — reading it alone, as this
+      // did, put every share in 'Other'. Dashboard and Portfolio both resolve the
+      // name this way; matching them is what keeps a sector's colour the same on
+      // every page.
       const shareToSector = new Map<string, string>();
-      sharesRes.data?.forEach(s => {
-        shareToSector.set(s.id, s.sector || 'Other');
+      sharesRes.data?.forEach((s: {
+        id: string;
+        sector?: string;
+        sector_types?: { sector_name: string } | { sector_name: string }[] | null;
+      }) => {
+        const st = Array.isArray(s.sector_types) ? s.sector_types[0] : s.sector_types;
+        shareToSector.set(s.id, st?.sector_name || s.sector || 'Other');
       });
 
       const holdingsMap = new Map<string, { holdings: number; cost: number }>();

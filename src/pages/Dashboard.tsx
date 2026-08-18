@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { selectAll } from '../lib/selectAll';
+import { aerPercent, formatAer } from '../lib/aer';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
 import {
@@ -28,31 +30,9 @@ function fmtCur(v: number) {
 
 function fmtNum(v: number) { return v.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
-// ── XIRR ─────────────────────────────────────────────────────────────────────
-
-function xirr(cashFlows: Array<{ date: Date; amount: number }>, guess = 0.1): number {
-  if (cashFlows.length < 2) return 0;
-  const sorted = [...cashFlows].sort((a, b) => a.date.getTime() - b.date.getTime());
-  const d0 = sorted[0].date.getTime();
-  const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-  let rate = guess;
-  for (let iter = 0; iter < 200; iter++) {
-    let f = 0, df = 0;
-    for (const cf of sorted) {
-      const t = (cf.date.getTime() - d0) / MS_PER_YEAR;
-      const base = 1 + rate;
-      if (base <= 0) break;
-      const pv = Math.pow(base, t);
-      f  += cf.amount / pv;
-      df -= (t * cf.amount) / (pv * base);
-    }
-    if (Math.abs(df) < 1e-12) break;
-    const nr = rate - f / df;
-    if (Math.abs(nr - rate) < 1e-8) return nr;
-    rate = Math.max(-0.999, nr);
-  }
-  return rate;
-}
+// AER lives in ../lib/aer — this file used to carry its own copy of the solver
+// that returned its last iterate on non-convergence, so a failed solve surfaced
+// as a real-looking rate rather than "no answer".
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,6 +43,7 @@ interface ShareRow {
   ticker: string;
   share_name: string;
   sector: string;
+  sectorColor: string | null;
 }
 
 interface ShareMetrics {
@@ -70,6 +51,7 @@ interface ShareMetrics {
   ticker: string;
   shareName: string;
   sector: string;
+  sectorColor: string | null;
   heldShares: number;
   cost: number;        // cumulative cost of held shares
   totalCostAll: number; // total cost ever (incl. sold)
@@ -80,7 +62,8 @@ interface ShareMetrics {
   totalReturns: number;   // (marketValue + saleProceeds + dividends) - totalCostAll
   avgCostPerShare: number;
   latestPrice: number;
-  aer: number; // XIRR annualized return % (matches ShareAnalytics)
+  /** XIRR annualised return % (matches ShareAnalytics), null when none solves. */
+  aer: number | null;
 }
 
 // ── KPI summary card ─────────────────────────────────────────────────────────
@@ -241,35 +224,57 @@ export function Dashboard() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      let txnsQ = supabase.from('transactions')
-        .select('id, share_id, entity_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
-        .in('approval_status', ['MANUAL_APPROVED'])
-        .order('transaction_date', { ascending: true });
-      if (selectedEntityId) txnsQ = txnsQ.eq('entity_id', selectedEntityId);
+      // All paged — unbounded these were capped at db-max-rows, which left the
+      // price lookup missing shares and silently zeroed their market value.
+      const txnsQ = () => {
+        const q = supabase.from('transactions')
+          .select('id, share_id, entity_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('transaction_date', { ascending: true })
+          .order('id', { ascending: true });
+        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
+      };
 
-      let dividendsQ = supabase.from('dividends').select('share_id, entity_id, amount_net, payment_date');
-      if (selectedEntityId) dividendsQ = dividendsQ.eq('entity_id', selectedEntityId);
+      const dividendsQ = () => {
+        const q = supabase.from('dividends')
+          .select('share_id, entity_id, amount_net, payment_date')
+          .order('id', { ascending: true });
+        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
+      };
 
-      let openingQ = supabase.from('entity_share_opening_balances')
-        .select('share_id, entity_id, opening_shares, average_purchase_cost, effective_date');
-      if (selectedEntityId) openingQ = openingQ.eq('entity_id', selectedEntityId);
+      const openingQ = () => {
+        const q = supabase.from('entity_share_opening_balances')
+          .select('share_id, entity_id, opening_shares, average_purchase_cost, effective_date')
+          .order('id', { ascending: true });
+        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
+      };
 
-      const [sharesRes, txnsRes, pricesRes, dividendsRes, notesRes, openingRes] = await Promise.all([
-        supabase.from('shares')
-          .select('id, ticker, share_name, sector, sector_types(sector_name)')
+      const [sharesData, txnsData, pricesData, dividendsData, notesData, openingData] = await Promise.all([
+        selectAll(() => supabase.from('shares')
+          .select('id, ticker, share_name, sector, sector_types(sector_name, color)')
           .eq('is_active', true)
-          .order('share_name'),
-        txnsQ,
-        supabase.from('daily_share_prices')
+          .order('share_name')
+          .order('id', { ascending: true })),
+        selectAll(txnsQ),
+        selectAll(() => supabase.from('daily_share_prices')
           .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false }),
-        dividendsQ,
+          .order('effective_date', { ascending: false })
+          .order('id', { ascending: true })),
+        selectAll(dividendsQ),
         // Notes override transaction amounts with more accurate settled figures
-        supabase.from('buy_sell_notes')
+        selectAll(() => supabase.from('buy_sell_notes')
           .select('transaction_id, no_of_shares, gross_amount, note_type, trade_date')
-          .not('transaction_id', 'is', null),
-        openingQ,
+          .not('transaction_id', 'is', null)
+          .order('id', { ascending: true })),
+        selectAll(openingQ),
       ]);
+
+      const sharesRes    = { data: sharesData };
+      const txnsRes      = { data: txnsData };
+      const pricesRes    = { data: pricesData };
+      const dividendsRes = { data: dividendsData };
+      const notesRes     = { data: notesData };
+      const openingRes   = { data: openingData };
 
       const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
         id: s.id,
@@ -277,6 +282,10 @@ export function Dashboard() {
         share_name: s.share_name || s.ticker || '',
         // Prefer sector_types.sector_name, fall back to shares.sector column
         sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
+        // The colour stored against the sector, when there is one. Null for a share
+        // that has no sector_types row (it only carries the free-text shares.sector),
+        // which is what buildSectorColorMap's derived fallback is for.
+        sectorColor: (s.sector_types as { color: string | null } | null)?.color || null,
       }));
       setShares(shareRows);
 
@@ -388,19 +397,15 @@ export function Dashboard() {
         const tr      = (mv + h.saleProceeds + divs) - h.totalCostAll;
         const avgCPS  = h.held > 0 ? h.cost / h.held : 0;
 
-        // AER = XIRR annualized return (matches ShareAnalytics)
-        let aer = 0;
+        // AER = XIRR annualized return (matches ShareAnalytics and Portfolio Summary).
+        // mv is already net of brokerage, the same terminal basis those use.
         const cfs = [...(cfMap.get(shareId) || [])];
         if (mv > 0) cfs.push({ date: today, amount: mv });
-        if (cfs.length >= 2) {
-          try {
-            const rate = xirr(cfs);
-            if (isFinite(rate)) aer = rate * 100;
-          } catch { /* leave as 0 */ }
-        }
+        const aer = aerPercent(cfs);
 
         result.push({
           shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
+          sectorColor: sr.sectorColor,
           heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
           marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
           netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,
@@ -485,9 +490,18 @@ export function Dashboard() {
   // top-5 pies came out mostly grey.
   const shareColorMap = buildShareColorMap(held);
   const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
-  // Sectors stay keyed off all of `metrics`: the portfolio table below lists
-  // sold-out shares too, and each row is tinted by its sector.
-  const sectorColorMap = buildSectorColorMap(metrics);
+
+  // Sectors are keyed off `shares`, not `metrics`. `metrics` is built from
+  // `holdMap`, so it only covers shares that have a transaction or an opening
+  // balance — the portfolio table below lists every active share, including ones
+  // that have never traded, and those would miss the map and come out grey.
+  // `shares` is the safe superset: `metrics` is derived from it and drops any
+  // share it cannot find there, so it can never hold a sector `shares` lacks.
+  //
+  // Both functions are handed to Sections 5 and 6 rather than rebuilt there. A
+  // section that derives its own map from a narrower list assigns different slots
+  // and paints the same sector two colours on one page.
+  const sectorColorMap = buildSectorColorMap(shares);
   const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Top 5 contributors by net market value (held > 0)
@@ -522,7 +536,11 @@ export function Dashboard() {
   // Top-5 bar charts — use share name for x-axis labels
   const top5PriceCost  = top5.map(m => ({ label: m.shareName || m.ticker, price: m.latestPrice,      cost: m.avgCostPerShare, color: shareColor(m.ticker) }));
   const top5BalShares  = top5.map(m => ({ label: m.shareName || m.ticker, value: m.heldShares,        color: shareColor(m.ticker) }));
-  const top5AER        = top5.map(m => ({ label: m.shareName || m.ticker, value: m.aer,               color: shareColor(m.ticker) }));
+  // Shares with no computable AER are left out of the chart rather than
+  // plotted as a 0% bar, which would read as a flat return.
+  const top5AER        = top5
+    .filter(m => m.aer !== null)
+    .map(m => ({ label: m.shareName || m.ticker, value: m.aer as number, color: shareColor(m.ticker) }));
 
   // Share portfolio table — active shares with holdings, then the rest (dimmed)
   const heldIds = new Set(held.map(m => m.shareId));
@@ -807,7 +825,7 @@ export function Dashboard() {
                         </td>
                         <td className="py-1.5 text-right text-gray-600">{fmtNum(m.heldShares)}</td>
                         <td className="py-1.5 text-right text-gray-800 font-semibold">{fmtCur(m.marketValue)}</td>
-                        <td className={`py-1.5 text-right font-semibold ${m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{m.aer.toFixed(1)}%</td>
+                        <td className={`py-1.5 text-right font-semibold ${m.aer === null ? 'text-gray-400' : m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatAer(m.aer, 1)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -819,10 +837,10 @@ export function Dashboard() {
       </div>
 
       {/* ── Section 5: Total Returns by Sector ────────────────────────────── */}
-      <Section5TotalReturnsBySector metrics={metrics} />
+      <Section5TotalReturnsBySector metrics={metrics} shareColor={shareColor} sectorColor={sectorColor} />
 
       {/* ── Section 6: Share Name Cards ───────────────────────────────────── */}
-      <Section6ShareCards metrics={metrics} entityName={selectedEntityName} />
+      <Section6ShareCards metrics={metrics} entityName={selectedEntityName} sectorColor={sectorColor} />
 
     </div>
   );
@@ -838,16 +856,16 @@ const SECTOR_DISPLAY_ORDER = [
   'Industries',
 ];
 
-function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) {
+function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
+  metrics: ShareMetrics[];
+  shareColor: (ticker: string) => string;
+  sectorColor: (sector: string) => string;
+}) {
   const held = metrics.filter(m => m.heldShares > 0);
 
-  // Built from every held share, not from each sector's slice, so a ticker keeps
-  // the same colour here as in the top-5 charts above. Indexing within each
-  // sector previously gave the same share a different colour in every pie.
-  const shareColorMap = buildShareColorMap(held);
-  const shareColor = (ticker: string) => shareColorMap.get(ticker) ?? CHART_COLOR_FALLBACK;
-  const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
+  // Colours come from the parent, so a ticker keeps the same colour here as in
+  // the top-5 charts above. Deriving them per sector slice previously gave the
+  // same share a different colour in every pie.
 
   // Overall sector returns pie
   const sectorRetMap = new Map<string, number>();
@@ -915,13 +933,12 @@ function Section5TotalReturnsBySector({ metrics }: { metrics: ShareMetrics[] }) 
 
 // ── Section 6 component ───────────────────────────────────────────────────────
 
-function Section6ShareCards({ metrics, entityName }: { metrics: ShareMetrics[]; entityName: string }) {
+function Section6ShareCards({ metrics, entityName, sectorColor }: {
+  metrics: ShareMetrics[];
+  entityName: string;
+  sectorColor: (sector: string) => string;
+}) {
   const [selectedShareId, setSelectedShareId] = useState<string | null>(null);
-
-  // From the unsorted metrics, so the colour does not follow the market-value
-  // ordering applied just below.
-  const sectorColorMap = buildSectorColorMap(metrics);
-  const sectorColor = (sector: string) => sectorColorMap.get(sector) ?? CHART_COLOR_FALLBACK;
 
   // Shares ordered descending by total market value
   const allMetrics = [...metrics].sort((a, b) => b.marketValue - a.marketValue);
@@ -1013,9 +1030,9 @@ function Section6ShareCards({ metrics, entityName }: { metrics: ShareMetrics[]; 
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard
                     label="AER"
-                    value={`${selected.aer.toFixed(1)}%`}
+                    value={formatAer(selected.aer, 1)}
                     bg="bg-yellow-50"
-                    textColor={selected.aer >= 0 ? 'text-green-700' : 'text-red-600'}
+                    textColor={selected.aer === null ? 'text-gray-400' : selected.aer >= 0 ? 'text-green-700' : 'text-red-600'}
                     border="border-yellow-200"
                   />
                   <MetricCard
