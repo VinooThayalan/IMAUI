@@ -148,13 +148,29 @@ function computeRows(
   marketPrice: number,
   scrips: ScripRecord[] = [],
 ): ComputedRow[] {
-  const sorted     = [...notes].sort((a, b) => (a.trade_date ?? '') < (b.trade_date ?? '') ? -1 : 1);
-  const sortedDivs = [...dividends].sort((a, b) => (a.payment_date ?? '') < (b.payment_date ?? '') ? -1 : 1);
-  const sortedScrips = [...scrips].sort((a, b) => {
-    const da = a.effective_date ?? a.entry_date;
-    const db = b.effective_date ?? b.entry_date;
-    return da < db ? -1 : da > db ? 1 : 0;
-  });
+  /*
+    Ties must compare equal.
+
+    These comparators used to return 1 for "not less than", so two events on the
+    same date never compared equal and the sort was free to order them either
+    way. That is not academic: a share with a buy and a sell of the same size on
+    one day runs the two in whichever order the sort happened to produce, and
+    each order leaves a different average cost behind.
+
+    Returning 0 makes the sort stable by specification, so same-date events keep
+    the order they arrived in -- the query sorts by (trade_date, id), so that
+    order is itself deterministic. Same data in, same numbers out.
+
+    Which of a same-day buy and sell truly came first is not recorded anywhere:
+    the notes carry a trade date but no trade time. Deterministic is the most
+    this can be without that.
+  */
+  const byDate = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+  const sorted     = [...notes].sort((a, b) => byDate(a.trade_date ?? '', b.trade_date ?? ''));
+  const sortedDivs = [...dividends].sort((a, b) => byDate(a.payment_date ?? '', b.payment_date ?? ''));
+  const sortedScrips = [...scrips].sort((a, b) =>
+    byDate(a.effective_date ?? a.entry_date, b.effective_date ?? b.entry_date));
 
   type Ev = { date: string } & (
     | { kind: 'note'; note: RawNote }

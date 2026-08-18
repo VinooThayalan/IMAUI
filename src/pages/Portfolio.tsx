@@ -1,6 +1,7 @@
 import { PieChart, TrendingUp, TrendingDown, Wallet, Percent, Download } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { selectAll } from '../lib/selectAll';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 
 /**
@@ -200,14 +201,23 @@ export function Portfolio() {
 
       // ── Cache miss: read holdings from share_analytics_cache ─────────────
       // The last row of each entity-share group has the final cumulative values.
-      const { data: analyticsRows, error: analyticsErr } = await supabase
-        .from('share_analytics_cache')
-        .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, source_hash')
-        .order('entity_name', { ascending: true })
-        .order('share_ticker', { ascending: true })
-        .order('trade_date', { ascending: true });
-
-      if (analyticsErr) throw analyticsErr;
+      //
+      // Ordered by row_index, the order the rows were actually computed in, and
+      // paged so the read is not truncated at db-max-rows.
+      //
+      // trade_date cannot order this. A buy and a sell on one day tie, and the
+      // tie was broken arbitrarily -- land the buy last and the group reports a
+      // balance inflated by the whole sale, because the sell that cancelled it
+      // is no longer the final row.
+      const analyticsRows = await selectAll(() =>
+        supabase
+          .from('share_analytics_cache')
+          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, source_hash')
+          .order('entity_name', { ascending: true })
+          .order('share_ticker', { ascending: true })
+          .order('row_index', { ascending: true })
+          .order('id', { ascending: true }),
+      );
 
       // If share_analytics_cache is empty or the hash doesn't match, we need
       // to fall back to computing from source tables directly.
@@ -220,7 +230,7 @@ export function Portfolio() {
         for (const r of analyticsRows) {
           if (entityId && r.entity_id !== entityId) continue;
           const key = `${r.entity_id}__${r.share_id}`;
-          // Since ordered by trade_date ascending, last entry wins = final state
+          // Ordered by row_index, so the last entry is the final computed state
           lastRowMap.set(key, {
             held: Number(r.share_cum_bal) || 0,
             cost: Number(r.av_cost) || 0,
