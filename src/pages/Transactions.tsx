@@ -679,7 +679,22 @@ export function Transactions() {
 
       const txnPayload = {
         entity_id: formData.entity_id,
-        broker_id: selectedEntityBroker?.broker_id || null,
+        /*
+          The explicitly chosen broker wins.
+
+          On a Custodian account the account row carries no broker -- the CDS
+          number identifies a custodian, not the house that executed the trade --
+          which is why the form shows a separate, required "Broker Name" dropdown
+          for that case. That choice was collected and then dropped here: broker_id
+          came only from the account row, so it saved as null and every downstream
+          consumer had nothing to resolve. All 478 existing transactions have a
+          null broker_id for this reason.
+
+          For a Broker account, selected_broker_name_id is cleared when the
+          relationship type changes, so this falls through to the account row's own
+          broker exactly as before.
+        */
+        broker_id: formData.selected_broker_name_id || selectedEntityBroker?.broker_id || null,
         bank_id: formData.selected_bank_id || null,
         cds_account_id: selectedEntityBroker?.relationship_type === 'Custodian'
           ? selectedEntityBroker?.custodian_account_number
@@ -955,26 +970,16 @@ export function Transactions() {
     const entityName = getEntityName(transaction.entity_id);
     const shareInfo = getShareInfo(transaction.share_id);
 
-    const entityBroker = entityBrokers.find(eb =>
-      eb.entity_id === transaction.entity_id && (
-        (transaction.broker_id && eb.broker_id === transaction.broker_id) ||
-        (transaction.cds_account_id && (
-          eb.broker_account_number === transaction.cds_account_id ||
-          eb.custodian_account_number === transaction.cds_account_id
-        ))
-      )
-    );
-    const fallbackEntityBroker = !transaction.broker_id && !entityBroker?.broker_id
-      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
-      : null;
+    // The shared resolver, not the copy of the old lookup that used to sit here.
+    // That copy fell back to the first broker assigned to the entity, so an
+    // approval document could be printed naming a brokerage that was guessed.
+    const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
+      resolveTransactionBroker(transaction);
+
     const cdsAccount = transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A';
-    const brokerName = transaction.broker_id
-      ? getBrokerName(transaction.broker_id)
-      : entityBroker?.broker_id
-        ? getBrokerName(entityBroker.broker_id)
-        : fallbackEntityBroker?.broker_id
-          ? getBrokerName(fallbackEntityBroker.broker_id)
-          : (entityBroker as any)?.broker_text || 'N/A';
+    const brokerName = resolvedBroker?.broker_name
+      || (entityBroker as { broker_text?: string } | null)?.broker_text
+      || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
     const currentDate = new Date().toLocaleDateString();
 
     // Who generated this document. Falls back to a signature line when the
@@ -1191,26 +1196,19 @@ export function Transactions() {
         ? brokerageFeeTypes.find(ft => ft.id === selectedTransaction.brokerage_fee_type_id)
         : null;
 
-      const entityBroker = entityBrokers.find(eb =>
-        eb.entity_id === selectedTransaction.entity_id && (
-          (selectedTransaction.broker_id && eb.broker_id === selectedTransaction.broker_id) ||
-          (selectedTransaction.cds_account_id && (
-            eb.broker_account_number === selectedTransaction.cds_account_id ||
-            eb.custodian_account_number === selectedTransaction.cds_account_id
-          ))
-        )
-      );
-      const fallbackEntityBroker = !selectedTransaction.broker_id && !entityBroker?.broker_id
-        ? entityBrokers.find(eb => eb.entity_id === selectedTransaction.entity_id && eb.broker_id)
-        : null;
+      /*
+        The same resolver the modal uses, rather than the copy of the old lookup
+        that used to live here. That copy ended in `fallbackEntityBroker` -- the
+        first broker assigned to the entity -- so when nothing resolved it named
+        a guessed brokerage inside an email about a client's trade. The resolver
+        deliberately does not guess.
+      */
+      const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
+        resolveTransactionBroker(selectedTransaction);
 
-      const brokerName = selectedTransaction.broker_id
-        ? getBrokerName(selectedTransaction.broker_id)
-        : entityBroker?.broker_id
-          ? getBrokerName(entityBroker.broker_id)
-          : fallbackEntityBroker?.broker_id
-            ? getBrokerName(fallbackEntityBroker.broker_id)
-            : (entityBroker as any)?.broker_text || 'N/A';
+      const brokerName = resolvedBroker?.broker_name
+        || (entityBroker as { broker_text?: string } | null)?.broker_text
+        || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
 
       const transactionData = {
         entity: entityName,
@@ -1338,9 +1336,25 @@ export function Transactions() {
     */
     const broker = exact ?? (candidates.length === 1 ? candidates[0] : null);
 
+    /*
+      What the modal offers as one-click recipients.
+
+      Once the broker is known -- the transaction names one, or its CDS account
+      matches an assignment -- that is the answer, and listing the entity's other
+      brokers beside it reads as though the choice were still open. Picking ACS
+      Capital on the transaction and then being shown two brokers in the email
+      modal is the reported symptom.
+
+      The full list is still offered when the transaction is genuinely ambiguous,
+      which is the case `candidates` was introduced for: several brokers assigned,
+      nothing to match on, and a user who has to choose.
+    */
+    const recipientOptions = exact ? [exact] : candidates;
+
     return {
       broker,
       candidates,
+      recipientOptions,
       ambiguous: !exact && candidates.length > 1,
       entityBroker: entityBroker ?? fallbackEntityBroker,
     };
@@ -1356,12 +1370,18 @@ export function Transactions() {
 
     const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
       resolveTransactionBroker(transaction);
-    // Display may name every assigned broker; addressing an email may not guess
-    // among them. Hence candidates here but only `broker` for the To field.
+    /*
+      Only the broker this transaction actually resolves to.
+
+      This used to fall back to joining every assigned broker, which rendered as
+      "First Capital Equities (Pvt) Ltd, Softlogic Brokers (Pvt) Ltd" in the
+      Broker row and read as though the transaction had two of them. It has one,
+      or none recorded -- a list of who it might have been is not a broker name,
+      and this value is also sent in the email body.
+    */
     const brokerName = resolvedBroker?.broker_name
-      || (brokerCandidates.length > 0 ? brokerCandidates.map(b => b.broker_name).join(', ') : null)
       || (entityBroker as { broker_text?: string } | null)?.broker_text
-      || 'N/A';
+      || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
 
     return {
       entity: entityName,
@@ -2782,7 +2802,10 @@ export function Transactions() {
         const data = getTransactionEmailData(selectedTransaction);
         // Same resolver the displayed name uses, so the address always belongs to
         // the broker shown above it.
-        const { candidates: brokerCandidates, ambiguous: ambiguousBroker } =
+        // recipientOptions, not candidates: once the transaction's broker is
+        // known this is just that broker, so the modal stops offering the
+        // entity's other brokers as if the choice were still open.
+        const { recipientOptions: brokerCandidates, ambiguous: ambiguousBroker } =
           resolveTransactionBroker(selectedTransaction);
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
@@ -2880,20 +2903,22 @@ export function Transactions() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       disabled={sendingEmail}
                     />
-                    {/* Every broker assigned to this entity, each usable as the
-                        recipient or addable to CC — so several brokers can be
-                        emailed without typing addresses by hand.
+                    {/* The broker this transaction resolves to, usable as the
+                        recipient or addable to CC without typing the address.
 
-                        When more than one is assigned and none matches the
-                        transaction's CDS account, nothing is prefilled on purpose:
-                        guessing would address a client's trade details to an
-                        unrelated brokerage. */}
+                        Only when the transaction is ambiguous — several brokers
+                        assigned to the entity and none matching its CDS account —
+                        does this list them all for the user to choose between.
+                        Nothing is prefilled in that case on purpose: guessing
+                        would address a client's trade details to an unrelated
+                        brokerage. */}
                     {brokerCandidates.length > 0 && (
                       <div className="mt-1 space-y-0.5">
                         {ambiguousBroker && (
                           <p className="text-xs text-amber-600">
-                            {brokerCandidates.length} brokers are assigned to this entity and none matches
-                            this transaction&apos;s CDS account — pick the recipient.
+                            No broker is recorded on this transaction, so the recipient cannot be
+                            determined — pick one of the {brokerCandidates.length} assigned to this entity.
+                            Editing the transaction and setting Broker Name will resolve it permanently.
                           </p>
                         )}
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
