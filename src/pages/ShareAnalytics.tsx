@@ -856,30 +856,9 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
                   </>
                 );
               })()}
-              <tr className="bg-gray-100">
-                <td colSpan={5} className="px-3 py-2.5 text-gray-500 uppercase">Totals / Final</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.purchase_cost, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(group.rows.reduce((s, r) => s + r.sale_value, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-orange-700">{fmt(group.rows.filter(r => r.row_type === 'sell').reduce((s, r) => s + r.no_of_shares * r.av_price, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-900">{fmt(last.av_price)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-yellow-700">{fmt(group.rows.reduce((s, r) => s + r.dividend, 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-gray-300">—</td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  <span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0))}>
-                    {fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0))}
-                  </span>
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0 ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span> : '—'}
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono">
-                  {group.market_price > 0
-                    ? <span className={clsSurplus(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}>{fmt(last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100)))}</span>
-                    : <span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span>}
-                </td>
-                <td />
-              </tr>
+              {/* The "Totals / Final" row was removed here — reported as not
+                  required. The Market Value and Cost per share rows above stay:
+                  they are the closing position, not a column summary. */}
             </tfoot>
           </table>
         </div>
