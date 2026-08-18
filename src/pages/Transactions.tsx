@@ -1338,9 +1338,25 @@ export function Transactions() {
     */
     const broker = exact ?? (candidates.length === 1 ? candidates[0] : null);
 
+    /*
+      What the modal offers as one-click recipients.
+
+      Once the broker is known -- the transaction names one, or its CDS account
+      matches an assignment -- that is the answer, and listing the entity's other
+      brokers beside it reads as though the choice were still open. Picking ACS
+      Capital on the transaction and then being shown two brokers in the email
+      modal is the reported symptom.
+
+      The full list is still offered when the transaction is genuinely ambiguous,
+      which is the case `candidates` was introduced for: several brokers assigned,
+      nothing to match on, and a user who has to choose.
+    */
+    const recipientOptions = exact ? [exact] : candidates;
+
     return {
       broker,
       candidates,
+      recipientOptions,
       ambiguous: !exact && candidates.length > 1,
       entityBroker: entityBroker ?? fallbackEntityBroker,
     };
@@ -2782,7 +2798,10 @@ export function Transactions() {
         const data = getTransactionEmailData(selectedTransaction);
         // Same resolver the displayed name uses, so the address always belongs to
         // the broker shown above it.
-        const { candidates: brokerCandidates, ambiguous: ambiguousBroker } =
+        // recipientOptions, not candidates: once the transaction's broker is
+        // known this is just that broker, so the modal stops offering the
+        // entity's other brokers as if the choice were still open.
+        const { recipientOptions: brokerCandidates, ambiguous: ambiguousBroker } =
           resolveTransactionBroker(selectedTransaction);
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
@@ -2880,14 +2899,15 @@ export function Transactions() {
                       className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                       disabled={sendingEmail}
                     />
-                    {/* Every broker assigned to this entity, each usable as the
-                        recipient or addable to CC — so several brokers can be
-                        emailed without typing addresses by hand.
+                    {/* The broker this transaction resolves to, usable as the
+                        recipient or addable to CC without typing the address.
 
-                        When more than one is assigned and none matches the
-                        transaction's CDS account, nothing is prefilled on purpose:
-                        guessing would address a client's trade details to an
-                        unrelated brokerage. */}
+                        Only when the transaction is ambiguous — several brokers
+                        assigned to the entity and none matching its CDS account —
+                        does this list them all for the user to choose between.
+                        Nothing is prefilled in that case on purpose: guessing
+                        would address a client's trade details to an unrelated
+                        brokerage. */}
                     {brokerCandidates.length > 0 && (
                       <div className="mt-1 space-y-0.5">
                         {ambiguousBroker && (
