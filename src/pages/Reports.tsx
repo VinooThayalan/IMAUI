@@ -1,6 +1,8 @@
 import { FileText, Calendar, Filter, PieChart, BarChart3, Printer, X, Download, TrendingUp, BookOpen, Layers, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { selectAll } from '../lib/selectAll';
+import { aerPercent, formatAer, netMarketValue, type CashFlow } from '../lib/aer';
 import { useAuth } from '../contexts/AuthContext';
 
 interface ShareHolding {
@@ -32,7 +34,8 @@ interface PortfolioHolding {
     dividends: number;
     cash_dps_net: number;
     total_returns: number;
-    aer: number;
+    /** null when no annualised rate solves. */
+    aer: number | null;
     remarks: string;
   }[];
   total_cost: number;
@@ -146,7 +149,8 @@ interface ContributorRow {
   market_value: number;
   dividends: number;
   total_returns: number;
-  aer: number;
+  /** null when no annualised rate solves. */
+  aer: number | null;
 }
 
 type ReportType = 'share' | 'portfolio' | 'detailed' | 'cashbook' | 'dividends' | 'scrip' | 'analytics' | 'sector-wise' | 'contributors' | null;
@@ -193,39 +197,36 @@ export function Reports() {
     try {
       setLoading(true);
 
-      let query = supabase
-        .from('transactions')
-        .select(`
-          share_id,
-          transaction_type,
-          no_of_shares,
-          total_amount,
-          transaction_date,
-          shares (
-            id,
-            ticker,
-            share_name
-          )
-        `)
-        .in('approval_status', ['MANUAL_APPROVED']);
+      const buildQuery = () => {
+        let q = supabase
+          .from('transactions')
+          .select(`
+            share_id,
+            transaction_type,
+            no_of_shares,
+            total_amount,
+            transaction_date,
+            shares (
+              id,
+              ticker,
+              share_name
+            )
+          `)
+          .in('approval_status', ['MANUAL_APPROVED'])
+          .order('id', { ascending: true });
+        if (fromDate) q = q.gte('transaction_date', fromDate);
+        if (toDate) q = q.lte('transaction_date', toDate);
+        return q;
+      };
 
-      if (fromDate) {
-        query = query.gte('transaction_date', fromDate);
-      }
-      if (toDate) {
-        query = query.lte('transaction_date', toDate);
-      }
+      // Paged — see selectAll: an unbounded select is silently truncated.
+      const transactions = await selectAll(buildQuery);
 
-      const { data: transactions, error: txError } = await query;
-
-      if (txError) throw txError;
-
-      const { data: prices, error: priceError } = await supabase
+      const prices = await selectAll(() => supabase
         .from('daily_share_prices')
         .select('share_id, share_price, effective_date')
-        .order('effective_date', { ascending: false });
-
-      if (priceError) throw priceError;
+        .order('effective_date', { ascending: false })
+        .order('id', { ascending: true }));
 
       const latestPrices = new Map<string, number>();
       prices?.forEach(p => {
@@ -304,7 +305,8 @@ export function Reports() {
     try {
       setLoading(true);
 
-      let transactionsQuery = supabase
+      const buildTransactionsQuery = () => {
+        let q = supabase
         .from('transactions')
         .select(`
           entity_id,
@@ -313,6 +315,7 @@ export function Reports() {
           transaction_date,
           no_of_shares,
           total_amount,
+          brokerage_fee_rate,
           entities (
             id,
             name,
@@ -326,41 +329,40 @@ export function Reports() {
           )
         `)
         .in('approval_status', ['MANUAL_APPROVED'])
-        .order('transaction_date', { ascending: true });
+        .order('transaction_date', { ascending: true })
+        .order('id', { ascending: true });
+        if (fromDate) q = q.gte('transaction_date', fromDate);
+        if (toDate) q = q.lte('transaction_date', toDate);
+        return q;
+      };
 
-      if (fromDate) {
-        transactionsQuery = transactionsQuery.gte('transaction_date', fromDate);
-      }
-      if (toDate) {
-        transactionsQuery = transactionsQuery.lte('transaction_date', toDate);
-      }
+      const buildDividendsQuery = () => {
+        let q = supabase
+          .from('dividends')
+          .select('entity_id, share_id, payment_date, amount_net, amount_gross')
+          .order('payment_date', { ascending: false })
+          .order('id', { ascending: true });
+        if (fromDate) q = q.gte('payment_date', fromDate);
+        if (toDate) q = q.lte('payment_date', toDate);
+        return q;
+      };
 
-      let dividendsQuery = supabase
-        .from('dividends')
-        .select('entity_id, share_id, payment_date, amount_net, amount_gross')
-        .order('payment_date', { ascending: false });
-
-      if (fromDate) {
-        dividendsQuery = dividendsQuery.gte('payment_date', fromDate);
-      }
-      if (toDate) {
-        dividendsQuery = dividendsQuery.lte('payment_date', toDate);
-      }
-
-      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
-        transactionsQuery,
-        dividendsQuery,
-        supabase
+      // Paged. Run unbounded these were capped at db-max-rows: the price lookup
+      // is ordered newest-first, so shares past the cap resolved to a market
+      // price of zero, which now feeds the XIRR rather than only a total.
+      const [transactionsData, dividendsData, pricesData] = await Promise.all([
+        selectAll(buildTransactionsQuery),
+        selectAll(buildDividendsQuery),
+        selectAll(() => supabase
           .from('daily_share_prices')
           .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false }),
-        supabase.from('entities').select('id, name, entity_id')
+          .order('effective_date', { ascending: false })
+          .order('id', { ascending: true })),
       ]);
 
-      if (transactionsRes.error) throw transactionsRes.error;
-      if (dividendsRes.error) throw dividendsRes.error;
-      if (pricesRes.error) throw pricesRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
+      const transactionsRes = { data: transactionsData };
+      const dividendsRes    = { data: dividendsData };
+      const pricesRes       = { data: pricesData };
 
       const latestPrices = new Map<string, number>();
       pricesRes.data?.forEach(p => {
@@ -391,6 +393,8 @@ export function Reports() {
           total_shares: number;
           total_cost: number;
           first_tx_date: string;
+          fee_rate: number;
+          cash_flows: CashFlow[];
         }>;
       }>();
 
@@ -416,17 +420,40 @@ export function Reports() {
             name: tx.shares.share_name,
             total_shares: 0,
             total_cost: 0,
-            first_tx_date: tx.transaction_date
+            first_tx_date: tx.transaction_date,
+            fee_rate: 0,
+            cash_flows: [],
           });
         }
 
         const share = entity.shares.get(shareId)!;
-        if (tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy') {
+        if (tx.brokerage_fee_rate != null) share.fee_rate = Number(tx.brokerage_fee_rate);
+
+        const amount = Number(tx.total_amount) || 0;
+        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
+        if (isBuy) {
           share.total_shares += Number(tx.no_of_shares);
-          share.total_cost += Number(tx.total_amount);
+          share.total_cost += amount;
         } else if (tx.transaction_type === 'SELL' || tx.transaction_type === 'Sell') {
           share.total_shares -= Number(tx.no_of_shares);
-          share.total_cost -= Number(tx.total_amount);
+          share.total_cost -= amount;
+        }
+        // Dated flows for the XIRR: buys out, sells in.
+        if (tx.transaction_date && amount > 0) {
+          share.cash_flows.push({
+            date: new Date(tx.transaction_date + 'T00:00:00'),
+            amount: isBuy ? -amount : amount,
+          });
+        }
+      });
+
+      // Dividends are inflows on their payment date.
+      dividendsRes.data?.forEach((d: any) => {
+        const entity = entityMap.get(d.entity_id);
+        const share = entity?.shares.get(d.share_id);
+        const amount = Number(d.amount_net) || 0;
+        if (share && d.payment_date && amount > 0) {
+          share.cash_flows.push({ date: new Date(d.payment_date + 'T00:00:00'), amount });
         }
       });
 
@@ -436,7 +463,9 @@ export function Reports() {
             .map(([shareId, share]) => {
               const marketPrice = latestPrices.get(shareId) || 0;
               const costPerShare = share.total_shares > 0 ? share.total_cost / share.total_shares : 0;
-              const marketValueNet = share.total_shares * marketPrice;
+              // Net of brokerage, matching the column label and every other
+              // screen's terminal value. This used to be the gross figure.
+              const marketValueNet = netMarketValue(share.total_shares, marketPrice, share.fee_rate);
 
               const divKey = `${entityId}-${shareId}`;
               const divData = dividendMap.get(divKey) || { total: 0, count: 0, lastFY: 0 };
@@ -445,8 +474,12 @@ export function Reports() {
 
               const totalReturns = (marketValueNet - share.total_cost) + totalDividends;
 
-              const daysSinceFirst = Math.max(1, Math.floor((new Date().getTime() - new Date(share.first_tx_date).getTime()) / (1000 * 60 * 60 * 24)));
-              const aer = share.total_cost > 0 ? (totalReturns / share.total_cost) * (365 / daysSinceFirst) * 100 : 0;
+              // XIRR, via the shared helper. This was a simple non-compounded
+              // (returns / cost) x (365 / days), so the same holding reported a
+              // different AER here than on Share Analytics or Portfolio Summary.
+              const aerCfs = [...share.cash_flows];
+              if (marketValueNet > 0) aerCfs.push({ date: new Date(), amount: marketValueNet });
+              const aer = aerPercent(aerCfs);
 
               return {
                 sector: share.sector,
@@ -501,7 +534,8 @@ export function Reports() {
     try {
       setLoading(true);
 
-      let transactionsQuery = supabase
+      const buildTransactionsQuery = () => {
+        let q = supabase
         .from('transactions')
         .select(`
           id,
@@ -526,41 +560,40 @@ export function Reports() {
           )
         `)
         .in('approval_status', ['MANUAL_APPROVED'])
-        .order('transaction_date', { ascending: true });
+        .order('transaction_date', { ascending: true })
+        .order('id', { ascending: true });
+        if (fromDate) q = q.gte('transaction_date', fromDate);
+        if (toDate) q = q.lte('transaction_date', toDate);
+        return q;
+      };
 
-      if (fromDate) {
-        transactionsQuery = transactionsQuery.gte('transaction_date', fromDate);
-      }
-      if (toDate) {
-        transactionsQuery = transactionsQuery.lte('transaction_date', toDate);
-      }
+      const buildDividendsQuery = () => {
+        let q = supabase
+          .from('dividends')
+          .select('entity_id, share_id, payment_date, amount_net')
+          .order('payment_date', { ascending: true })
+          .order('id', { ascending: true });
+        if (fromDate) q = q.gte('payment_date', fromDate);
+        if (toDate) q = q.lte('payment_date', toDate);
+        return q;
+      };
 
-      let dividendsQuery = supabase
-        .from('dividends')
-        .select('entity_id, share_id, payment_date, amount_net')
-        .order('payment_date', { ascending: true });
-
-      if (fromDate) {
-        dividendsQuery = dividendsQuery.gte('payment_date', fromDate);
-      }
-      if (toDate) {
-        dividendsQuery = dividendsQuery.lte('payment_date', toDate);
-      }
-
-      const [transactionsRes, dividendsRes, pricesRes, entitiesRes] = await Promise.all([
-        transactionsQuery,
-        dividendsQuery,
-        supabase
+      // Paged. Run unbounded these were capped at db-max-rows: the price lookup
+      // is ordered newest-first, so shares past the cap resolved to a market
+      // price of zero, which now feeds the XIRR rather than only a total.
+      const [transactionsData, dividendsData, pricesData] = await Promise.all([
+        selectAll(buildTransactionsQuery),
+        selectAll(buildDividendsQuery),
+        selectAll(() => supabase
           .from('daily_share_prices')
           .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false }),
-        supabase.from('entities').select('id, name, entity_id')
+          .order('effective_date', { ascending: false })
+          .order('id', { ascending: true })),
       ]);
 
-      if (transactionsRes.error) throw transactionsRes.error;
-      if (dividendsRes.error) throw dividendsRes.error;
-      if (pricesRes.error) throw pricesRes.error;
-      if (entitiesRes.error) throw entitiesRes.error;
+      const transactionsRes = { data: transactionsData };
+      const dividendsRes    = { data: dividendsData };
+      const pricesRes       = { data: pricesData };
 
       const latestPrices = new Map<string, number>();
       pricesRes.data?.forEach(p => {
@@ -1016,19 +1049,23 @@ export function Reports() {
     try {
       setLoading(true);
 
-      const [txRes, divRes, priceRes, obRes, sharesRes] = await Promise.all([
-        supabase.from('transactions')
-          .select('share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate')
+      const [txData, divData, priceData, obData, sharesData] = await Promise.all([
+        selectAll(() => supabase.from('transactions')
+          .select('share_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
           .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true }),
-        supabase.from('dividends').select('share_id, amount_net'),
-        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('share_id, opening_shares, average_purchase_cost'),
-        supabase.from('shares').select('id, ticker, share_name'),
+          .order('transaction_date', { ascending: true })
+          .order('id', { ascending: true })),
+        selectAll(() => supabase.from('dividends').select('share_id, amount_net, payment_date').order('id', { ascending: true })),
+        selectAll(() => supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }).order('id', { ascending: true })),
+        selectAll(() => supabase.from('entity_share_opening_balances').select('share_id, opening_shares, average_purchase_cost, effective_date').order('id', { ascending: true })),
+        selectAll(() => supabase.from('shares').select('id, ticker, share_name').order('id', { ascending: true })),
       ]);
 
-      if (txRes.error) throw txRes.error;
-      if (sharesRes.error) throw sharesRes.error;
+      const txRes     = { data: txData };
+      const divRes    = { data: divData };
+      const priceRes  = { data: priceData };
+      const obRes     = { data: obData };
+      const sharesRes = { data: sharesData };
 
       const latestPrices = new Map<string, number>();
       priceRes.data?.forEach((p: any) => { if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, p.share_price); });
@@ -1039,12 +1076,15 @@ export function Reports() {
       const divMap = new Map<string, number>();
       divRes.data?.forEach((d: any) => { divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + Number(d.amount_net)); });
 
-      type HoldAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
+      type HoldAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number; cashFlows: CashFlow[] };
       const holdMap = new Map<string, HoldAcc>();
+      const ensureHold = (shareId: string): HoldAcc => {
+        if (!holdMap.has(shareId)) holdMap.set(shareId, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0, cashFlows: [] });
+        return holdMap.get(shareId)!;
+      };
 
       obRes.data?.forEach((ob: any) => {
-        if (!holdMap.has(ob.share_id)) holdMap.set(ob.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
-        const h = holdMap.get(ob.share_id)!;
+        const h = ensureHold(ob.share_id);
         // average_purchase_cost is per share, so the opening cost is the
         // product — the same rule Portfolio.tsx and ShareAnalytics.tsx use.
         const openingShares = Number(ob.opening_shares) || 0;
@@ -1052,11 +1092,21 @@ export function Reports() {
         h.held += openingShares;
         h.cost += openingCost;
         h.totalCostAll += openingCost;
+        if (openingCost > 0 && ob.effective_date) {
+          h.cashFlows.push({ date: new Date(ob.effective_date + 'T00:00:00'), amount: -openingCost });
+        }
+      });
+
+      // Dividends as dated inflows, for the XIRR below.
+      divRes.data?.forEach((d: any) => {
+        const amount = Number(d.amount_net) || 0;
+        if (amount > 0 && d.payment_date) {
+          ensureHold(d.share_id).cashFlows.push({ date: new Date(d.payment_date + 'T00:00:00'), amount });
+        }
       });
 
       txRes.data?.forEach((tx: any) => {
-        if (!holdMap.has(tx.share_id)) holdMap.set(tx.share_id, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
-        const h = holdMap.get(tx.share_id)!;
+        const h = ensureHold(tx.share_id);
         const shares_qty = Number(tx.no_of_shares);
         const gross = Number(tx.total_amount);
         const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
@@ -1068,6 +1118,9 @@ export function Reports() {
           h.held = Math.max(0, h.held - shares_qty);
           h.cost = Math.max(0, h.cost - avgCPS * shares_qty);
           h.saleProceeds += gross;
+        }
+        if (tx.transaction_date && gross > 0) {
+          h.cashFlows.push({ date: new Date(tx.transaction_date + 'T00:00:00'), amount: isBuy ? -gross : gross });
         }
       });
 
@@ -1081,7 +1134,11 @@ export function Reports() {
         const mv = h.held * price * (1 - feeRate);
         const divs = divMap.get(shareId) || 0;
         const totalReturns = (mv + h.saleProceeds + divs) - h.totalCostAll;
-        const aer = h.cost > 0 ? ((mv - h.cost + divs) / h.cost) * 100 : 0;
+        // XIRR. This column is headed "AER %" but used to hold a plain
+        // (gain / cost) percentage that was never annualised at all.
+        const aerCfs = [...h.cashFlows];
+        if (mv > 0) aerCfs.push({ date: new Date(), amount: mv });
+        const aer = aerPercent(aerCfs);
         rows.push({ share_name: info.name, ticker: info.ticker, balance: h.held, total_cost: h.cost, market_value: mv, dividends: divs, total_returns: totalReturns, aer });
       });
 
@@ -1122,7 +1179,7 @@ export function Reports() {
       headers = ['Entity', 'Sector', 'Share', 'Balance', 'Cost', 'Cost/Share', 'Mkt Price', 'Mkt Value', 'Dividends', 'Total Returns', 'AER%'];
       portfolioData.forEach(entity => {
         entity.holdings.forEach(h => {
-          rows.push([entity.entity_name, h.sector, h.ticker, h.balance, h.cost.toFixed(2), h.cost_per_share.toFixed(4), h.market_price_per_share.toFixed(2), h.market_value_net.toFixed(2), h.dividends.toFixed(2), h.total_returns.toFixed(2), h.aer.toFixed(2)]);
+          rows.push([entity.entity_name, h.sector, h.ticker, h.balance, h.cost.toFixed(2), h.cost_per_share.toFixed(4), h.market_price_per_share.toFixed(2), h.market_value_net.toFixed(2), h.dividends.toFixed(2), h.total_returns.toFixed(2), formatAer(h.aer)]);
         });
       });
     }
@@ -1953,9 +2010,9 @@ export function Reports() {
                           {holding.total_returns.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </td>
                         <td className={`px-2 py-2 text-xs font-semibold text-right ${
-                          holding.aer >= 0 ? 'text-green-600' : 'text-red-600'
+                          holding.aer === null ? 'text-gray-400' : holding.aer >= 0 ? 'text-green-600' : 'text-red-600'
                         }`}>
-                          {holding.aer.toFixed(2)}%
+                          {formatAer(holding.aer)}
                         </td>
                         <td className="px-2 py-2 text-xs text-gray-900 text-right">
                           {holding.cash_dps_net > 0 ? holding.cash_dps_net.toFixed(2) : '-'}
@@ -2210,7 +2267,7 @@ export function Reports() {
                     <td className="px-4 py-3 text-right font-semibold text-blue-700">{fmt2(row.market_value)}</td>
                     <td className="px-4 py-3 text-right text-green-700">{row.dividends > 0 ? fmt2(row.dividends) : '-'}</td>
                     <td className={`px-4 py-3 text-right font-semibold ${row.total_returns >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmt2(row.total_returns)}</td>
-                    <td className={`px-4 py-3 text-right font-semibold ${row.aer >= 0 ? 'text-green-700' : 'text-red-600'}`}>{row.aer.toFixed(2)}%</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${row.aer === null ? 'text-gray-400' : row.aer >= 0 ? 'text-green-700' : 'text-red-600'}`}>{formatAer(row.aer)}</td>
                     <td className="px-4 py-3 text-right text-gray-700">{totMV > 0 ? ((row.market_value / totMV) * 100).toFixed(1) : '0.0'}%</td>
                   </tr>
                 ))}
