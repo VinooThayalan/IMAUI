@@ -43,6 +43,7 @@ interface ShareRow {
   ticker: string;
   share_name: string;
   sector: string;
+  sectorColor: string | null;
 }
 
 interface ShareMetrics {
@@ -50,6 +51,7 @@ interface ShareMetrics {
   ticker: string;
   shareName: string;
   sector: string;
+  sectorColor: string | null;
   heldShares: number;
   cost: number;        // cumulative cost of held shares
   totalCostAll: number; // total cost ever (incl. sold)
@@ -249,7 +251,7 @@ export function Dashboard() {
 
       const [sharesData, txnsData, pricesData, dividendsData, notesData, openingData] = await Promise.all([
         selectAll(() => supabase.from('shares')
-          .select('id, ticker, share_name, sector, sector_types(sector_name)')
+          .select('id, ticker, share_name, sector, sector_types(sector_name, color)')
           .eq('is_active', true)
           .order('share_name')
           .order('id', { ascending: true })),
@@ -280,6 +282,10 @@ export function Dashboard() {
         share_name: s.share_name || s.ticker || '',
         // Prefer sector_types.sector_name, fall back to shares.sector column
         sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
+        // The colour stored against the sector, when there is one. Null for a share
+        // that has no sector_types row (it only carries the free-text shares.sector),
+        // which is what buildSectorColorMap's derived fallback is for.
+        sectorColor: (s.sector_types as { color: string | null } | null)?.color || null,
       }));
       setShares(shareRows);
 
@@ -399,6 +405,7 @@ export function Dashboard() {
 
         result.push({
           shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
+          sectorColor: sr.sectorColor,
           heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
           marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
           netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,

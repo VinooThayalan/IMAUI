@@ -1,35 +1,47 @@
-/*
-  # Open All Master/Transaction Tables to Authenticated Users
 
-  ## Problem
-  Multiple tables have INSERT/UPDATE/DELETE policies that require is_app_admin(),
-  blocking non-admin authenticated users from managing data across most menus.
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- /*
+--   # Open All Master/Transaction Tables to Authenticated Users
+-- 
+--   ## Problem
+--   Multiple tables have INSERT/UPDATE/DELETE policies that require is_app_admin(),
+--   blocking non-admin authenticated users from managing data across most menus.
+-- 
+--   ## Affected Tables
+--   - amalgamations
+--   - brokerage_fee_types
+--   - entity_types
+--   - fee_components, fee_rates, fee_tiers
+--   - industry_types, sector_types
+--   - rights_issues, share_buybacks, share_subdivisions
+--   - currencies
+-- 
+--   ## Change
+--   Replace admin-only write policies with authenticated-user write policies
+--   on all affected tables so any logged-in user can manage data.
+-- */
+-- 
+-- -- ===== AMALGAMATIONS =====
+-- DROP POLICY IF EXISTS "Admins can insert amalgamations" ON amalgamations;
 
-  ## Affected Tables
-  - amalgamations
-  - brokerage_fee_types
-  - entity_types
-  - fee_components, fee_rates, fee_tiers
-  - industry_types, sector_types
-  - rights_issues, share_buybacks, share_subdivisions
-  - currencies
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update amalgamations" ON amalgamations;
 
-  ## Change
-  Replace admin-only write policies with authenticated-user write policies
-  on all affected tables so any logged-in user can manage data.
-*/
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete amalgamations" ON amalgamations;
 
--- ===== AMALGAMATIONS =====
-DROP POLICY IF EXISTS "Admins can insert amalgamations" ON amalgamations;
-DROP POLICY IF EXISTS "Admins can update amalgamations" ON amalgamations;
-DROP POLICY IF EXISTS "Admins can delete amalgamations" ON amalgamations;
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Authenticated users can insert amalgamations"
+--   ON amalgamations FOR INSERT TO authenticated WITH CHECK (true);
 
-CREATE POLICY "Authenticated users can insert amalgamations"
-  ON amalgamations FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Authenticated users can update amalgamations"
-  ON amalgamations FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Authenticated users can delete amalgamations"
-  ON amalgamations FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Authenticated users can update amalgamations"
+--   ON amalgamations FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Authenticated users can delete amalgamations"
+--   ON amalgamations FOR DELETE TO authenticated USING (true);
+
 
 -- ===== BROKERAGE FEE TYPES =====
 DROP POLICY IF EXISTS "Admins can insert brokerage fee types" ON brokerage_fee_types;
@@ -102,18 +114,28 @@ CREATE POLICY "Authenticated users can update industry types"
   ON industry_types FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated users can delete industry types"
   ON industry_types FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- -- ===== RIGHTS ISSUES =====
+-- DROP POLICY IF EXISTS "Admins can insert rights issues" ON rights_issues;
 
--- ===== RIGHTS ISSUES =====
-DROP POLICY IF EXISTS "Admins can insert rights issues" ON rights_issues;
-DROP POLICY IF EXISTS "Admins can update rights issues" ON rights_issues;
-DROP POLICY IF EXISTS "Admins can delete rights issues" ON rights_issues;
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update rights issues" ON rights_issues;
 
-CREATE POLICY "Authenticated users can insert rights issues"
-  ON rights_issues FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Authenticated users can update rights issues"
-  ON rights_issues FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Authenticated users can delete rights issues"
-  ON rights_issues FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete rights issues" ON rights_issues;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Authenticated users can insert rights issues"
+--   ON rights_issues FOR INSERT TO authenticated WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Authenticated users can update rights issues"
+--   ON rights_issues FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Authenticated users can delete rights issues"
+--   ON rights_issues FOR DELETE TO authenticated USING (true);
+
 
 -- ===== SECTOR TYPES =====
 DROP POLICY IF EXISTS "Admins can insert sector types" ON sector_types;
@@ -126,30 +148,50 @@ CREATE POLICY "Authenticated users can update sector types"
   ON sector_types FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Authenticated users can delete sector types"
   ON sector_types FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- -- ===== SHARE BUYBACKS =====
+-- DROP POLICY IF EXISTS "Admins can insert share buybacks" ON share_buybacks;
 
--- ===== SHARE BUYBACKS =====
-DROP POLICY IF EXISTS "Admins can insert share buybacks" ON share_buybacks;
-DROP POLICY IF EXISTS "Admins can update share buybacks" ON share_buybacks;
-DROP POLICY IF EXISTS "Admins can delete share buybacks" ON share_buybacks;
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update share buybacks" ON share_buybacks;
 
-CREATE POLICY "Authenticated users can insert share buybacks"
-  ON share_buybacks FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Authenticated users can update share buybacks"
-  ON share_buybacks FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Authenticated users can delete share buybacks"
-  ON share_buybacks FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete share buybacks" ON share_buybacks;
 
--- ===== SHARE SUBDIVISIONS =====
-DROP POLICY IF EXISTS "Admins can insert share subdivisions" ON share_subdivisions;
-DROP POLICY IF EXISTS "Admins can update share subdivisions" ON share_subdivisions;
-DROP POLICY IF EXISTS "Admins can delete share subdivisions" ON share_subdivisions;
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Authenticated users can insert share buybacks"
+--   ON share_buybacks FOR INSERT TO authenticated WITH CHECK (true);
 
-CREATE POLICY "Authenticated users can insert share subdivisions"
-  ON share_subdivisions FOR INSERT TO authenticated WITH CHECK (true);
-CREATE POLICY "Authenticated users can update share subdivisions"
-  ON share_subdivisions FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Authenticated users can delete share subdivisions"
-  ON share_subdivisions FOR DELETE TO authenticated USING (true);
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Authenticated users can update share buybacks"
+--   ON share_buybacks FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Authenticated users can delete share buybacks"
+--   ON share_buybacks FOR DELETE TO authenticated USING (true);
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- -- ===== SHARE SUBDIVISIONS =====
+-- DROP POLICY IF EXISTS "Admins can insert share subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can update share subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Admins can delete share subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Authenticated users can insert share subdivisions"
+--   ON share_subdivisions FOR INSERT TO authenticated WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Authenticated users can update share subdivisions"
+--   ON share_subdivisions FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Authenticated users can delete share subdivisions"
+--   ON share_subdivisions FOR DELETE TO authenticated USING (true);
+
 
 -- ===== CURRENCIES =====
 DROP POLICY IF EXISTS "Admins can insert currencies" ON currencies;

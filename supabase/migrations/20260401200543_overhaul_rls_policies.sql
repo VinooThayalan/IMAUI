@@ -111,32 +111,45 @@ DROP POLICY IF EXISTS "Public write access to transaction requests" ON transacti
 -- transactions
 DROP POLICY IF EXISTS "Public read access to transactions" ON transactions;
 DROP POLICY IF EXISTS "Public write access to transactions" ON transactions;
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- -- ============================================
+-- -- 2. REMOVE PUBLIC ROLE ALWAYS-TRUE POLICIES
+-- --    Replace with authenticated-only policies
+-- -- ============================================
+-- 
+-- -- amalgamations
+-- DROP POLICY IF EXISTS "Allow public read access to amalgamations" ON amalgamations;
 
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to amalgamations" ON amalgamations;
 
--- ============================================
--- 2. REMOVE PUBLIC ROLE ALWAYS-TRUE POLICIES
---    Replace with authenticated-only policies
--- ============================================
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to amalgamations" ON amalgamations;
 
--- amalgamations
-DROP POLICY IF EXISTS "Allow public read access to amalgamations" ON amalgamations;
-DROP POLICY IF EXISTS "Allow public insert to amalgamations" ON amalgamations;
-DROP POLICY IF EXISTS "Allow public update to amalgamations" ON amalgamations;
-DROP POLICY IF EXISTS "Allow public delete from amalgamations" ON amalgamations;
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from amalgamations" ON amalgamations;
 
-CREATE POLICY "Authenticated users can read amalgamations"
-  ON amalgamations FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert amalgamations"
-  ON amalgamations FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update amalgamations"
-  ON amalgamations FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete amalgamations"
-  ON amalgamations FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read amalgamations"
+--   ON amalgamations FOR SELECT TO authenticated
+--   USING (true);
+
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can insert amalgamations"
+--   ON amalgamations FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can update amalgamations"
+--   ON amalgamations FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'amalgamations' is not created by any migration]
+-- CREATE POLICY "Admins can delete amalgamations"
+--   ON amalgamations FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
+
 
 -- brokerage_fee_types
 DROP POLICY IF EXISTS "Allow public read access to brokerage_fee_types" ON brokerage_fee_types;
@@ -157,106 +170,176 @@ CREATE POLICY "Admins can update brokerage fee types"
 CREATE POLICY "Admins can delete brokerage fee types"
   ON brokerage_fee_types FOR DELETE TO authenticated
   USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- -- corporate_actions
+-- DROP POLICY IF EXISTS "Allow public read access to corporate_actions" ON corporate_actions;
 
--- corporate_actions
-DROP POLICY IF EXISTS "Allow public read access to corporate_actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Allow public insert to corporate_actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Allow public update to corporate_actions" ON corporate_actions;
-DROP POLICY IF EXISTS "Allow public delete from corporate_actions" ON corporate_actions;
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to corporate_actions" ON corporate_actions;
 
-CREATE POLICY "Authenticated users can read corporate actions"
-  ON corporate_actions FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert corporate actions"
-  ON corporate_actions FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update corporate actions"
-  ON corporate_actions FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete corporate actions"
-  ON corporate_actions FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to corporate_actions" ON corporate_actions;
 
--- corporate_action_history
-DROP POLICY IF EXISTS "Allow public read access to corporate_action_history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Allow public insert to corporate_action_history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Allow public update to corporate_action_history" ON corporate_action_history;
-DROP POLICY IF EXISTS "Allow public delete from corporate_action_history" ON corporate_action_history;
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from corporate_actions" ON corporate_actions;
 
-CREATE POLICY "Authenticated users can read corporate action history"
-  ON corporate_action_history FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert corporate action history"
-  ON corporate_action_history FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update corporate action history"
-  ON corporate_action_history FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete corporate action history"
-  ON corporate_action_history FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read corporate actions"
+--   ON corporate_actions FOR SELECT TO authenticated
+--   USING (true);
 
--- rights_issues
-DROP POLICY IF EXISTS "Allow public read access to rights_issues" ON rights_issues;
-DROP POLICY IF EXISTS "Allow public insert to rights_issues" ON rights_issues;
-DROP POLICY IF EXISTS "Allow public update to rights_issues" ON rights_issues;
-DROP POLICY IF EXISTS "Allow public delete from rights_issues" ON rights_issues;
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Admins can insert corporate actions"
+--   ON corporate_actions FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
 
-CREATE POLICY "Authenticated users can read rights issues"
-  ON rights_issues FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert rights issues"
-  ON rights_issues FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update rights issues"
-  ON rights_issues FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete rights issues"
-  ON rights_issues FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Admins can update corporate actions"
+--   ON corporate_actions FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
 
--- share_buybacks
-DROP POLICY IF EXISTS "Allow public read access to share_buybacks" ON share_buybacks;
-DROP POLICY IF EXISTS "Allow public insert to share_buybacks" ON share_buybacks;
-DROP POLICY IF EXISTS "Allow public update to share_buybacks" ON share_buybacks;
-DROP POLICY IF EXISTS "Allow public delete from share_buybacks" ON share_buybacks;
+-- [no-op on self-hosted: table 'corporate_actions' is not created by any migration]
+-- CREATE POLICY "Admins can delete corporate actions"
+--   ON corporate_actions FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
 
-CREATE POLICY "Authenticated users can read share buybacks"
-  ON share_buybacks FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert share buybacks"
-  ON share_buybacks FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update share buybacks"
-  ON share_buybacks FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete share buybacks"
-  ON share_buybacks FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- -- corporate_action_history
+-- DROP POLICY IF EXISTS "Allow public read access to corporate_action_history" ON corporate_action_history;
 
--- share_subdivisions
-DROP POLICY IF EXISTS "Allow public read access to share_subdivisions" ON share_subdivisions;
-DROP POLICY IF EXISTS "Allow public insert to share_subdivisions" ON share_subdivisions;
-DROP POLICY IF EXISTS "Allow public update to share_subdivisions" ON share_subdivisions;
-DROP POLICY IF EXISTS "Allow public delete from share_subdivisions" ON share_subdivisions;
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to corporate_action_history" ON corporate_action_history;
 
-CREATE POLICY "Authenticated users can read share subdivisions"
-  ON share_subdivisions FOR SELECT TO authenticated
-  USING (true);
-CREATE POLICY "Admins can insert share subdivisions"
-  ON share_subdivisions FOR INSERT TO authenticated
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can update share subdivisions"
-  ON share_subdivisions FOR UPDATE TO authenticated
-  USING (public.is_app_admin())
-  WITH CHECK (public.is_app_admin());
-CREATE POLICY "Admins can delete share subdivisions"
-  ON share_subdivisions FOR DELETE TO authenticated
-  USING (public.is_app_admin());
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to corporate_action_history" ON corporate_action_history;
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from corporate_action_history" ON corporate_action_history;
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read corporate action history"
+--   ON corporate_action_history FOR SELECT TO authenticated
+--   USING (true);
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Admins can insert corporate action history"
+--   ON corporate_action_history FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Admins can update corporate action history"
+--   ON corporate_action_history FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'corporate_action_history' is not created by any migration]
+-- CREATE POLICY "Admins can delete corporate action history"
+--   ON corporate_action_history FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- -- rights_issues
+-- DROP POLICY IF EXISTS "Allow public read access to rights_issues" ON rights_issues;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to rights_issues" ON rights_issues;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to rights_issues" ON rights_issues;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from rights_issues" ON rights_issues;
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read rights issues"
+--   ON rights_issues FOR SELECT TO authenticated
+--   USING (true);
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can insert rights issues"
+--   ON rights_issues FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can update rights issues"
+--   ON rights_issues FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'rights_issues' is not created by any migration]
+-- CREATE POLICY "Admins can delete rights issues"
+--   ON rights_issues FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- -- share_buybacks
+-- DROP POLICY IF EXISTS "Allow public read access to share_buybacks" ON share_buybacks;
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to share_buybacks" ON share_buybacks;
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to share_buybacks" ON share_buybacks;
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from share_buybacks" ON share_buybacks;
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read share buybacks"
+--   ON share_buybacks FOR SELECT TO authenticated
+--   USING (true);
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can insert share buybacks"
+--   ON share_buybacks FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can update share buybacks"
+--   ON share_buybacks FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_buybacks' is not created by any migration]
+-- CREATE POLICY "Admins can delete share buybacks"
+--   ON share_buybacks FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- -- share_subdivisions
+-- DROP POLICY IF EXISTS "Allow public read access to share_subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public insert to share_subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public update to share_subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- DROP POLICY IF EXISTS "Allow public delete from share_subdivisions" ON share_subdivisions;
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Authenticated users can read share subdivisions"
+--   ON share_subdivisions FOR SELECT TO authenticated
+--   USING (true);
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can insert share subdivisions"
+--   ON share_subdivisions FOR INSERT TO authenticated
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can update share subdivisions"
+--   ON share_subdivisions FOR UPDATE TO authenticated
+--   USING (public.is_app_admin())
+--   WITH CHECK (public.is_app_admin());
+
+-- [no-op on self-hosted: table 'share_subdivisions' is not created by any migration]
+-- CREATE POLICY "Admins can delete share subdivisions"
+--   ON share_subdivisions FOR DELETE TO authenticated
+--   USING (public.is_app_admin());
+
 
 -- currencies
 DROP POLICY IF EXISTS "Anyone can read currencies" ON currencies;
