@@ -3533,24 +3533,53 @@ export function BuyAndSellNotes() {
                 const noteStatus = note.status || "PROCESSED";
                 const isExpanded = expandedNoteId === note.id;
 
+                /*
+                  Icon lives with the label so the two cannot disagree.
+
+                  They did: the badge rendered its icon from a separate
+                  `noteStatus === "PROCESSED"` check, while the label came from
+                  this map with `|| statusCfg["PROCESSED"]` as the fallback. Any
+                  status not listed here therefore took the green "Processed"
+                  label and failed the icon check -- which is how the one
+                  REJECTED note in the table displayed as a Processed one
+                  without a tick, next to genuinely processed rows with a tick.
+                */
                 const statusCfg: Record<
                   string,
-                  { label: string; cls: string }
+                  { label: string; cls: string; Icon: typeof CheckCircle }
                 > = {
                   PROCESSED: {
                     label: "Processed",
                     cls: "bg-green-100 text-green-800",
+                    Icon: CheckCircle,
                   },
                   PENDING_APPROVAL: {
                     label: "Pending Approval",
                     cls: "bg-amber-100 text-amber-800",
+                    Icon: AlertTriangle,
                   },
                   MANUAL_APPROVED: {
                     label: "Approved",
                     cls: "bg-blue-100 text-blue-800",
+                    Icon: CheckCircle,
+                  },
+                  REJECTED: {
+                    label: "Rejected",
+                    cls: "bg-red-100 text-red-800",
+                    Icon: XCircle,
                   },
                 };
-                const scfg = statusCfg[noteStatus] || statusCfg["PROCESSED"];
+                /*
+                  An unrecognised status shows itself, in neutral grey. It must
+                  never borrow another status's wording: claiming a note is
+                  "Processed" when the database says otherwise is worse than
+                  admitting the label is unknown.
+                */
+                const scfg = statusCfg[noteStatus] ?? {
+                  label: noteStatus.replace(/_/g, " "),
+                  cls: "bg-gray-100 text-gray-700",
+                  Icon: AlertTriangle,
+                };
 
                 return (
                   <>
@@ -3634,12 +3663,7 @@ export function BuyAndSellNotes() {
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${scfg.cls}`}
                         >
-                          {noteStatus === "PENDING_APPROVAL" && (
-                            <AlertTriangle className="w-3 h-3" />
-                          )}
-                          {noteStatus === "PROCESSED" && (
-                            <CheckCircle className="w-3 h-3" />
-                          )}
+                          <scfg.Icon className="w-3 h-3" />
                           {scfg.label}
                         </span>
                         {note.has_mismatch && noteStatus === "PROCESSED" && (
