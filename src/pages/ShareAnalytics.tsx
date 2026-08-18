@@ -148,13 +148,29 @@ function computeRows(
   marketPrice: number,
   scrips: ScripRecord[] = [],
 ): ComputedRow[] {
-  const sorted     = [...notes].sort((a, b) => (a.trade_date ?? '') < (b.trade_date ?? '') ? -1 : 1);
-  const sortedDivs = [...dividends].sort((a, b) => (a.payment_date ?? '') < (b.payment_date ?? '') ? -1 : 1);
-  const sortedScrips = [...scrips].sort((a, b) => {
-    const da = a.effective_date ?? a.entry_date;
-    const db = b.effective_date ?? b.entry_date;
-    return da < db ? -1 : da > db ? 1 : 0;
-  });
+  /*
+    Ties must compare equal.
+
+    These comparators used to return 1 for "not less than", so two events on the
+    same date never compared equal and the sort was free to order them either
+    way. That is not academic: a share with a buy and a sell of the same size on
+    one day runs the two in whichever order the sort happened to produce, and
+    each order leaves a different average cost behind.
+
+    Returning 0 makes the sort stable by specification, so same-date events keep
+    the order they arrived in -- the query sorts by (trade_date, id), so that
+    order is itself deterministic. Same data in, same numbers out.
+
+    Which of a same-day buy and sell truly came first is not recorded anywhere:
+    the notes carry a trade date but no trade time. Deterministic is the most
+    this can be without that.
+  */
+  const byDate = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+  const sorted     = [...notes].sort((a, b) => byDate(a.trade_date ?? '', b.trade_date ?? ''));
+  const sortedDivs = [...dividends].sort((a, b) => byDate(a.payment_date ?? '', b.payment_date ?? ''));
+  const sortedScrips = [...scrips].sort((a, b) =>
+    byDate(a.effective_date ?? a.entry_date, b.effective_date ?? b.entry_date));
 
   type Ev = { date: string } & (
     | { kind: 'note'; note: RawNote }
@@ -310,7 +326,7 @@ interface NoteDetail {
 
 // ── Breakdown modal ──────────────────────────────────────────────────────────
 
-function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => void }) {
+function BreakdownModal({ group, onClose, fromDate }: { group: ShareGroup; onClose: () => void; fromDate: string }) {
   const last = group.rows[group.rows.length - 1];
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
@@ -589,7 +605,7 @@ function BreakdownModal({ group, onClose }: { group: ShareGroup; onClose: () => 
               </tr>
             </thead>
             <tbody>
-              {group.rows.map((row, idx) => {
+              {(fromDate ? group.rows.filter(r => r.trade_date && r.trade_date >= fromDate) : group.rows).map((row, idx) => {
                 const isOp    = row.row_type === 'opening';
                 const isDiv   = row.row_type === 'dividend';
                 const isScrip = row.row_type === 'scrip';
@@ -875,6 +891,8 @@ export function ShareAnalytics() {
   const [entities, setEntities]                   = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId]   = useState('');
   const [search, setSearch]                       = useState('');
+  const [fromDate, setFromDate]                   = useState('');
+  const [toDate, setToDate]                       = useState('');
   const [loading, setLoading]                     = useState(false);
   const [groups, setGroups]                       = useState<ShareGroup[]>([]);
   const [activeGroup, setActiveGroup]             = useState<ShareGroup | null>(null);
@@ -1267,27 +1285,59 @@ export function ShareAnalytics() {
     }
   }, [selectedEntityId]);
 
-  const filtered = groups.filter(g => {
+  /*
+    The end date truncates history; the start date does not.
+
+    This asymmetry is the whole design. Every row carries the cumulative state
+    after it, so dropping everything after the end date leaves the last
+    surviving row holding the position exactly as it stood that day -- an "as
+    of" report, no recomputation needed.
+
+    Dropping rows *before* a start date would do the opposite. The balance,
+    average cost and cumulative totals all depend on the purchases that came
+    first, so a report that hid them would show a holding with no record of
+    having been bought. The start date therefore filters what is listed and
+    what the activity columns sum, and never what the position is built from.
+
+    Undated rows are kept: an opening balance predates any window, and nothing
+    else should be silently dropped for want of a date.
+  */
+  const inWindow = groups
+    .map(g => (toDate
+      ? { ...g, rows: g.rows.filter(r => !r.trade_date || r.trade_date <= toDate) }
+      : g))
+    .filter(g => g.rows.length > 0);
+
+  /** Rows a period's activity columns should sum: within the window. */
+  const activityRows = (g: ShareGroup) =>
+    fromDate ? g.rows.filter(r => r.trade_date && r.trade_date >= fromDate) : g.rows;
+
+  const filtered = inWindow.filter(g => {
     if (!search) return true;
     const q = search.toLowerCase();
     return g.share_ticker.toLowerCase().includes(q) || g.share_name.toLowerCase().includes(q) || g.entity_name.toLowerCase().includes(q);
   });
 
-  // Aggregate totals across filtered groups
+  // Aggregate totals across filtered groups. Position columns come from the
+  // last row inside the window; activity columns sum only the period's rows.
   const totals = filtered.reduce((acc, g) => {
     const last = g.rows[g.rows.length - 1];
-    const mvAfterFees = last.share_cum_bal * (g.market_price - g.market_price * (g.brokerage_fee_rate / 100));
+    const act  = activityRows(g);
+    const mvAfterFees = netMarketValue(last.share_cum_bal, g.market_price, g.brokerage_fee_rate);
+    const pc  = act.reduce((s, r) => s + r.purchase_cost, 0);
+    const sv  = act.reduce((s, r) => s + r.sale_value, 0);
+    const div = act.reduce((s, r) => s + r.dividend, 0);
     return {
       share_cum_bal:      acc.share_cum_bal   + last.share_cum_bal,
-      purchase_cost:      acc.purchase_cost   + g.rows.reduce((s, r) => s + r.purchase_cost, 0),
-      sale_value:         acc.sale_value      + g.rows.reduce((s, r) => s + r.sale_value, 0),
+      purchase_cost:      acc.purchase_cost   + pc,
+      sale_value:         acc.sale_value      + sv,
       av_cost:            acc.av_cost         + last.av_cost,
-      dividend:           acc.dividend        + g.rows.reduce((s, r) => s + r.dividend, 0),
+      dividend:           acc.dividend        + div,
       cum_surplus:        acc.cum_surplus     + last.cum_surplus,
       market_value:       acc.market_value    + last.market_value,
       mv_after_fees:      acc.mv_after_fees   + mvAfterFees,
-      cash_flow:          acc.cash_flow       + g.rows.reduce((s, r) => s + r.cash_flow, 0),
-      total_surplus:      acc.total_surplus   + (mvAfterFees + g.rows.reduce((s, r) => s + r.sale_value, 0) + g.rows.reduce((s, r) => s + r.dividend, 0) - g.rows.reduce((s, r) => s + r.purchase_cost, 0)),
+      cash_flow:          acc.cash_flow       + act.reduce((s, r) => s + r.cash_flow, 0),
+      total_surplus:      acc.total_surplus   + (mvAfterFees + sv + div - pc),
     };
   }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
 
@@ -1317,22 +1367,23 @@ export function ShareAnalytics() {
     const headers = ['Share','Share Name','Entity','CDS Accounts','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
     const rows = filtered.map(g => {
       const last = g.rows[g.rows.length - 1];
-      const mvAfterFees = g.market_price > 0 ? (last.share_cum_bal * (g.market_price - g.market_price * (g.brokerage_fee_rate / 100))).toFixed(2) : '';
+      const act  = activityRows(g);
+      const mvAfterFees = g.market_price > 0 ? netMarketValue(last.share_cum_bal, g.market_price, g.brokerage_fee_rate).toFixed(2) : '';
       return [
         g.share_ticker,
         g.share_name,
         g.entity_name,
         g.cds_accounts.join('; '),
         last.share_cum_bal,
-        g.rows.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
-        g.rows.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
+        act.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
+        act.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
         last.av_cost.toFixed(2),
         last.av_price.toFixed(2),
-        g.rows.reduce((s, r) => s + r.dividend, 0).toFixed(2),
+        act.reduce((s, r) => s + r.dividend, 0).toFixed(2),
         last.cum_surplus.toFixed(2),
         g.market_price > 0 ? last.market_value.toFixed(2) : '',
         mvAfterFees,
-        g.rows.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
+        act.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
         g.market_price > 0 ? last.total_surplus.toFixed(2) : '',
       ];
     });
@@ -1378,6 +1429,36 @@ export function ShareAnalytics() {
               />
             </div>
           </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="sa-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
+            <input
+              id="sa-from"
+              type="date"
+              value={fromDate}
+              max={toDate || undefined}
+              onChange={e => setFromDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="sa-to" className="text-xs font-semibold text-gray-500 uppercase">To (as of)</label>
+            <input
+              id="sa-to"
+              type="date"
+              value={toDate}
+              min={fromDate || undefined}
+              onChange={e => setToDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <button
+              onClick={() => { setFromDate(''); setToDate(''); }}
+              className="px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors self-end"
+            >
+              Clear dates
+            </button>
+          )}
           <div className="ml-auto flex items-center gap-3 self-end pb-2">
             <span className="text-sm text-gray-500">{filtered.length} share{filtered.length !== 1 ? 's' : ''}</span>
             {filtered.length > 0 && (
@@ -1391,6 +1472,20 @@ export function ShareAnalytics() {
             )}
           </div>
         </div>
+
+        {/* The two dates do different jobs, and reading the report as though
+            they did the same thing is the easy mistake. Say which is which. */}
+        {(fromDate || toDate) && (
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-900">
+            {toDate && (
+              <>Balance, average cost and market value are <strong>as at {fmtDate(toDate)}</strong>; anything traded later is excluded. </>
+            )}
+            {fromDate && (
+              <>Purchase cost, sale value, dividend and cash flow cover <strong>{fmtDate(fromDate)} onward</strong> only — the position itself still includes everything bought before then, or it would not add up. </>
+            )}
+            Market price is the latest on file, not the price on the as-at date.
+          </div>
+        )}
       </div>
 
       {/* Cache write error banner */}
@@ -1478,11 +1573,12 @@ export function ShareAnalytics() {
               <tbody className="divide-y divide-gray-50">
                 {filtered.map((group, idx) => {
                   const last     = group.rows[group.rows.length - 1];
-                  const totalPC  = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-                  const totalSV  = group.rows.reduce((s, r) => s + r.sale_value, 0);
-                  const totalDiv = group.rows.reduce((s, r) => s + r.dividend, 0);
-                  const totalCF  = group.rows.reduce((s, r) => s + r.cash_flow, 0);
-                  const txnCount = group.rows.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length;
+                  const act      = activityRows(group);
+                  const totalPC  = act.reduce((s, r) => s + r.purchase_cost, 0);
+                  const totalSV  = act.reduce((s, r) => s + r.sale_value, 0);
+                  const totalDiv = act.reduce((s, r) => s + r.dividend, 0);
+                  const totalCF  = act.reduce((s, r) => s + r.cash_flow, 0);
+                  const txnCount = act.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length;
 
                   return (
                     <tr
@@ -1562,7 +1658,7 @@ export function ShareAnalytics() {
       )}
 
       {/* Breakdown modal */}
-      {activeGroup && <BreakdownModal group={activeGroup} onClose={() => setActiveGroup(null)} />}
+      {activeGroup && <BreakdownModal group={activeGroup} onClose={() => setActiveGroup(null)} fromDate={fromDate} />}
       </>}
     </div>
   );
