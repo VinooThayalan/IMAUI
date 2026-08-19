@@ -85,6 +85,41 @@ Never widen a refactor beyond the reported problem without saying so first.
 
 ---
 
+## Working a reported bug
+
+Follow this for every bug, not just the awkward ones. Most of it exists because
+skipping a step produced a second defect.
+
+**1. Read the data before forming a theory.** Query the database. A screenshot
+shows a symptom; the rows show the cause. Four separate reports once came down to
+one entity holding 59,962 scrip shares that one screen never queried.
+
+**2. Two screens disagreeing on the same number is one bug, not two.** Find the
+divergence and delete it. Do not correct both computations — they will drift
+again, and you will not be the one to notice. If the same question has two
+answers in this codebase, the fix is that it has one.
+
+**3. Name the grain.** Per share, or per (entity, share)? Since acquisition, or
+within a window? Two figures computed at different grains are *both right* and
+will never match. Decide which the report means, and put it in the label.
+
+**4. If both numbers are correct, the bug is the label.** Some figures genuinely
+cannot agree — a pooled XIRR is not any single holding's AER, and averaging
+returns instead would be arithmetic nonsense. When that happens, do not force
+them together: say on screen what the number measures, and show what it is made
+of so a reader can reconcile it. An unexplained difference reads as a defect
+forever.
+
+**5. Prove it where it can be run.** Put the rule in a service, then verify it
+with assertions that need no browser and no database. State the numbers in the
+commit. "Typecheck passes" is not evidence that a balance is right.
+
+**6. Fix the cause, then look for its siblings.** The same mistake is usually
+copied. An unpaged read, a `trade_date` ordering, a status filter left off — if
+one screen got it wrong, check the other three before closing.
+
+---
+
 ## Non-negotiables
 
 These are settled decisions. Do not quietly reverse them.
