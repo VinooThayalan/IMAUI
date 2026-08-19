@@ -514,9 +514,22 @@ export function Dashboard() {
   const totalMarketValue           = held.reduce((s, m) => s + m.marketValue, 0);
   const totalCostsBalShares        = held.reduce((s, m) => s + m.cost, 0);
 
-  // Sector aggregates. Grouping and the rule that every sector is reported --
-  // including the ones a pie cannot draw -- live in sectorBreakdown.service.
-  const sectors = sectorTotals(held);
+  /*
+    Sector aggregates over EVERY position, not just what is still held.
+
+    `held` drops any share sold down to zero. Its realised gains and the
+    dividends it paid are real and belong in a returns or dividends breakdown,
+    and a sector whose shares have all been sold was disappearing from the chart
+    and from the sector count entirely — the other half of "has not considered
+    all the sectors".
+
+    Market value is unaffected in substance: an exited position values at zero,
+    so it shows in the legend as not plotted rather than silently vanishing.
+
+    Grouping, and the rule that a breakdown reports every sector it was given,
+    live in sectorBreakdown.service.
+  */
+  const sectors = sectorTotals(metrics);
   const sectorNames = sectors.map(s => s.sector);
 
   const sectorReturnsPie = sectorSeries(sectors, 'returns', sectorColor);

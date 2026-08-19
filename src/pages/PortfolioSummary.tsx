@@ -1,8 +1,10 @@
 import { ArrowUpDown, Download, FileText, Calendar } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { selectAll } from '../lib/selectAll';
 import { formatAer, portfolioAer, type CashFlow, type PortfolioAerResult } from '../lib/aer';
+import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
+import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
+import { summaryInWindow } from '../services/portfolioSummary.service';
 
 function fmtCompact(v: number) {
   const abs = Math.abs(v);
@@ -68,6 +70,7 @@ export function PortfolioSummary() {
   const [sortField, setSortField] = useState<SortField>('entity_name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [asOfDate, setAsOfDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [fromDate, setFromDate] = useState<string>('');
   const [selectedEntityId, setSelectedEntityId] = useState<string>('');
   // Editable overrides: key = entity_id_share_id
   const [editedDps, setEditedDps]       = useState<Map<string, string>>(new Map());
@@ -75,96 +78,26 @@ export function PortfolioSummary() {
 
   useEffect(() => {
     fetchPortfolioData();
-  }, [asOfDate]);
+  }, [asOfDate, fromDate]);
 
   async function fetchPortfolioData() {
     try {
       setLoading(true);
 
-      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
-        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      ]);
-      const fingerprint = [
-        bsnMax.data?.[0]?.updated_at   ?? '0',
-        txnMax.data?.[0]?.updated_at   ?? '0',
-        obMax.data?.[0]?.updated_at    ?? '0',
-        divMax.data?.[0]?.updated_at   ?? '0',
-        priceMax.data?.[0]?.updated_at ?? '0',
-        scripMax.data?.[0]?.updated_at ?? '0',
-        shareMax.data?.[0]?.updated_at ?? '0',
-        entMax.data?.[0]?.updated_at   ?? '0',
-      ].join('|');
-      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
+      const sourceHash = await sourceFingerprintRepo.current();
+      const cacheRows = await analyticsCacheRepo.findByHash(sourceHash);
 
-      // Paged, and ordered by row_index rather than trade_date.
-      //
-      // Unbounded, this select was capped at db-max-rows and quietly dropped
-      // whole entities off the end of the table. Ordering by trade_date was the
-      // second half of the problem: Postgres sorts NULLs last, so a share with
-      // one undated note had its *earliest* event read as the closing position,
-      // while Share Analytics — sorting in JS, where NULL became '' — read the
-      // latest. row_index is the order the rows were actually computed in, so
-      // both screens now land on the same row.
-      const cacheRows = await selectAll(() =>
-        supabase
-          .from('share_analytics_cache')
-          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, cds_accounts, aer, trade_date, cash_flow, source_hash')
-          .eq('source_hash', sourceHash)
-          .order('entity_name', { ascending: true })
-          .order('share_ticker', { ascending: true })
-          .order('row_index', { ascending: true })
-          .order('id', { ascending: true }),
-      );
-
-      if (!cacheRows || cacheRows.length === 0) {
+      if (cacheRows.length === 0) {
         setData([]);
         setAerInputs([]);
         return;
       }
 
-      const lastRowMap = new Map<string, {
-        entity_id: string; share_id: string; entity_name: string;
-        share_ticker: string; share_name: string;
-        share_cum_bal: number; av_cost: number; market_value: number;
-        cum_dividend: number; cum_purchase_cost: number; cum_sale_value: number;
-        market_price: number; brokerage_fee_rate: number; cds_accounts: string[];
-        aer: number | null;
-      }>();
-      // Cash flows per holding, kept so this report can compute its own
-      // portfolio-level AER instead of only showing per-share figures.
-      const cashFlowMap = new Map<string, CashFlow[]>();
-
-      for (const r of cacheRows) {
-        const key = `${r.entity_id}_${r.share_id}`;
-
-        const flow = Number(r.cash_flow) || 0;
-        if (flow !== 0 && r.trade_date) {
-          if (!cashFlowMap.has(key)) cashFlowMap.set(key, []);
-          cashFlowMap.get(key)!.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: flow });
-        }
-
-        lastRowMap.set(key, {
-          entity_id: r.entity_id, share_id: r.share_id,
-          entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
-          share_cum_bal: Number(r.share_cum_bal) || 0,
-          av_cost: Number(r.av_cost) || 0,
-          market_value: Number(r.market_value) || 0,
-          cum_dividend: Number(r.cum_dividend) || 0,
-          cum_purchase_cost: Number(r.cum_purchase_cost) || 0,
-          cum_sale_value: Number(r.cum_sale_value) || 0,
-          market_price: Number(r.market_price) || 0,
-          brokerage_fee_rate: Number(r.brokerage_fee_rate) || 0,
-          cds_accounts: r.cds_accounts ?? [],
-          aer: r.aer != null ? Number(r.aer) : null,
-        });
-      }
+      // The window rule lives in the service. This page only says which window.
+      const { rows: summaryRows, aerPositions } = summaryInWindow(
+        cacheRows,
+        { from: fromDate, to: asOfDate },
+      );
 
       const [sharesRes2, divRes2] = await Promise.all([
         supabase.from('shares').select('id, sector, sector_types(sector_name)'),
@@ -187,51 +120,41 @@ export function PortfolioSummary() {
         }
       });
 
-      const portfolioData: PortfolioRow[] = [];
-      // Built from every holding, including fully-exited ones: a portfolio
-      // return has to carry the positions that were bought and sold, not just
-      // what happens to be held today.
-      const aerRows: AerInput[] = [];
-
-      lastRowMap.forEach((h, key) => {
-        aerRows.push({
-          entity_id: h.entity_id,
-          ticker: h.share_ticker || 'N/A',
-          cashFlows: cashFlowMap.get(key) ?? [],
-          heldShares: h.share_cum_bal,
-          marketPrice: h.market_price,
-          brokerageFeeRate: h.brokerage_fee_rate,
-        });
-
-        if (h.share_cum_bal <= 0) return;
-        const feeRate = h.brokerage_fee_rate / 100;
-        const marketValueNet = h.market_value * (1 - feeRate);
-        const totalReturns = marketValueNet + h.cum_sale_value + h.cum_dividend - h.cum_purchase_cost;
-        const dps = dpsMap.get(key) ?? 0;
-        portfolioData.push({
-          entity_id: h.entity_id,
-          entity_name: h.entity_name,
-          cds_accounts: h.cds_accounts,
-          sector: shareSectorMap.get(h.share_id) || 'N/A',
-          share_id: h.share_id,
-          ticker: h.share_ticker || 'N/A',
-          share_name: h.share_name || 'N/A',
-          balance_shares: h.share_cum_bal,
-          cost: h.av_cost,
-          cost_per_share: h.share_cum_bal > 0 ? h.av_cost / h.share_cum_bal : 0,
-          market_price_per_share: h.market_price,
-          market_value_net: marketValueNet,
-          div: h.cum_dividend,
-          total_returns: totalReturns,
+      const portfolioData: PortfolioRow[] = summaryRows.map(r => {
+        const dps = dpsMap.get(`${r.entityId}_${r.shareId}`) ?? 0;
+        return {
+          entity_id: r.entityId,
+          entity_name: r.entityName,
+          cds_accounts: r.cdsAccounts,
+          sector: shareSectorMap.get(r.shareId) || 'N/A',
+          share_id: r.shareId,
+          ticker: r.ticker,
+          share_name: r.shareName,
+          balance_shares: r.balanceShares,
+          cost: r.cost,
+          cost_per_share: r.costPerShare,
+          market_price_per_share: r.marketPricePerShare,
+          market_value_net: r.marketValueNet,
+          div: r.div,
+          total_returns: r.totalReturns,
           // Left null when there is no solution. Coercing it to 0 rendered an
           // uncomputable return as a green 0.00%, indistinguishable from a real
           // flat return — which is how broken inputs stayed invisible here.
-          aer: h.aer,
+          aer: r.aer,
           cash_dps_last_fy: dps,
-          cash_div: h.share_cum_bal * dps,
+          cash_div: r.balanceShares * dps,
           remarks: '',
-        });
+        };
       });
+
+      const aerRows: AerInput[] = aerPositions.map(p => ({
+        entity_id: summaryRows.find(r => r.ticker === p.label)?.entityId ?? '',
+        ticker: p.label,
+        cashFlows: p.cashFlows,
+        heldShares: p.heldShares,
+        marketPrice: p.marketPrice,
+        brokerageFeeRate: p.brokerageFeeRate,
+      }));
 
       portfolioData.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.ticker.localeCompare(b.ticker));
       setData(portfolioData);
@@ -365,7 +288,7 @@ export function PortfolioSummary() {
             <div className="flex items-center space-x-3">
               <Calendar className="w-5 h-5 text-gray-500" />
               <div>
-                <label className="text-sm font-medium text-gray-700 mr-2">As of Date:</label>
+                <label className="text-sm font-medium text-gray-700 mr-2">As of Date (to):</label>
                 <input
                   type="date"
                   value={asOfDate}
@@ -373,6 +296,25 @@ export function PortfolioSummary() {
                   className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <label htmlFor="ps-from" className="text-sm font-medium text-gray-700">From:</label>
+              <input
+                id="ps-from"
+                type="date"
+                value={fromDate}
+                max={asOfDate || undefined}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {fromDate && (
+                <button
+                  onClick={() => setFromDate('')}
+                  className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mr-2">Entity:</label>
@@ -411,6 +353,16 @@ export function PortfolioSummary() {
             </div>
           </div>
         </div>
+
+        {(fromDate || asOfDate) && (
+          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900">
+            Balance, Cost, Market Value and Total Returns are <strong>as at {new Date(asOfDate + 'T00:00:00').toLocaleDateString('en-GB')}</strong>; anything traded later is excluded.
+            {fromDate && (
+              <> The <strong>Div</strong> column covers <strong>{new Date(fromDate + 'T00:00:00').toLocaleDateString('en-GB')} onward</strong> only. <strong>Total Returns stays measured from acquisition</strong> — it includes the market value of what is still held, so a period figure would need the position's value on the start date, which needs a historic price. The two columns therefore differ on purpose while a start date is set.</>
+            )}
+            {' '}Shares are valued at the latest market price on file, not the price on the as-at date.
+          </div>
+        )}
 
         {/* Held positions with no market price have no terminal value and cannot
             enter the pooled XIRR. Naming them here is what makes a missing price

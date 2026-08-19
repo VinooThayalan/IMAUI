@@ -26,15 +26,30 @@ export interface AnalyticsCacheRow {
   av_cost: number | string;
   market_value: number | string;
   cum_dividend: number | string;
+  cum_purchase_cost: number | string;
+  cum_sale_value: number | string;
+  market_price: number | string;
+  brokerage_fee_rate: number | string;
+  cds_accounts: string[] | null;
+  aer: number | string | null;
+  cash_flow: number | string;
   trade_date: string | null;
   row_index: number;
   source_hash: string;
 }
 
-/** Columns Portfolio-style holdings readers need. Extend deliberately. */
+/**
+ * The superset every holdings reader needs.
+ *
+ * One column list rather than one per screen: Portfolio wants a subset of what
+ * Portfolio Summary wants, and two near-identical queries is how they drifted
+ * apart before. Extend deliberately — this is read on every visit.
+ */
 const HOLDING_COLUMNS =
   'entity_id, share_id, entity_name, share_ticker, share_name, ' +
-  'share_cum_bal, av_cost, market_value, cum_dividend, trade_date, row_index, source_hash';
+  'share_cum_bal, av_cost, market_value, cum_dividend, ' +
+  'cum_purchase_cost, cum_sale_value, market_price, brokerage_fee_rate, ' +
+  'cds_accounts, aer, cash_flow, trade_date, row_index, source_hash';
 
 /**
  * Every row of a batch, in compute order.
