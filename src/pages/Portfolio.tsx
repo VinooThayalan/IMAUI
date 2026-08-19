@@ -1,7 +1,9 @@
 import { PieChart, TrendingUp, TrendingDown, Wallet, Percent, Download } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { selectAll } from '../lib/selectAll';
+import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
+import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
+import { holdingsInWindow, isFresh } from '../services/portfolioHoldings.service';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 
 /**
@@ -106,29 +108,7 @@ export function Portfolio() {
       // for one date range would be served for another, silently.
       const scope = [entityId || 'all', fromDate || '-', toDate || '-'].join('|');
 
-      // ── Compute source hash (same fingerprint as ShareAnalytics) ─────────
-      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
-        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      ]);
-
-      const fingerprint = [
-        bsnMax.data?.[0]?.updated_at   ?? '0',
-        txnMax.data?.[0]?.updated_at   ?? '0',
-        obMax.data?.[0]?.updated_at    ?? '0',
-        divMax.data?.[0]?.updated_at   ?? '0',
-        priceMax.data?.[0]?.updated_at ?? '0',
-        scripMax.data?.[0]?.updated_at ?? '0',
-        shareMax.data?.[0]?.updated_at ?? '0',
-        entMax.data?.[0]?.updated_at   ?? '0',
-      ].join('|');
-      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
+      const sourceHash = await sourceFingerprintRepo.current();
 
       // ── Check portfolio_cache for a matching batch ───────────────────────
       const { data: existing } = await supabase
@@ -204,66 +184,15 @@ export function Portfolio() {
       }
 
       // ── Cache miss: read holdings from share_analytics_cache ─────────────
-      // The last row of each entity-share group has the final cumulative values.
-      //
-      // Ordered by row_index, the order the rows were actually computed in, and
-      // paged so the read is not truncated at db-max-rows.
-      //
-      // trade_date cannot order this. A buy and a sell on one day tie, and the
-      // tie was broken arbitrarily -- land the buy last and the group reports a
-      // balance inflated by the whole sale, because the sell that cancelled it
-      // is no longer the final row.
-      const analyticsRows = await selectAll(() =>
-        supabase
-          .from('share_analytics_cache')
-          .select('entity_id, share_id, entity_name, share_ticker, share_name, share_cum_bal, av_cost, market_value, cum_dividend, trade_date, source_hash')
-          .order('entity_name', { ascending: true })
-          .order('share_ticker', { ascending: true })
-          .order('row_index', { ascending: true })
-          .order('id', { ascending: true }),
-      );
+      // Query and ordering belong to analyticsCache.repo; the date-window rule
+      // belongs to portfolioHoldings.service. This page only asks for holdings.
+      const analyticsRows = await analyticsCacheRepo.findByHash(sourceHash);
 
-      // If share_analytics_cache is empty or the hash doesn't match, we need
-      // to fall back to computing from source tables directly.
-      const analyticsHash = analyticsRows?.[0]?.source_hash;
-      const cacheValid = analyticsRows && analyticsRows.length > 0 && analyticsHash === sourceHash;
-
-      if (cacheValid) {
-        // Build holdings from the last row of each entity-share group
-        const lastRowMap = new Map<string, { held: number; cost: number; marketValue: number; dividends: number; entity_id: string; share_id: string; entity_name: string; share_ticker: string; share_name: string }>();
-        /*
-          The end date truncates; the start date does not.
-
-          Every row carries the cumulative state after it, so ignoring rows
-          traded after the end date leaves the last surviving row holding the
-          position exactly as it stood that day. Skipping rows *before* a start
-          date would instead hide the purchases the position is built from, and
-          the holding would report a balance it has no record of acquiring.
-
-          The one figure a start date can honestly scope is dividends, which
-          accumulate: period dividends are the running total at the end of the
-          window minus the total already banked before it opened.
-        */
-        const dividendsBefore = new Map<string, number>();
-        for (const r of analyticsRows) {
-          if (entityId && r.entity_id !== entityId) continue;
-          if (toDate && r.trade_date && r.trade_date > toDate) continue;
-          const key = `${r.entity_id}__${r.share_id}`;
-
-          if (fromDate && r.trade_date && r.trade_date < fromDate) {
-            dividendsBefore.set(key, Number(r.cum_dividend) || 0);
-          }
-
-          // Ordered by row_index, so the last entry is the final computed state
-          lastRowMap.set(key, {
-            held: Number(r.share_cum_bal) || 0,
-            cost: Number(r.av_cost) || 0,
-            marketValue: Number(r.market_value) || 0,
-            dividends: (Number(r.cum_dividend) || 0) - (dividendsBefore.get(key) ?? 0),
-            entity_id: r.entity_id, share_id: r.share_id,
-            entity_name: r.entity_name, share_ticker: r.share_ticker, share_name: r.share_name,
-          });
-        }
+      if (isFresh(analyticsRows, sourceHash)) {
+        const lastRowMap = new Map(
+          holdingsInWindow(analyticsRows, { from: fromDate, to: toDate }, entityId)
+            .map(h => [`${h.entityId}__${h.shareId}`, h]),
+        );
 
         // Aggregate
         let totalValue = 0, totalCost = 0, totalGainLoss = 0;
@@ -302,14 +231,14 @@ export function Portfolio() {
           const gainLoss = h.marketValue - h.cost + h.dividends;
           totalGainLoss += gainLoss;
           const pct = h.cost > 0 ? (gainLoss / h.cost) * 100 : 0;
-          const sector = shareSectorMap.get(h.share_id) || 'Other';
+          const sector = shareSectorMap.get(h.shareId) || 'Other';
           sectorMap.set(sector, (sectorMap.get(sector) || 0) + h.marketValue);
 
-          performers.push({ ticker: h.share_ticker, name: h.share_name, gainLoss, percentage: pct });
+          performers.push({ ticker: h.ticker, name: h.shareName, gainLoss, percentage: pct });
 
-          const ent = entityHoldMap.get(h.entity_id);
+          const ent = entityHoldMap.get(h.entityId);
           if (ent) { ent.value += h.marketValue; ent.shares += 1; }
-          else entityHoldMap.set(h.entity_id, { value: h.marketValue, shares: 1, name: h.entity_name });
+          else entityHoldMap.set(h.entityId, { value: h.marketValue, shares: 1, name: h.entityName });
         });
 
         const percentChange = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
