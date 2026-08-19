@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import { selectAll } from '../lib/selectAll';
-import { aerPercent, formatAer } from '../lib/aer';
-import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
+import { formatAer } from '../lib/aer';
+import { sectorTotals, sectorSeries, sectorShareBreakdown } from '../services/sectorBreakdown.service';
+import { loadShareMetrics, type ShareMetric } from '../services/shareMetrics.service';
+import * as entitiesRepo from '../repositories/entities.repo';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
 import {
@@ -47,25 +47,11 @@ interface ShareRow {
   sectorColor: string | null;
 }
 
-interface ShareMetrics {
-  shareId: string;
-  ticker: string;
-  shareName: string;
-  sector: string;
-  sectorColor: string | null;
-  heldShares: number;
-  cost: number;        // cumulative cost of held shares
-  totalCostAll: number; // total cost ever (incl. sold)
-  marketValue: number;
-  dividends: number;
-  saleProceeds: number;
-  netMarketValue: number; // marketValue - cost (held)
-  totalReturns: number;   // (marketValue + saleProceeds + dividends) - totalCostAll
-  avgCostPerShare: number;
-  latestPrice: number;
-  /** XIRR annualised return % (matches ShareAnalytics), null when none solves. */
-  aer: number | null;
-}
+/**
+ * The shape the service returns. Declared there, not here: this page held its own
+ * copy, which is how it drifted out of step with what the service computes.
+ */
+type ShareMetrics = ShareMetric;
 
 // ── KPI summary card ─────────────────────────────────────────────────────────
 
@@ -218,204 +204,36 @@ export function Dashboard() {
   const [entities, setEntities]         = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState('');
 
-  useEffect(() => {
-    supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
-  }, []);
+  /*
+    One source of truth for what a holding is.
 
+    This used to compute holdings here, from `transactions` and unfiltered
+    `buy_sell_notes`, and never read `scrip_entries` at all -- so it reported
+    fewer shares than the holder owned and disagreed with Share Analytics and
+    Portfolio Summary on market value, net market value, total returns and AER.
+    Four reported defects, one divergence.
+
+    It now goes through the same ledger every other screen uses.
+  */
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      // All paged — unbounded these were capped at db-max-rows, which left the
-      // price lookup missing shares and silently zeroed their market value.
-      const txnsQ = () => {
-        const q = supabase.from('transactions')
-          .select('id, share_id, entity_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
-          .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true })
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const dividendsQ = () => {
-        const q = supabase.from('dividends')
-          .select('share_id, entity_id, amount_net, payment_date')
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const openingQ = () => {
-        const q = supabase.from('entity_share_opening_balances')
-          .select('share_id, entity_id, opening_shares, average_purchase_cost, effective_date')
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const [sharesData, txnsData, pricesData, dividendsData, notesData, openingData] = await Promise.all([
-        selectAll(() => supabase.from('shares')
-          .select('id, ticker, share_name, sector, sector_types(sector_name, color)')
-          .eq('is_active', true)
-          .order('share_name')
-          .order('id', { ascending: true })),
-        selectAll(txnsQ),
-        selectAll(() => supabase.from('daily_share_prices')
-          .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false })
-          .order('id', { ascending: true })),
-        selectAll(dividendsQ),
-        // Notes override transaction amounts with more accurate settled figures
-        selectAll(() => supabase.from('buy_sell_notes')
-          .select('transaction_id, no_of_shares, gross_amount, note_type, trade_date')
-          .not('transaction_id', 'is', null)
-          .order('id', { ascending: true })),
-        selectAll(openingQ),
+      const [metrics, entityRows] = await Promise.all([
+        loadShareMetrics(selectedEntityId || undefined),
+        entitiesRepo.listAll(),
       ]);
 
-      const sharesRes    = { data: sharesData };
-      const txnsRes      = { data: txnsData };
-      const pricesRes    = { data: pricesData };
-      const dividendsRes = { data: dividendsData };
-      const notesRes     = { data: notesData };
-      const openingRes   = { data: openingData };
-
-      const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
-        id: s.id,
-        ticker: s.ticker || '',
-        share_name: s.share_name || s.ticker || '',
-        // Prefer sector_types.sector_name, fall back to shares.sector column
-        sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
-        // The colour stored against the sector, when there is one. Null for a share
-        // that has no sector_types row (it only carries the free-text shares.sector),
-        // which is what buildSectorColorMap's derived fallback is for.
-        sectorColor: (s.sector_types as { color: string | null } | null)?.color || null,
-      }));
-      setShares(shareRows);
-
-      const shareMap = new Map(shareRows.map(s => [s.id, s]));
-
-      // Latest price per share
-      const latestPrices = new Map<string, number>();
-      (pricesRes.data || []).forEach((p: any) => {
-        if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, Number(p.share_price) || 0);
-      });
-
-      // Dividends by share (aggregate across all entities for dashboard totals)
-      const divMap = new Map<string, number>();
-      (dividendsRes.data || []).forEach((d: any) => {
-        divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + (Number(d.amount_net) || 0));
-      });
-
-      // Notes map: transaction_id → settled amounts (more accurate than raw transaction)
-      const txnNoteMap = new Map<string, { shares: number; gross: number; type: string; date: string | null }>();
-      (notesRes.data || []).forEach((n: any) => {
-        if (n.transaction_id) {
-          txnNoteMap.set(n.transaction_id, {
-            shares: Number(n.no_of_shares) || 0,
-            gross:  Number(n.gross_amount)  || 0,
-            type:   n.note_type,
-            date:   n.trade_date ?? null,
-          });
-        }
-      });
-
-      // Holdings accumulator: share_id → { held, cost, totalCostAll, saleProceeds, feeRate }
-      type HoldingAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
-      const holdMap = new Map<string, HoldingAcc>();
-      // Cash flows per share for XIRR — aggregated across all entities
-      const cfMap = new Map<string, Array<{ date: Date; amount: number }>>();
-
-      const ensureHolding = (shareId: string): HoldingAcc => {
-        if (!holdMap.has(shareId)) holdMap.set(shareId, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
-        return holdMap.get(shareId)!;
-      };
-      const addCf = (shareId: string, date: Date, amount: number) => {
-        if (!cfMap.has(shareId)) cfMap.set(shareId, []);
-        cfMap.get(shareId)!.push({ date, amount });
-      };
-
-      // Seed with opening balances first (they represent pre-system holdings)
-      (openingRes.data || []).forEach((ob: any) => {
-        if (!shareMap.has(ob.share_id)) return;
-        const h = ensureHolding(ob.share_id);
-        const qty  = Number(ob.opening_shares) || 0;
-        const cost = qty * (Number(ob.average_purchase_cost) || 0);
-        h.held        += qty;
-        h.cost        += cost;
-        h.totalCostAll += cost;
-        if (cost > 0 && ob.effective_date) {
-          addCf(ob.share_id, new Date(ob.effective_date + 'T00:00:00'), -cost);
-        }
-      });
-
-      // Dividends cash flows (inflow, dated)
-      (dividendsRes.data || []).forEach((d: any) => {
-        if (d.payment_date && Number(d.amount_net) > 0) {
-          addCf(d.share_id, new Date(d.payment_date + 'T00:00:00'), Number(d.amount_net));
-        }
-      });
-
-      // Apply approved transactions (notes take precedence for settled amounts)
-      (txnsRes.data || []).forEach((tx: any) => {
-        if (!shareMap.has(tx.share_id)) return;
-        const note       = txnNoteMap.get(tx.id);
-        const shares_qty = note ? note.shares : Number(tx.no_of_shares) || 0;
-        const gross      = note ? note.gross  : Number(tx.total_amount)  || 0;
-        const txType     = note?.type || tx.transaction_type || '';
-        const isBuy      = txType.toUpperCase() === 'BUY';
-        const h = ensureHolding(tx.share_id);
-
-        // Track the latest brokerage fee rate for this share
-        if (tx.brokerage_fee_rate != null) h.feeRate = Number(tx.brokerage_fee_rate);
-
-        // Use note's trade_date first, fall back to transaction_date
-        const rawDate = note?.date ?? tx.transaction_date ?? null;
-        const cfDate = rawDate ? new Date(rawDate + 'T00:00:00') : null;
-
-        if (isBuy) {
-          h.held        += shares_qty;
-          h.cost        += gross;
-          h.totalCostAll += gross;
-          if (cfDate && gross > 0) addCf(tx.share_id, cfDate, -gross);
-        } else {
-          const avgCPS = h.held > 0 ? h.cost / h.held : 0;
-          h.held          = Math.max(0, h.held - shares_qty);
-          h.cost          = Math.max(0, h.cost - avgCPS * shares_qty);
-          h.saleProceeds += gross;
-          if (cfDate && gross > 0) addCf(tx.share_id, cfDate, gross);
-        }
-      });
-
-      const today = new Date();
-      const result: ShareMetrics[] = [];
-      holdMap.forEach((h, shareId) => {
-        const sr = shareMap.get(shareId);
-        if (!sr) return;
-        const price   = latestPrices.get(shareId) || 0;
-        const feeRate = h.feeRate / 100;
-        // Net market value (after brokerage fees) — matches ShareAnalytics & PortfolioSummary
-        const mv      = h.held * price * (1 - feeRate);
-        const divs    = divMap.get(shareId) || 0;
-        const nmv     = mv - h.cost;
-        const tr      = (mv + h.saleProceeds + divs) - h.totalCostAll;
-        const avgCPS  = h.held > 0 ? h.cost / h.held : 0;
-
-        // AER = XIRR annualized return (matches ShareAnalytics and Portfolio Summary).
-        // mv is already net of brokerage, the same terminal basis those use.
-        const cfs = [...(cfMap.get(shareId) || [])];
-        if (mv > 0) cfs.push({ date: today, amount: mv });
-        const aer = aerPercent(cfs);
-
-        result.push({
-          shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
-          sectorColor: sr.sectorColor,
-          heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
-          marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
-          netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,
-          latestPrice: price, aer,
-        });
-      });
-
-      result.sort((a, b) => b.netMarketValue - a.netMarketValue);
-      setMetrics(result);
+      setShares(
+        metrics.map(m => ({
+          id: m.shareId,
+          ticker: m.ticker,
+          share_name: m.shareName,
+          sector: m.sector,
+          sectorColor: m.sectorColor,
+        })),
+      );
+      setMetrics(metrics);
+      setEntities(entityRows.map(e => ({ id: e.id, name: e.name })));
     } catch (err) {
       console.error(err);
     } finally {
@@ -834,11 +652,31 @@ export function Dashboard() {
                         </td>
                         <td className="py-1.5 text-right text-gray-600">{fmtNum(m.heldShares)}</td>
                         <td className="py-1.5 text-right text-gray-800 font-semibold">{fmtCur(m.marketValue)}</td>
-                        <td className={`py-1.5 text-right font-semibold ${m.aer === null ? 'text-gray-400' : m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatAer(m.aer, 1)}</td>
+                        <td
+                          className={`py-1.5 text-right font-semibold ${m.aer === null ? 'text-gray-400' : m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                          title={m.entityCount > 1
+                            ? `Pooled across ${m.entityCount} entities. Share Analytics reports each holding separately: ${m.byEntity.map(b => `${b.entityName} ${formatAer(b.aer, 1)}`).join(', ')}`
+                            : undefined}
+                        >
+                          {formatAer(m.aer, 1)}
+                          {m.entityCount > 1 && <span className="ml-0.5 text-gray-400 font-normal">*</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {/* Only shown when pooling actually changes an answer. A pooled
+                    XIRR is not any single holding's AER, and Share Analytics and
+                    Portfolio Summary both report per (entity, share) -- so
+                    without this the two screens look like they disagree. */}
+                {metrics.some(m => m.entityCount > 1) && (
+                  <p className="mt-2 text-xs text-gray-400 leading-snug">
+                    * AER is pooled across the entities holding that share — the money-weighted
+                    return on the whole book, not any one holding. Share Analytics and Portfolio
+                    Summary report per entity; hover the figure to see each. Select a single entity
+                    above and the numbers line up.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -857,50 +695,35 @@ export function Dashboard() {
 
 // ── Section 5 component ───────────────────────────────────────────────────────
 
-const SECTOR_DISPLAY_ORDER = [
-  'Banking',
-  'Construction Materials',
-  'Constructions Materials',
-  'Diversified Financials',
-  'Industries',
-];
-
 function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
   metrics: ShareMetrics[];
   shareColor: (ticker: string) => string;
   sectorColor: (sector: string) => string;
 }) {
-  const held = metrics.filter(m => m.heldShares > 0);
+  /*
+    Every sector, from the data.
 
-  // Colours come from the parent, so a ticker keeps the same colour here as in
-  // the top-5 charts above. Deriving them per sector slice previously gave the
-  // same share a different colour in every pie.
+    This section picked sectors by matching them against a hardcoded list --
+    Banking, Construction Materials, Diversified Financials, Industries -- and
+    sector names are user data from the Sector Types screen. The live names are
+    GICS ones, so not a single entry matched and the per-sector breakdown
+    rendered nothing at all. That is the "not all sectors are considered" report:
+    none were.
 
-  // Overall sector returns pie
-  const sectorRetMap = new Map<string, number>();
-  held.forEach(m => sectorRetMap.set(m.sector, (sectorRetMap.get(m.sector) || 0) + m.totalReturns));
-  const sectorReturnsPie = mkPiePct(
-    Array.from(sectorRetMap.entries()).map(([k, v]) => ({ label: k, value: v, color: sectorColor(k) }))
-  );
+    It also aggregated over held positions only, so a sector whose shares had all
+    been sold lost its realised returns, the same defect fixed in the sector pies
+    above. Both rules now live in sectorBreakdown.service.
 
-  // Per-sector: returns broken down by share
-  const targetSectors = Array.from(new Set(
-    held.map(m => m.sector).filter(s =>
-      SECTOR_DISPLAY_ORDER.some(ds => ds.toLowerCase() === s.toLowerCase())
-    )
-  )).sort((a, b) => {
-    const ia = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === a.toLowerCase());
-    const ib = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === b.toLowerCase());
-    return ia - ib;
-  });
+    Colours come from the parent, so a ticker keeps the same colour here as in
+    the top-5 charts above.
+  */
+  const sectorReturnsPie = sectorSeries(sectorTotals(metrics), 'returns', sectorColor);
 
-  const sectorSharePies = targetSectors.map(sector => {
-    const shares = held.filter(m => m.sector.toLowerCase() === sector.toLowerCase());
-    const pieData = mkPiePct(
-      shares.map(m => ({ label: m.ticker, value: m.totalReturns, color: shareColor(m.ticker) }))
-    );
-    return { sector, pieData };
-  });
+  const sectorSharePies = sectorShareBreakdown(
+    metrics.map(m => ({ ...m, label: m.ticker })),
+    'returns',
+    shareColor,
+  ).map(b => ({ sector: b.sector, pieData: b.shares }));
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -1038,7 +861,7 @@ function Section6ShareCards({ metrics, entityName, sectorColor }: {
                 {/* 2-column metric cards */}
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard
-                    label="AER"
+                    label={selected.entityCount > 1 ? `AER (pooled, ${selected.entityCount} entities)` : 'AER'}
                     value={formatAer(selected.aer, 1)}
                     bg="bg-yellow-50"
                     textColor={selected.aer === null ? 'text-gray-400' : selected.aer >= 0 ? 'text-green-700' : 'text-red-600'}
