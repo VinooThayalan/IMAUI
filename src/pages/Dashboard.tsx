@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import { selectAll } from '../lib/selectAll';
-import { aerPercent, formatAer } from '../lib/aer';
+import { formatAer } from '../lib/aer';
 import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
+import { loadShareMetrics } from '../services/shareMetrics.service';
+import * as entitiesRepo from '../repositories/entities.repo';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
 import {
@@ -218,204 +218,36 @@ export function Dashboard() {
   const [entities, setEntities]         = useState<Entity[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState('');
 
-  useEffect(() => {
-    supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
-  }, []);
+  /*
+    One source of truth for what a holding is.
 
+    This used to compute holdings here, from `transactions` and unfiltered
+    `buy_sell_notes`, and never read `scrip_entries` at all -- so it reported
+    fewer shares than the holder owned and disagreed with Share Analytics and
+    Portfolio Summary on market value, net market value, total returns and AER.
+    Four reported defects, one divergence.
+
+    It now goes through the same ledger every other screen uses.
+  */
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      // All paged — unbounded these were capped at db-max-rows, which left the
-      // price lookup missing shares and silently zeroed their market value.
-      const txnsQ = () => {
-        const q = supabase.from('transactions')
-          .select('id, share_id, entity_id, transaction_type, no_of_shares, total_amount, brokerage_fee_rate, transaction_date')
-          .in('approval_status', ['MANUAL_APPROVED'])
-          .order('transaction_date', { ascending: true })
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const dividendsQ = () => {
-        const q = supabase.from('dividends')
-          .select('share_id, entity_id, amount_net, payment_date')
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const openingQ = () => {
-        const q = supabase.from('entity_share_opening_balances')
-          .select('share_id, entity_id, opening_shares, average_purchase_cost, effective_date')
-          .order('id', { ascending: true });
-        return selectedEntityId ? q.eq('entity_id', selectedEntityId) : q;
-      };
-
-      const [sharesData, txnsData, pricesData, dividendsData, notesData, openingData] = await Promise.all([
-        selectAll(() => supabase.from('shares')
-          .select('id, ticker, share_name, sector, sector_types(sector_name, color)')
-          .eq('is_active', true)
-          .order('share_name')
-          .order('id', { ascending: true })),
-        selectAll(txnsQ),
-        selectAll(() => supabase.from('daily_share_prices')
-          .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false })
-          .order('id', { ascending: true })),
-        selectAll(dividendsQ),
-        // Notes override transaction amounts with more accurate settled figures
-        selectAll(() => supabase.from('buy_sell_notes')
-          .select('transaction_id, no_of_shares, gross_amount, note_type, trade_date')
-          .not('transaction_id', 'is', null)
-          .order('id', { ascending: true })),
-        selectAll(openingQ),
+      const [metrics, entityRows] = await Promise.all([
+        loadShareMetrics(selectedEntityId || undefined),
+        entitiesRepo.listAll(),
       ]);
 
-      const sharesRes    = { data: sharesData };
-      const txnsRes      = { data: txnsData };
-      const pricesRes    = { data: pricesData };
-      const dividendsRes = { data: dividendsData };
-      const notesRes     = { data: notesData };
-      const openingRes   = { data: openingData };
-
-      const shareRows: ShareRow[] = (sharesRes.data || []).map((s: any) => ({
-        id: s.id,
-        ticker: s.ticker || '',
-        share_name: s.share_name || s.ticker || '',
-        // Prefer sector_types.sector_name, fall back to shares.sector column
-        sector: (s.sector_types as { sector_name: string } | null)?.sector_name || s.sector || 'Other',
-        // The colour stored against the sector, when there is one. Null for a share
-        // that has no sector_types row (it only carries the free-text shares.sector),
-        // which is what buildSectorColorMap's derived fallback is for.
-        sectorColor: (s.sector_types as { color: string | null } | null)?.color || null,
-      }));
-      setShares(shareRows);
-
-      const shareMap = new Map(shareRows.map(s => [s.id, s]));
-
-      // Latest price per share
-      const latestPrices = new Map<string, number>();
-      (pricesRes.data || []).forEach((p: any) => {
-        if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, Number(p.share_price) || 0);
-      });
-
-      // Dividends by share (aggregate across all entities for dashboard totals)
-      const divMap = new Map<string, number>();
-      (dividendsRes.data || []).forEach((d: any) => {
-        divMap.set(d.share_id, (divMap.get(d.share_id) || 0) + (Number(d.amount_net) || 0));
-      });
-
-      // Notes map: transaction_id → settled amounts (more accurate than raw transaction)
-      const txnNoteMap = new Map<string, { shares: number; gross: number; type: string; date: string | null }>();
-      (notesRes.data || []).forEach((n: any) => {
-        if (n.transaction_id) {
-          txnNoteMap.set(n.transaction_id, {
-            shares: Number(n.no_of_shares) || 0,
-            gross:  Number(n.gross_amount)  || 0,
-            type:   n.note_type,
-            date:   n.trade_date ?? null,
-          });
-        }
-      });
-
-      // Holdings accumulator: share_id → { held, cost, totalCostAll, saleProceeds, feeRate }
-      type HoldingAcc = { held: number; cost: number; totalCostAll: number; saleProceeds: number; feeRate: number };
-      const holdMap = new Map<string, HoldingAcc>();
-      // Cash flows per share for XIRR — aggregated across all entities
-      const cfMap = new Map<string, Array<{ date: Date; amount: number }>>();
-
-      const ensureHolding = (shareId: string): HoldingAcc => {
-        if (!holdMap.has(shareId)) holdMap.set(shareId, { held: 0, cost: 0, totalCostAll: 0, saleProceeds: 0, feeRate: 0 });
-        return holdMap.get(shareId)!;
-      };
-      const addCf = (shareId: string, date: Date, amount: number) => {
-        if (!cfMap.has(shareId)) cfMap.set(shareId, []);
-        cfMap.get(shareId)!.push({ date, amount });
-      };
-
-      // Seed with opening balances first (they represent pre-system holdings)
-      (openingRes.data || []).forEach((ob: any) => {
-        if (!shareMap.has(ob.share_id)) return;
-        const h = ensureHolding(ob.share_id);
-        const qty  = Number(ob.opening_shares) || 0;
-        const cost = qty * (Number(ob.average_purchase_cost) || 0);
-        h.held        += qty;
-        h.cost        += cost;
-        h.totalCostAll += cost;
-        if (cost > 0 && ob.effective_date) {
-          addCf(ob.share_id, new Date(ob.effective_date + 'T00:00:00'), -cost);
-        }
-      });
-
-      // Dividends cash flows (inflow, dated)
-      (dividendsRes.data || []).forEach((d: any) => {
-        if (d.payment_date && Number(d.amount_net) > 0) {
-          addCf(d.share_id, new Date(d.payment_date + 'T00:00:00'), Number(d.amount_net));
-        }
-      });
-
-      // Apply approved transactions (notes take precedence for settled amounts)
-      (txnsRes.data || []).forEach((tx: any) => {
-        if (!shareMap.has(tx.share_id)) return;
-        const note       = txnNoteMap.get(tx.id);
-        const shares_qty = note ? note.shares : Number(tx.no_of_shares) || 0;
-        const gross      = note ? note.gross  : Number(tx.total_amount)  || 0;
-        const txType     = note?.type || tx.transaction_type || '';
-        const isBuy      = txType.toUpperCase() === 'BUY';
-        const h = ensureHolding(tx.share_id);
-
-        // Track the latest brokerage fee rate for this share
-        if (tx.brokerage_fee_rate != null) h.feeRate = Number(tx.brokerage_fee_rate);
-
-        // Use note's trade_date first, fall back to transaction_date
-        const rawDate = note?.date ?? tx.transaction_date ?? null;
-        const cfDate = rawDate ? new Date(rawDate + 'T00:00:00') : null;
-
-        if (isBuy) {
-          h.held        += shares_qty;
-          h.cost        += gross;
-          h.totalCostAll += gross;
-          if (cfDate && gross > 0) addCf(tx.share_id, cfDate, -gross);
-        } else {
-          const avgCPS = h.held > 0 ? h.cost / h.held : 0;
-          h.held          = Math.max(0, h.held - shares_qty);
-          h.cost          = Math.max(0, h.cost - avgCPS * shares_qty);
-          h.saleProceeds += gross;
-          if (cfDate && gross > 0) addCf(tx.share_id, cfDate, gross);
-        }
-      });
-
-      const today = new Date();
-      const result: ShareMetrics[] = [];
-      holdMap.forEach((h, shareId) => {
-        const sr = shareMap.get(shareId);
-        if (!sr) return;
-        const price   = latestPrices.get(shareId) || 0;
-        const feeRate = h.feeRate / 100;
-        // Net market value (after brokerage fees) — matches ShareAnalytics & PortfolioSummary
-        const mv      = h.held * price * (1 - feeRate);
-        const divs    = divMap.get(shareId) || 0;
-        const nmv     = mv - h.cost;
-        const tr      = (mv + h.saleProceeds + divs) - h.totalCostAll;
-        const avgCPS  = h.held > 0 ? h.cost / h.held : 0;
-
-        // AER = XIRR annualized return (matches ShareAnalytics and Portfolio Summary).
-        // mv is already net of brokerage, the same terminal basis those use.
-        const cfs = [...(cfMap.get(shareId) || [])];
-        if (mv > 0) cfs.push({ date: today, amount: mv });
-        const aer = aerPercent(cfs);
-
-        result.push({
-          shareId, ticker: sr.ticker, shareName: sr.share_name, sector: sr.sector,
-          sectorColor: sr.sectorColor,
-          heldShares: h.held, cost: h.cost, totalCostAll: h.totalCostAll,
-          marketValue: mv, dividends: divs, saleProceeds: h.saleProceeds,
-          netMarketValue: nmv, totalReturns: tr, avgCostPerShare: avgCPS,
-          latestPrice: price, aer,
-        });
-      });
-
-      result.sort((a, b) => b.netMarketValue - a.netMarketValue);
-      setMetrics(result);
+      setShares(
+        metrics.map(m => ({
+          id: m.shareId,
+          ticker: m.ticker,
+          share_name: m.shareName,
+          sector: m.sector,
+          sectorColor: m.sectorColor,
+        })),
+      );
+      setMetrics(metrics);
+      setEntities(entityRows.map(e => ({ id: e.id, name: e.name })));
     } catch (err) {
       console.error(err);
     } finally {
