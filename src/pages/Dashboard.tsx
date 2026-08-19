@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { formatAer } from '../lib/aer';
-import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
+import { sectorTotals, sectorSeries, sectorShareBreakdown } from '../services/sectorBreakdown.service';
 import { loadShareMetrics, type ShareMetric } from '../services/shareMetrics.service';
 import * as entitiesRepo from '../repositories/entities.repo';
 import { PieChart } from '../components/PieChart';
@@ -695,50 +695,35 @@ export function Dashboard() {
 
 // ── Section 5 component ───────────────────────────────────────────────────────
 
-const SECTOR_DISPLAY_ORDER = [
-  'Banking',
-  'Construction Materials',
-  'Constructions Materials',
-  'Diversified Financials',
-  'Industries',
-];
-
 function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
   metrics: ShareMetrics[];
   shareColor: (ticker: string) => string;
   sectorColor: (sector: string) => string;
 }) {
-  const held = metrics.filter(m => m.heldShares > 0);
+  /*
+    Every sector, from the data.
 
-  // Colours come from the parent, so a ticker keeps the same colour here as in
-  // the top-5 charts above. Deriving them per sector slice previously gave the
-  // same share a different colour in every pie.
+    This section picked sectors by matching them against a hardcoded list --
+    Banking, Construction Materials, Diversified Financials, Industries -- and
+    sector names are user data from the Sector Types screen. The live names are
+    GICS ones, so not a single entry matched and the per-sector breakdown
+    rendered nothing at all. That is the "not all sectors are considered" report:
+    none were.
 
-  // Overall sector returns pie
-  const sectorRetMap = new Map<string, number>();
-  held.forEach(m => sectorRetMap.set(m.sector, (sectorRetMap.get(m.sector) || 0) + m.totalReturns));
-  const sectorReturnsPie = mkPiePct(
-    Array.from(sectorRetMap.entries()).map(([k, v]) => ({ label: k, value: v, color: sectorColor(k) }))
-  );
+    It also aggregated over held positions only, so a sector whose shares had all
+    been sold lost its realised returns, the same defect fixed in the sector pies
+    above. Both rules now live in sectorBreakdown.service.
 
-  // Per-sector: returns broken down by share
-  const targetSectors = Array.from(new Set(
-    held.map(m => m.sector).filter(s =>
-      SECTOR_DISPLAY_ORDER.some(ds => ds.toLowerCase() === s.toLowerCase())
-    )
-  )).sort((a, b) => {
-    const ia = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === a.toLowerCase());
-    const ib = SECTOR_DISPLAY_ORDER.findIndex(d => d.toLowerCase() === b.toLowerCase());
-    return ia - ib;
-  });
+    Colours come from the parent, so a ticker keeps the same colour here as in
+    the top-5 charts above.
+  */
+  const sectorReturnsPie = sectorSeries(sectorTotals(metrics), 'returns', sectorColor);
 
-  const sectorSharePies = targetSectors.map(sector => {
-    const shares = held.filter(m => m.sector.toLowerCase() === sector.toLowerCase());
-    const pieData = mkPiePct(
-      shares.map(m => ({ label: m.ticker, value: m.totalReturns, color: shareColor(m.ticker) }))
-    );
-    return { sector, pieData };
-  });
+  const sectorSharePies = sectorShareBreakdown(
+    metrics.map(m => ({ ...m, label: m.ticker })),
+    'returns',
+    shareColor,
+  ).map(b => ({ sector: b.sector, pieData: b.shares }));
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
