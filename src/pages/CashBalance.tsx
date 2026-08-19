@@ -1,6 +1,22 @@
-import { Plus, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark } from 'lucide-react';
+import { Plus, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
+import * as cashLedgerRepo from '../repositories/cashLedger.repo';
+import {
+  indexNoteDates,
+  tradeDatesFor,
+  matchesLedgerFilters,
+  matchesPendingFilters,
+  hasActiveFilter,
+  entityRunningBalance,
+  accountNetMovement,
+  entityFacilityLimit,
+  accountFacilityLimit,
+  entityCashPosition,
+  NO_FILTERS,
+  type LedgerFilters,
+  type TradeDates,
+} from '../services/cashLedger.service';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/auditLog';
 
@@ -10,7 +26,6 @@ interface Entity {
   name: string;
   type: string;
   current_balance: number;
-  od_limit: number;
 }
 
 interface Bank {
@@ -32,8 +47,28 @@ interface PendingNote {
   note_number?: string;
   net_amount?: number;
   trade_date?: string;
+  settlement_date?: string;
   entity_id: string;
   status: string;
+}
+
+/** Ledger dates render the same way wherever they appear, or as an em dash. */
+function fmtLedgerDate(d?: string | null): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function CashBalance() {
@@ -48,6 +83,8 @@ export function CashBalance() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
   const [pendingNotes, setPendingNotes] = useState<PendingNote[]>([]);
+  const [noteDates, setNoteDates] = useState<Map<string, TradeDates>>(new Map());
+  const [filters, setFilters] = useState<LedgerFilters>(NO_FILTERS);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
     entityId: '',
@@ -86,23 +123,15 @@ export function CashBalance() {
 
       if (banksError) throw banksError;
 
-      const { data: transactionsData, error: transactionsError } = await supabase
-        .from('cash_balance_ledger')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('timestamp', { ascending: false });
-
-      if (transactionsError) throw transactionsError;
-
-      const { data: pendingNotesData } = await supabase
-        .from('buy_sell_notes')
-        .select('id, note_type, contract_no, note_number, net_amount, trade_date, status, transaction_id, transactions!inner(entity_id)')
-        .eq('status', 'PENDING_APPROVAL');
+      const [transactionsData, pendingNotesData, noteDateRows] = await Promise.all([
+        cashLedgerRepo.listAll(),
+        cashLedgerRepo.listPendingTradeNotes(),
+        cashLedgerRepo.listNoteDates(),
+      ]);
 
       const parsedEntities = (entitiesData || []).map(entity => ({
         ...entity,
         current_balance: Number(entity.current_balance) || 0,
-        od_limit: Number(entity.od_limit) || 0
       }));
 
       const parsedBanks = (banksData || []).map(bank => ({
@@ -110,10 +139,27 @@ export function CashBalance() {
         balance: Number(bank.balance) || 0
       }));
 
-      const parsedTransactions = (transactionsData || []).map(txn => ({
+      /*
+        Adapt the row to CashTransaction, the older shape this page renders.
+
+        The repository reports the columns as the database has them — nullable —
+        while CashTransaction predates that and treats several as required. The
+        coercion belongs here, at the boundary between the two, rather than in
+        the repository pretending the table has no nulls.
+      */
+      const parsedTransactions: CashTransaction[] = transactionsData.map(txn => ({
         ...txn,
+        description: txn.description ?? '',
+        created_by: txn.created_by ?? '',
+        code: txn.code ?? undefined,
+        notes: txn.notes ?? undefined,
+        entity_id: txn.entity_id ?? undefined,
+        bank_id: txn.bank_id ?? undefined,
+        reference_id: txn.reference_id ?? undefined,
+        source: txn.source ?? undefined,
         amount: Number(txn.amount) || 0,
-        running_balance: Number(txn.running_balance) || 0
+        running_balance: Number(txn.running_balance) || 0,
+        on_hold_amount: Number(txn.on_hold_amount) || 0,
       }));
 
       const parsedPending: PendingNote[] = (pendingNotesData || []).map((n: any) => ({
@@ -123,7 +169,9 @@ export function CashBalance() {
         note_number: n.note_number,
         net_amount: n.net_amount != null ? Number(n.net_amount) : undefined,
         trade_date: n.trade_date,
-        entity_id: n.transactions?.entity_id ?? '',
+        settlement_date: n.settlement_date,
+        // supabase-js types a to-one embed as an array; PostgREST returns an object.
+        entity_id: (Array.isArray(n.transactions) ? n.transactions[0] : n.transactions)?.entity_id ?? '',
         status: n.status,
       })).filter((n: PendingNote) => n.entity_id);
 
@@ -131,6 +179,7 @@ export function CashBalance() {
       setBanks(parsedBanks);
       setTransactions(parsedTransactions);
       setPendingNotes(parsedPending);
+      setNoteDates(indexNoteDates(noteDateRows));
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -152,13 +201,9 @@ export function CashBalance() {
       const entity = entities.find(e => e.id === formData.entityId);
       if (!entity) return;
 
-      const entityTransactions = transactions
-        .filter(t => t.entity_id === formData.entityId)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-      const lastBalance = entityTransactions.length > 0
-        ? entityTransactions[entityTransactions.length - 1].running_balance
-        : 0;
+      // Same rule the form displays, so the figure saved cannot differ from the
+      // figure shown. Both had their own copy of this.
+      const lastBalance = entityRunningBalance(transactions, formData.entityId);
 
       const amount = parseFloat(formData.amount);
       const newBalance = transactionType === 'Addition'
@@ -168,7 +213,11 @@ export function CashBalance() {
       // Check the deduction does not exceed available credit (balance + facility limit)
       if (transactionType === 'Deduction') {
         const selectedBankObj = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-        const facilityLimit = Number(selectedBankObj?.facility_limit ?? entity.od_limit ?? 0);
+        // Prefer the account's own limit; otherwise the entity's, which is the sum
+        // of its accounts'. This used to fall back to entity.od_limit, a column
+        // that does not exist, so with no account selected every deduction was
+        // checked against a limit of zero.
+        const facilityLimit = accountFacilityLimit(selectedBankObj) ?? entityFacilityLimit(banks, formData.entityId);
         const maxDeductible = lastBalance + facilityLimit;
         if (amount > maxDeductible) {
           alert(`Amount exceeds available credit. Maximum deductible: Rs. ${maxDeductible.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
@@ -227,27 +276,76 @@ export function CashBalance() {
     }
   }
 
-  const totalBalance = entities.reduce((sum, entity) => sum + entity.current_balance, 0);
+  // Same source as the rows, or the header would disagree with the table under it.
+  const totalBalance = entities.reduce(
+    (sum, entity) => sum + entityRunningBalance(transactions, entity.id),
+    0,
+  );
   const totalOnHold = Array.from(entityPendingHold.values()).reduce((s, v) => s + v, 0);
-  const filteredTransactions = (() => {
-    let filtered = transactions;
+  /*
+    The drill-down and the filter bar are one filter.
 
-    if (selectedEntity) {
-      filtered = filtered.filter(t => t.entity_id === selectedEntity.id);
-    }
+    Clicking an entity row above and choosing one in the bar mean the same thing,
+    so they resolve to a single set of criteria rather than two filters that can
+    contradict each other. The drill-down wins where both are set, because it is
+    the more specific action the user just took.
+  */
+  const activeFilters: LedgerFilters = {
+    entityId: selectedEntity?.id ?? filters.entityId,
+    bankId: selectedBank?.id ?? filters.bankId,
+    from: filters.from,
+    to: filters.to,
+  };
 
-    if (selectedBank) {
-      filtered = filtered.filter(t => t.bank_id === selectedBank.id);
-    }
+  const filteredTransactions = transactions.filter(t => matchesLedgerFilters(t, activeFilters));
+  const filteredPendingNotes = pendingNotes.filter(n => matchesPendingFilters(n, activeFilters));
 
-    return filtered;
-  })();
+  /** Exports exactly what the filters admit, pending trades included. */
+  function exportLedger() {
+    const headers = [
+      'Date', 'Trade Date', 'Settlement Date', 'Source', 'Entity ID', 'Entity',
+      'Bank', 'Account Number', 'Type', 'Code', 'Description', 'Amount', 'On Hold', 'Running Balance',
+    ];
 
-  const filteredPendingNotes = pendingNotes.filter(n => {
-    if (selectedEntity && n.entity_id !== selectedEntity.id) return false;
-    if (selectedBank) return false; // pending notes have no bank
-    return true;
-  });
+    const pendingRows = filteredPendingNotes.map(note => {
+      const entity = entities.find(e => e.id === note.entity_id);
+      return [
+        fmtLedgerDate(note.trade_date),
+        fmtLedgerDate(note.trade_date),
+        fmtLedgerDate(note.settlement_date),
+        'Trade (pending)',
+        entity?.entity_id ?? '', entity?.name ?? '',
+        '', '',
+        note.note_type === 'Buy' ? 'Deduction' : 'Addition',
+        note.contract_no || note.note_number || '',
+        `${note.note_type} Note — Awaiting Approval`,
+        (note.net_amount ?? 0).toFixed(2),
+        (note.net_amount ?? 0).toFixed(2),
+        '',
+      ];
+    });
+
+    const ledgerRows = filteredTransactions.map(t => {
+      const entity = entities.find(e => e.id === t.entity_id);
+      const bank = getBankById(t.bank_id || null);
+      const dates = tradeDatesFor(t, noteDates);
+      return [
+        fmtLedgerDate(t.date || t.timestamp),
+        fmtLedgerDate(dates.tradeDate),
+        fmtLedgerDate(dates.settlementDate),
+        t.source || 'Manual',
+        entity?.entity_id ?? '', entity?.name ?? '',
+        bank?.name ?? '', bank?.account_number ?? '',
+        t.type, t.code ?? '', t.description ?? '',
+        Number(t.amount).toFixed(2),
+        Number(t.on_hold_amount || 0).toFixed(2),
+        Number(t.running_balance).toFixed(2),
+      ];
+    });
+
+    const stamp = new Date().toISOString().split('T')[0];
+    exportCsv(`cash_ledger_${stamp}.csv`, headers, [...pendingRows, ...ledgerRows]);
+  }
 
   function handleEntityClick(entity: Entity) {
     setSelectedEntity(entity);
@@ -415,7 +513,20 @@ export function CashBalance() {
             <tbody className="divide-y divide-gray-200">
               {entities.map((entity) => {
                 const onHold = entityPendingHold.get(entity.id) ?? 0;
-                const availableCredit = entity.current_balance + entity.od_limit - onHold;
+                /*
+                  Balance from the ledger, not entities.current_balance.
+
+                  That column is a denormalised copy written alongside each ledger
+                  row, and it drifts: ENT004 holds 1,000,000,000.00 against a ledger
+                  that adds to 999,140,480.00. The ledger reproduces its own stored
+                  running_balance from the signed amounts exactly, for every entity,
+                  and it is what each new entry is computed from -- so it decides.
+
+                  Available credit stays entity-level. Limits are per account and
+                  are summed, but balances do not exist per account, so per-account
+                  headroom is not computable from this data.
+                */
+                const position = entityCashPosition(transactions, banks, entity.id, onHold);
                 return (
                   <tr
                     key={entity.id}
@@ -435,12 +546,12 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
-                        Rs. {entity.current_balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {position.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        Rs. {entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {position.facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -453,8 +564,8 @@ export function CashBalance() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-semibold ${availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        Rs. {availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className={`text-sm font-semibold ${position.availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        Rs. {position.availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -484,15 +595,100 @@ export function CashBalance() {
         <div className="p-6 border-b border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-900">Transaction Ledger</h2>
-            <div className="text-sm text-gray-500">
-              {filteredTransactions.length + filteredPendingNotes.length} transaction{(filteredTransactions.length + filteredPendingNotes.length) !== 1 ? 's' : ''}
-              {filteredPendingNotes.length > 0 && (
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
-                  {filteredPendingNotes.length} pending
-                </span>
-              )}
+            <div className="flex items-center gap-3">
+              <div className="text-sm text-gray-500">
+                {filteredTransactions.length + filteredPendingNotes.length} transaction{(filteredTransactions.length + filteredPendingNotes.length) !== 1 ? 's' : ''}
+                {filteredPendingNotes.length > 0 && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                    {filteredPendingNotes.length} pending
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={exportLedger}
+                disabled={filteredTransactions.length + filteredPendingNotes.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
             </div>
           </div>
+
+          {/* Filters. These write to the same criteria the entity/bank drill-down
+              above uses, so the two cannot contradict each other. */}
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cb-entity" className="text-xs font-semibold text-gray-500 uppercase">Entity</label>
+              <select
+                id="cb-entity"
+                value={selectedEntity?.id ?? filters.entityId}
+                onChange={e => { setSelectedEntity(null); setFilters({ ...filters, entityId: e.target.value }); }}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px]"
+              >
+                <option value="">All entities</option>
+                {entities.map(e => <option key={e.id} value={e.id}>{e.entity_id} — {e.name}</option>)}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cb-bank" className="text-xs font-semibold text-gray-500 uppercase">Bank account</label>
+              <select
+                id="cb-bank"
+                value={selectedBank?.id ?? filters.bankId}
+                onChange={e => { setSelectedBank(null); setFilters({ ...filters, bankId: e.target.value }); }}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[220px]"
+              >
+                <option value="">All bank accounts</option>
+                {banks.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}{b.account_number ? ` — ${b.account_number}` : ''}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cb-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
+              <input
+                id="cb-from"
+                type="date"
+                value={filters.from}
+                max={filters.to || undefined}
+                onChange={e => setFilters({ ...filters, from: e.target.value })}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label htmlFor="cb-to" className="text-xs font-semibold text-gray-500 uppercase">To</label>
+              <input
+                id="cb-to"
+                type="date"
+                value={filters.to}
+                min={filters.from || undefined}
+                onChange={e => setFilters({ ...filters, to: e.target.value })}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {(hasActiveFilter(filters) || selectedEntity || selectedBank) && (
+              <button
+                onClick={() => { setFilters(NO_FILTERS); setSelectedEntity(null); setSelectedBank(null); }}
+                className="px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          {/* A pending trade has no bank account -- the money has not moved, so
+              nothing has been debited. Filtering by one therefore hides them all,
+              and the count above would otherwise just look wrong. */}
+          {activeFilters.bankId && pendingNotes.length > 0 && (
+            <p className="mt-2 text-xs text-amber-700">
+              Filtering by bank account hides trades awaiting approval — they have no
+              account until they settle.
+            </p>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -500,6 +696,8 @@ export function CashBalance() {
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Trade Date</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Settlement Date</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Source</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
@@ -530,6 +728,8 @@ export function CashBalance() {
                         {note.trade_date ? new Date(note.trade_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                       </div>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{fmtLedgerDate(note.trade_date)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{fmtLedgerDate(note.settlement_date)}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Trade</span>
                     </td>
@@ -589,7 +789,7 @@ export function CashBalance() {
 
                 const onHoldAmount = transaction.on_hold_amount || 0;
                 const entityHold = entity ? (entityPendingHold.get(entity.id) ?? 0) : 0;
-                const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount - entityHold;
+                const availableBalance = transaction.running_balance + (entity ? entityFacilityLimit(banks, entity.id) : 0) - onHoldAmount - entityHold;
                 const isOnHold = onHoldAmount > 0;
 
                 return (
@@ -606,6 +806,16 @@ export function CashBalance() {
                           minute: '2-digit'
                         })}
                       </div>
+                    </td>
+                    {/* An entry raised by settling a contract note carries that
+                        note's id, so its trade dates come from the note. A truly
+                        manual entry has none, and gets an em dash rather than the
+                        posting date standing in for a trade date it never had. */}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {fmtLedgerDate(tradeDatesFor(transaction, noteDates).tradeDate)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {fmtLedgerDate(tradeDatesFor(transaction, noteDates).settlementDate)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {(() => {
@@ -649,9 +859,19 @@ export function CashBalance() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{bank?.account_number || '-'}</div>
                     </td>
+                    {/* The limit belongs to the account, and the row names one.
+                        This read entity.od_limit -- a column that does not exist --
+                        so it printed Rs. 0.00 on every row, including accounts
+                        holding 50,000,000 and 500,000,000. An entry with no account
+                        has no limit to report and gets an em dash. */}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {entity ? `Rs. ${entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
+                        {(() => {
+                          const limit = accountFacilityLimit(bank);
+                          return limit === null
+                            ? <span className="text-gray-400">—</span>
+                            : `Rs. ${limit.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+                        })()}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -791,7 +1011,8 @@ export function CashBalance() {
                 {formData.entityId && (() => {
                   const selectedEntity = entities.find(e => e.id === formData.entityId);
                   const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = Number(selectedBank?.facility_limit ?? selectedEntity?.od_limit ?? 0);
+                  const facilityLimit = accountFacilityLimit(selectedBank)
+                    ?? entityFacilityLimit(banks, selectedEntity?.id ?? '');
                   return selectedEntity ? (
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
@@ -809,23 +1030,61 @@ export function CashBalance() {
                   const entity = entities.find(e => e.id === formData.entityId);
                   if (!entity) return null;
 
-                  const entityTransactions = transactions
-                    .filter(t => t.entity_id === formData.entityId)
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  /*
+                    This is the ENTITY's balance, not the selected account's.
 
-                  const openingBalance = entityTransactions.length > 0
-                    ? entityTransactions[entityTransactions.length - 1].running_balance
-                    : 0;
+                    `running_balance` accumulates per entity: the single ledger row
+                    against one account carries the whole entity's figure, and
+                    `banks.balance` is 0 everywhere because nothing maintains it.
+                    There is no per-account balance to show.
+
+                    Reported as "opening balance is wrong — no transactions on this
+                    account but it shows a minus value". The number was right for
+                    what it is and wrong for what the label promised, sitting under
+                    Account Number and Facility Limit where it reads as the
+                    account's. Naming the grain is the fix; the account's own
+                    movement is shown beneath it so the question that prompted the
+                    report has an answer on screen.
+                  */
+                  const openingBalance = entityRunningBalance(transactions, formData.entityId);
+                  const account = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
+                  const movement = formData.bankId
+                    ? accountNetMovement(transactions, formData.bankId)
+                    : null;
 
                   return (
-                    <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Opening Balance</label>
-                      <input
-                        type="text"
-                        value={`Rs. ${openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
-                        disabled
-                      />
+                    <div className="col-span-2 space-y-2">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Opening Balance — {entity.name}, all accounts
+                        </label>
+                        <input
+                          type="text"
+                          value={`Rs. ${openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
+                          disabled
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          The entity's running balance across every account, which is what this
+                          entry will continue from. Individual accounts do not carry their own.
+                        </p>
+                      </div>
+
+                      {movement && (
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Movement on {account?.account_number ?? 'this account'}
+                          </label>
+                          <input
+                            type="text"
+                            value={movement.entries === 0
+                              ? 'No entries on this account'
+                              : `Rs. ${movement.net.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} over ${movement.entries} ${movement.entries === 1 ? 'entry' : 'entries'}`}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                            disabled
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -931,7 +1190,7 @@ export function CashBalance() {
                     : lastBalance - amount;
 
                   const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = Number(selectedBank?.facility_limit ?? entity.od_limit ?? 0);
+                  const facilityLimit = accountFacilityLimit(selectedBank) ?? entityFacilityLimit(banks, entity.id);
                   const availableBalance = closingBalance + facilityLimit;
 
                   return (

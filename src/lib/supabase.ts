@@ -43,5 +43,4 @@ export interface Entity {
   name: string;
   type: string;
   current_balance: number;
-  od_limit: number;
 }
