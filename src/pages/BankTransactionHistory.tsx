@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X, Download, CalendarRange } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import * as cashLedgerRepo from '../repositories/cashLedger.repo';
+import { indexNoteDates, tradeDatesFor } from '../services/cashLedger.service';
 import { exportData, type ExportColumn } from '../lib/exportData';
 
 interface Entity {
@@ -27,6 +29,9 @@ interface LedgerEntry {
   amount: number;
   running_balance: number;
   reference_id: string | null;
+  /** From the contract note this entry settles. Null for a manual entry. */
+  tradeDate: string | null;
+  settlementDate: string | null;
 }
 
 interface BuyAndSellNote {
@@ -273,15 +278,17 @@ export function BankTransactionHistory() {
       // an entity with three banks triple-counted it. Entries with no bank
       // remain visible on the Cash Balance screen, which shows them whenever no
       // bank filter is applied.
-      const bankRes = await supabase
-        .from('cash_balance_ledger')
-        .select('id, date, type, description, code, amount, running_balance, reference_id')
-        .eq('bank_id', bankId)
-        .order('date', { ascending: true });
+      //
+      // Read and date resolution are shared with the Cash Balance ledger, which
+      // needed the same two columns: same repository, same rule about where a
+      // trade date may come from. The select here was also unpaged.
+      const [bankRows, noteDateRows] = await Promise.all([
+        cashLedgerRepo.listByBank(bankId),
+        cashLedgerRepo.listNoteDates(),
+      ]);
+      const noteDates = indexNoteDates(noteDateRows);
 
-      if (bankRes.error) throw bankRes.error;
-
-      const allEntries = [...(bankRes.data || [])].sort((a, b) => {
+      const allEntries = [...bankRows].sort((a, b) => {
         if (!a.date && !b.date) return 0;
         if (!a.date) return -1;
         if (!b.date) return 1;
@@ -289,16 +296,21 @@ export function BankTransactionHistory() {
       });
 
       setLedger(
-        allEntries.map((r: any) => ({
-          id: r.id,
-          date: r.date,
-          type: r.type,
-          description: r.description,
-          code: r.code,
-          amount: Number(r.amount) || 0,
-          running_balance: Number(r.running_balance) || 0,
-          reference_id: r.reference_id || null,
-        }))
+        allEntries.map(r => {
+          const dates = tradeDatesFor(r, noteDates);
+          return {
+            id: r.id,
+            date: r.date,
+            type: r.type,
+            description: r.description,
+            code: r.code,
+            amount: Number(r.amount) || 0,
+            running_balance: Number(r.running_balance) || 0,
+            reference_id: r.reference_id || null,
+            tradeDate: dates.tradeDate,
+            settlementDate: dates.settlementDate,
+          };
+        })
       );
     } catch (err) {
       console.error(err);
@@ -405,6 +417,10 @@ export function BankTransactionHistory() {
     if (!expandedBank) return;
     const columns: ExportColumn<LedgerEntry>[] = [
       { header: 'Date',            accessor: r => r.date || '' },
+      // Present only for an entry raised by settling a contract note. Blank
+      // rather than the posting date, which would read as a trade date.
+      { header: 'Trade Date',      accessor: r => r.tradeDate || '' },
+      { header: 'Settlement Date', accessor: r => r.settlementDate || '' },
       { header: 'Code',            accessor: r => r.code || '' },
       { header: 'Description',     accessor: r => r.description || '' },
       { header: 'Type',            accessor: r => (r.type === 'Addition' || r.type === 'addition' ? 'Credit' : 'Debit') },
@@ -668,6 +684,8 @@ export function BankTransactionHistory() {
                                             Date {sortAsc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                                           </button>
                                         </th>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Trade Date</th>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Settlement Date</th>
                                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Code</th>
                                         <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
                                         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
@@ -686,6 +704,10 @@ export function BankTransactionHistory() {
                                             className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'} hover:bg-blue-50/30 transition-colors`}
                                           >
                                             <td className="pl-12 pr-3 py-2 text-gray-600">{fmtDate(entry.date)}</td>
+                                            {/* Only an entry raised by settling a contract note has these.
+                                                A manual entry gets an em dash, not the posting date. */}
+                                            <td className="px-3 py-2 text-gray-600">{fmtDate(entry.tradeDate)}</td>
+                                            <td className="px-3 py-2 text-gray-600">{fmtDate(entry.settlementDate)}</td>
                                             <td className="px-3 py-2 text-gray-500 font-mono text-xs">{entry.code || '—'}</td>
                                             <td className="px-3 py-2 text-gray-700 max-w-xs truncate">{entry.description || '—'}</td>
                                             <td className="px-3 py-2 text-center">

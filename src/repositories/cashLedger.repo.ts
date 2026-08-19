@@ -44,6 +44,24 @@ export async function listAll(): Promise<CashLedgerRow[]> {
   return rows as unknown as CashLedgerRow[];
 }
 
+/**
+ * One bank account's entries, oldest first.
+ *
+ * Ascending, because a running balance only reads correctly forward. `id` breaks
+ * the tie so entries posted on the same date keep a stable order between pages.
+ */
+export async function listByBank(bankId: string): Promise<CashLedgerRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('cash_balance_ledger')
+      .select('id, type, description, amount, timestamp, running_balance, entity_id, reference_id, created_by, notes, code, date, bank_id, on_hold_amount, source, created_at, updated_at')
+      .eq('bank_id', bankId)
+      .order('date', { ascending: true })
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as CashLedgerRow[];
+}
+
 export interface PendingTradeNoteRow {
   id: string;
   note_type: 'Buy' | 'Sell';
