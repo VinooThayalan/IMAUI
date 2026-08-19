@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { aerPercent, formatAer } from '../lib/aer';
+import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
 import {
@@ -513,19 +514,27 @@ export function Dashboard() {
   const totalMarketValue           = held.reduce((s, m) => s + m.marketValue, 0);
   const totalCostsBalShares        = held.reduce((s, m) => s + m.cost, 0);
 
-  // Sector aggregates
-  const sectorMap = new Map<string, { returns: number; dividends: number; marketValue: number }>();
-  held.forEach(m => {
-    if (!sectorMap.has(m.sector)) sectorMap.set(m.sector, { returns: 0, dividends: 0, marketValue: 0 });
-    const s = sectorMap.get(m.sector)!;
-    s.returns     += m.totalReturns;
-    s.dividends   += m.dividends;
-    s.marketValue += m.marketValue;
-  });
+  /*
+    Sector aggregates over EVERY position, not just what is still held.
 
-  const sectorReturnsPie   = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.returns,     color: sectorColor(k) })));
-  const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
-  const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
+    `held` drops any share sold down to zero. Its realised gains and the
+    dividends it paid are real and belong in a returns or dividends breakdown,
+    and a sector whose shares have all been sold was disappearing from the chart
+    and from the sector count entirely — the other half of "has not considered
+    all the sectors".
+
+    Market value is unaffected in substance: an exited position values at zero,
+    so it shows in the legend as not plotted rather than silently vanishing.
+
+    Grouping, and the rule that a breakdown reports every sector it was given,
+    live in sectorBreakdown.service.
+  */
+  const sectors = sectorTotals(metrics);
+  const sectorNames = sectors.map(s => s.sector);
+
+  const sectorReturnsPie = sectorSeries(sectors, 'returns', sectorColor);
+  const sectorDivPie     = sectorSeries(sectors, 'dividends', sectorColor);
+  const sectorMvPie      = sectorSeries(sectors, 'marketValue', sectorColor);
 
   // Top-5 pie charts
   const top5NetMktPie  = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(m.ticker) })));
@@ -664,11 +673,11 @@ export function Dashboard() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50">
           <h2 className="text-lg font-bold text-gray-900">Portfolio by Sector</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectorMap.size} sectors</p>
+          <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectors.length} sectors</p>
           {/* Sector color legend */}
-          {sectorMap.size > 0 && (
+          {sectors.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-3">
-              {Array.from(sectorMap.keys()).map(s => (
+              {sectorNames.map(s => (
                 <span key={s} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: sectorColor(s) }}>
                   {s}
                 </span>
@@ -679,19 +688,19 @@ export function Dashboard() {
         <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #fff1f2 0%, #fff7ed 100%)', borderColor: '#fecdd3' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#e11d48' }}>Total Returns by Sector</p>
-            <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorReturnsPie} title="" size={210} formatValue={fmtCur} />
           </div>
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdfa 100%)', borderColor: '#a7f3d0' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#059669' }}>Total Dividends by Sector</p>
-            <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorDivPie} title="" size={210} formatValue={fmtCur} />
           </div>
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: '#bfdbfe' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#2563eb' }}>Market Value by Sector</p>
-            <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorMvPie} title="" size={210} formatValue={fmtCur} />
           </div>
         </div>
         {/* Sector breakdown table with color bands */}
-        {sectorMap.size > 0 && (
+        {sectors.length > 0 && (
           <div className="px-6 pb-6">
             <div className="rounded-xl overflow-hidden border border-gray-100">
               <table className="w-full text-sm">
@@ -704,9 +713,9 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from(sectorMap.entries())
-                    .sort((a, b) => b[1].marketValue - a[1].marketValue)
-                    .map(([sector, vals]) => {
+                  {[...sectors]
+                    .sort((a, b) => b.marketValue - a.marketValue)
+                    .map(({ sector, ...vals }) => {
                       const sc = sectorColor(sector);
                       return (
                         <tr key={sector} className="border-b border-gray-50 hover:bg-gray-50/60" style={{ borderLeftColor: sc, borderLeftWidth: 4 }}>
@@ -754,11 +763,11 @@ export function Dashboard() {
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-emerald-50 rounded-xl p-6 border border-emerald-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Dividends by Share</p>
-            <PieChart data={top5DivPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
+            <PieChart data={top5DivPie} title="" size={260} formatValue={fmtCur} />
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-rose-50 rounded-xl p-6 border border-rose-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Returns by Share</p>
-            <PieChart data={top5ReturnsPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
+            <PieChart data={top5ReturnsPie} title="" size={260} formatValue={fmtCur} />
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-amber-50 rounded-xl p-6 border border-amber-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Cost by Share</p>
@@ -903,7 +912,7 @@ function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
         {/* Overall sector returns pie — full width centred */}
         <div className="flex flex-col items-center">
           <PieChart
-            data={sectorReturnsPie.filter(d => d.value > 0)}
+            data={sectorReturnsPie}
             title="Total Returns by Sector"
             size={260}
           />
@@ -918,7 +927,7 @@ function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
                   Total Returns in {sector} by Share
                 </p>
                 <PieChart
-                  data={pieData.filter(d => d.value > 0)}
+                  data={pieData}
                   title=""
                   size={220}
                 />
