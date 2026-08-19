@@ -88,3 +88,74 @@ export function sectorSeries(
 export function notPlottable(totals: SectorTotals[], metric: Metric): string[] {
   return totals.filter(t => !(t[metric] > 0)).map(t => t.sector);
 }
+
+/** A position that can be attributed to a sector and named on a chart. */
+export interface SectorMember extends SectorContribution {
+  /** Ticker, or whatever should label this slice. */
+  label: string;
+}
+
+export interface SectorShareBreakdown {
+  sector: string;
+  /** That sector's total for the metric, so a caller can order or caption it. */
+  total: number;
+  /** Each position's contribution within the sector, largest first. */
+  shares: SeriesPoint[];
+}
+
+/**
+ * Which sectors get a breakdown, and what goes in each.
+ *
+ * Every sector present is included. The Dashboard used to pick sectors by
+ * matching them against a hardcoded list of names — Banking, Construction
+ * Materials, Diversified Financials, Industries — and sector names are user data
+ * maintained on the Sector Types screen. The live names are GICS ones (Finance,
+ * Materials, Industrials, Consumer Staples and so on), so **not one entry
+ * matched** and the breakdown rendered nothing at all. No hardcoded list can be
+ * right here; the names come from the data or they are wrong.
+ *
+ * Ordered by the size of each sector's contribution, largest first, because that
+ * is the question a returns breakdown answers. Ties fall back to the name so the
+ * order is deterministic.
+ */
+export function sectorShareBreakdown(
+  members: SectorMember[],
+  metric: Metric,
+  colorFor: (label: string) => string,
+): SectorShareBreakdown[] {
+  const bySector = new Map<string, SectorMember[]>();
+  for (const m of members) {
+    const sector = m.sector || 'Other';
+    const list = bySector.get(sector) ?? [];
+    list.push(m);
+    bySector.set(sector, list);
+  }
+
+  // A sector total is keyed `returns`; a position calls the same thing
+  // `totalReturns`. Map once here rather than letting callers guess.
+  // Narrowed to the numeric fields: `keyof SectorContribution` would include
+  // `sector`, and indexing with it yields string | number.
+  const FIELD: Record<Metric, 'totalReturns' | 'dividends' | 'marketValue'> = {
+    returns: 'totalReturns',
+    dividends: 'dividends',
+    marketValue: 'marketValue',
+  };
+  const field = FIELD[metric];
+
+  const out: SectorShareBreakdown[] = [];
+  for (const [sector, list] of bySector) {
+    out.push({
+      sector,
+      total: list.reduce((s, m) => s + m[field], 0),
+      // Nothing filtered: a position that cannot be drawn is still reported, and
+      // the chart says why. See the note on sectorSeries.
+      shares: list
+        .map(m => ({ label: m.label, value: m[field], color: colorFor(m.label) }))
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+    });
+  }
+
+  return out.sort(
+    (a, b) => Math.abs(b.total) - Math.abs(a.total) || a.sector.localeCompare(b.sector),
+  );
+}
