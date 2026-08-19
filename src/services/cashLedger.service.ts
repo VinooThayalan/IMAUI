@@ -1,0 +1,100 @@
+/**
+ * Cash book rules: which entries a filter admits, and where a posted entry's
+ * trade and settlement dates come from.
+ *
+ * No React and no Supabase: rows in, answers out.
+ */
+
+import type { NoteDatesRow } from '../repositories/cashLedger.repo';
+
+/** Trade and settlement dates, absent unless the entry came from a trade. */
+export interface TradeDates {
+  tradeDate: string | null;
+  settlementDate: string | null;
+}
+
+export const NO_TRADE_DATES: TradeDates = { tradeDate: null, settlementDate: null };
+
+/**
+ * Index note dates by note id, for resolving a ledger entry's origin.
+ *
+ * `cash_balance_ledger` stores only the posting date. A manual entry has no
+ * trade behind it and never will; an entry raised by settling a contract note
+ * carries that note's id in `reference_id`, and the dates belong to the note.
+ */
+export function indexNoteDates(rows: NoteDatesRow[]): Map<string, TradeDates> {
+  const index = new Map<string, TradeDates>();
+  for (const r of rows) {
+    index.set(r.id, { tradeDate: r.trade_date, settlementDate: r.settlement_date });
+  }
+  return index;
+}
+
+/**
+ * The trade behind a posted entry, or nothing.
+ *
+ * Nothing is invented for a manual entry: it has no trade date, and showing the
+ * posting date in that column would read as one. The caller renders an em dash.
+ */
+export function tradeDatesFor(
+  row: { reference_id?: string | null },
+  index: Map<string, TradeDates>,
+): TradeDates {
+  if (!row.reference_id) return NO_TRADE_DATES;
+  return index.get(row.reference_id) ?? NO_TRADE_DATES;
+}
+
+export interface LedgerFilters {
+  entityId: string;
+  bankId: string;
+  /** Posting date, inclusive. Empty means unbounded. */
+  from: string;
+  to: string;
+}
+
+export const NO_FILTERS: LedgerFilters = { entityId: '', bankId: '', from: '', to: '' };
+
+export function hasActiveFilter(f: LedgerFilters): boolean {
+  return Boolean(f.entityId || f.bankId || f.from || f.to);
+}
+
+/**
+ * Does a posted entry belong in the filtered view?
+ *
+ * Dates are compared as ISO strings, which sorts correctly for `YYYY-MM-DD` and
+ * avoids constructing a Date per row per keystroke. Both bounds are inclusive:
+ * a user picking a single day on both sides expects that day's entries.
+ */
+export function matchesLedgerFilters(
+  row: { entity_id?: string | null; bank_id?: string | null; date?: string | null },
+  f: LedgerFilters,
+): boolean {
+  if (f.entityId && row.entity_id !== f.entityId) return false;
+  if (f.bankId && row.bank_id !== f.bankId) return false;
+  const date = (row.date ?? '').slice(0, 10);
+  if (f.from && date < f.from) return false;
+  if (f.to && date > f.to) return false;
+  return true;
+}
+
+/**
+ * Does a trade awaiting approval belong in the filtered view?
+ *
+ * A pending trade has no bank account yet — the money has not moved, so no
+ * account has been debited. Filtering by bank therefore excludes every pending
+ * trade rather than matching none of them by accident, and the caller says so
+ * on screen instead of leaving a row count that silently disagrees.
+ *
+ * Its date is the trade date, since that is the only date it has.
+ */
+export function matchesPendingFilters(
+  note: { entity_id: string; trade_date?: string | null },
+  f: LedgerFilters,
+): boolean {
+  if (f.entityId && note.entity_id !== f.entityId) return false;
+  if (f.bankId) return false;
+  const date = (note.trade_date ?? '').slice(0, 10);
+  if (f.from && (!date || date < f.from)) return false;
+  if (f.to && (!date || date > f.to)) return false;
+  return true;
+}
