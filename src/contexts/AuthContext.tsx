@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { shouldEndSession } from '../lib/session';
 
 export interface AppUser {
   id: string;
@@ -19,6 +20,11 @@ interface AuthContextType {
   isAdmin: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Sign out when a failed request turns out to be a dead session.
+   * Resolves true when it did, meaning the caller should stop.
+   */
+  signOutIfSessionLost: (error: unknown) => Promise<boolean>;
   refreshPermissions: () => Promise<void>;
   hasMenuAccess: (menuName: string) => boolean;
   hasEntityAccess: (entityId: string) => boolean;
@@ -189,6 +195,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }
 
+  /** Clear the session locally whatever the server says about it. */
+  async function clearSession() {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Already gone server-side, which is the case we are handling. Dropping
+      // the local state is the part that has to happen either way.
+    }
+    setUser(null);
+    setAppUser(null);
+    setMenuAccess([]);
+    setEntityAccess([]);
+  }
+
+  /**
+   * Decide whether a refused request means the session is gone, and if so, end it.
+   *
+   * A token expiring is not announced. supabase-js refreshes in the background,
+   * and when the refresh token is itself dead nothing tells the page — React goes
+   * on holding the user and permissions it loaded while the token was good. Reads
+   * already returned and their results are still on screen, so everything looks
+   * signed in until a write reaches Postgres, where `auth.uid()` is null and the
+   * row-level policy refuses it. That is the 42501 users were shown.
+   *
+   * The session is checked rather than assumed, because **42501 is also what a
+   * genuine permission denial looks like**. Signing someone out for lacking a
+   * permission would be its own defect, and a worse one: it would look like the
+   * app logging people out at random. So a live session means the denial was
+   * real, the user stays signed in, and they get the permission message instead.
+   */
+  async function signOutIfSessionLost(error: unknown): Promise<boolean> {
+    // shouldEndSession screens the error shape too, so there is one rule rather
+    // than half of it here and half of it there.
+    const { data } = await supabase.auth.getSession();
+    if (!shouldEndSession(error, data.session, Date.now())) return false;
+
+    await clearSession();
+    return true;
+  }
+
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
@@ -208,6 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAdmin,
     signIn,
     signOut,
+    signOutIfSessionLost,
     refreshPermissions,
     hasMenuAccess,
     hasEntityAccess,
