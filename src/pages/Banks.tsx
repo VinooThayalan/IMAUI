@@ -1,7 +1,7 @@
 import { Plus, Search, DollarSign, Eye, Pencil, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { errorMessage } from '../lib/errorMessage';
+import { writeErrorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
@@ -196,7 +196,7 @@ export function Banks() {
       closeModal();
     } catch (error) {
       console.error('Error saving entity bank:', error);
-      alert(`Failed to save entity bank account: ${errorMessage(error)}`);
+      alert(writeErrorMessage(error, 'save this bank account'));
     } finally {
       setSaving(false);
     }
