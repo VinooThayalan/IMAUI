@@ -12,6 +12,7 @@ import {
   accountNetMovement,
   entityFacilityLimit,
   accountFacilityLimit,
+  entityCashPosition,
   NO_FILTERS,
   type LedgerFilters,
   type TradeDates,
@@ -275,7 +276,11 @@ export function CashBalance() {
     }
   }
 
-  const totalBalance = entities.reduce((sum, entity) => sum + entity.current_balance, 0);
+  // Same source as the rows, or the header would disagree with the table under it.
+  const totalBalance = entities.reduce(
+    (sum, entity) => sum + entityRunningBalance(transactions, entity.id),
+    0,
+  );
   const totalOnHold = Array.from(entityPendingHold.values()).reduce((s, v) => s + v, 0);
   /*
     The drill-down and the filter bar are one filter.
@@ -508,7 +513,20 @@ export function CashBalance() {
             <tbody className="divide-y divide-gray-200">
               {entities.map((entity) => {
                 const onHold = entityPendingHold.get(entity.id) ?? 0;
-                const availableCredit = entity.current_balance + entityFacilityLimit(banks, entity.id) - onHold;
+                /*
+                  Balance from the ledger, not entities.current_balance.
+
+                  That column is a denormalised copy written alongside each ledger
+                  row, and it drifts: ENT004 holds 1,000,000,000.00 against a ledger
+                  that adds to 999,140,480.00. The ledger reproduces its own stored
+                  running_balance from the signed amounts exactly, for every entity,
+                  and it is what each new entry is computed from -- so it decides.
+
+                  Available credit stays entity-level. Limits are per account and
+                  are summed, but balances do not exist per account, so per-account
+                  headroom is not computable from this data.
+                */
+                const position = entityCashPosition(transactions, banks, entity.id, onHold);
                 return (
                   <tr
                     key={entity.id}
@@ -528,12 +546,12 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
-                        Rs. {entity.current_balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {position.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        Rs. {entityFacilityLimit(banks, entity.id).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {position.facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -546,8 +564,8 @@ export function CashBalance() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-semibold ${availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        Rs. {availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className={`text-sm font-semibold ${position.availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        Rs. {position.availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

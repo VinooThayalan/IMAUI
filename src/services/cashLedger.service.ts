@@ -136,6 +136,50 @@ export function accountFacilityLimit(account: AccountFacility | null | undefined
   return Number(account.facility_limit) || 0;
 }
 
+export interface CashPosition {
+  /** From the ledger, which is the authoritative record — see below. */
+  balance: number;
+  /** Sum of the entity's accounts' facility limits. */
+  facilityLimit: number;
+  onHold: number;
+  /** balance + facilityLimit - onHold. */
+  availableCredit: number;
+}
+
+/**
+ * An entity's cash position, from the ledger rather than the cached column.
+ *
+ * `entities.current_balance` is a denormalised copy, written alongside each new
+ * ledger row, and it drifts: for ENT004 it holds 1,000,000,000.00 against a
+ * ledger that adds to 999,140,480.00 — 859,520 out. The ledger itself is
+ * internally consistent, and by a check worth stating: summing every row's signed
+ * amount reproduces the latest stored `running_balance` exactly, for every entity,
+ * to the cent. It is also what each new entry is computed from. So the ledger
+ * decides and the cached column is not read here.
+ *
+ * Available credit is deliberately entity-level. Facility limits belong to
+ * accounts and are summed, but balances do not exist per account at all —
+ * `running_balance` accumulates per entity and `banks.balance` is zero everywhere
+ * — so a per-account headroom cannot be computed from this data, however much the
+ * limits being per-account invites it. That question is open separately; nothing
+ * here should be read as answering it.
+ */
+export function entityCashPosition(
+  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  accounts: AccountFacility[],
+  entityId: string,
+  onHold: number,
+): CashPosition {
+  const balance = entityRunningBalance(rows, entityId);
+  const facilityLimit = entityFacilityLimit(accounts, entityId);
+  return {
+    balance,
+    facilityLimit,
+    onHold,
+    availableCredit: balance + facilityLimit - onHold,
+  };
+}
+
 export interface LedgerFilters {
   entityId: string;
   bankId: string;
