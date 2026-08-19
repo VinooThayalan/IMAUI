@@ -10,6 +10,8 @@ import {
   hasActiveFilter,
   entityRunningBalance,
   accountNetMovement,
+  entityFacilityLimit,
+  accountFacilityLimit,
   NO_FILTERS,
   type LedgerFilters,
   type TradeDates,
@@ -23,7 +25,6 @@ interface Entity {
   name: string;
   type: string;
   current_balance: number;
-  od_limit: number;
 }
 
 interface Bank {
@@ -130,7 +131,6 @@ export function CashBalance() {
       const parsedEntities = (entitiesData || []).map(entity => ({
         ...entity,
         current_balance: Number(entity.current_balance) || 0,
-        od_limit: Number(entity.od_limit) || 0
       }));
 
       const parsedBanks = (banksData || []).map(bank => ({
@@ -212,7 +212,11 @@ export function CashBalance() {
       // Check the deduction does not exceed available credit (balance + facility limit)
       if (transactionType === 'Deduction') {
         const selectedBankObj = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-        const facilityLimit = Number(selectedBankObj?.facility_limit ?? entity.od_limit ?? 0);
+        // Prefer the account's own limit; otherwise the entity's, which is the sum
+        // of its accounts'. This used to fall back to entity.od_limit, a column
+        // that does not exist, so with no account selected every deduction was
+        // checked against a limit of zero.
+        const facilityLimit = accountFacilityLimit(selectedBankObj) ?? entityFacilityLimit(banks, formData.entityId);
         const maxDeductible = lastBalance + facilityLimit;
         if (amount > maxDeductible) {
           alert(`Amount exceeds available credit. Maximum deductible: Rs. ${maxDeductible.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
@@ -504,7 +508,7 @@ export function CashBalance() {
             <tbody className="divide-y divide-gray-200">
               {entities.map((entity) => {
                 const onHold = entityPendingHold.get(entity.id) ?? 0;
-                const availableCredit = entity.current_balance + entity.od_limit - onHold;
+                const availableCredit = entity.current_balance + entityFacilityLimit(banks, entity.id) - onHold;
                 return (
                   <tr
                     key={entity.id}
@@ -529,7 +533,7 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        Rs. {entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {entityFacilityLimit(banks, entity.id).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -767,7 +771,7 @@ export function CashBalance() {
 
                 const onHoldAmount = transaction.on_hold_amount || 0;
                 const entityHold = entity ? (entityPendingHold.get(entity.id) ?? 0) : 0;
-                const availableBalance = transaction.running_balance + (entity?.od_limit || 0) - onHoldAmount - entityHold;
+                const availableBalance = transaction.running_balance + (entity ? entityFacilityLimit(banks, entity.id) : 0) - onHoldAmount - entityHold;
                 const isOnHold = onHoldAmount > 0;
 
                 return (
@@ -837,9 +841,19 @@ export function CashBalance() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{bank?.account_number || '-'}</div>
                     </td>
+                    {/* The limit belongs to the account, and the row names one.
+                        This read entity.od_limit -- a column that does not exist --
+                        so it printed Rs. 0.00 on every row, including accounts
+                        holding 50,000,000 and 500,000,000. An entry with no account
+                        has no limit to report and gets an em dash. */}
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {entity ? `Rs. ${entity.od_limit.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '-'}
+                        {(() => {
+                          const limit = accountFacilityLimit(bank);
+                          return limit === null
+                            ? <span className="text-gray-400">—</span>
+                            : `Rs. ${limit.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+                        })()}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -979,7 +993,8 @@ export function CashBalance() {
                 {formData.entityId && (() => {
                   const selectedEntity = entities.find(e => e.id === formData.entityId);
                   const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = Number(selectedBank?.facility_limit ?? selectedEntity?.od_limit ?? 0);
+                  const facilityLimit = accountFacilityLimit(selectedBank)
+                    ?? entityFacilityLimit(banks, selectedEntity?.id ?? '');
                   return selectedEntity ? (
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
@@ -1157,7 +1172,7 @@ export function CashBalance() {
                     : lastBalance - amount;
 
                   const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = Number(selectedBank?.facility_limit ?? entity.od_limit ?? 0);
+                  const facilityLimit = accountFacilityLimit(selectedBank) ?? entityFacilityLimit(banks, entity.id);
                   const availableBalance = closingBalance + facilityLimit;
 
                   return (

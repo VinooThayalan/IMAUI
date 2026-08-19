@@ -96,6 +96,46 @@ export function accountNetMovement(
   return { net, entries };
 }
 
+/** What a facility limit can be read from. Only accounts carry one. */
+export interface AccountFacility {
+  entity_id?: string | null;
+  facility_limit?: number | null;
+}
+
+/**
+ * The credit available to an entity: the sum of its accounts' facility limits.
+ *
+ * `entities` has **no** limit column — no `od_limit`, no facility limit, nothing.
+ * The frontend read `entity.od_limit` anyway, so `Number(undefined) || 0` made
+ * every facility limit on this screen `Rs. 0.00`, including the ones on accounts
+ * that plainly have a limit: ENT003 holds 50,000,000 and ENT001 holds 500,000,000
+ * on each of four accounts.
+ *
+ * Summing the accounts is a derivation, not a stored fact, and it is the only one
+ * the data supports. It is also the reading that matches the deduction check,
+ * which already preferred the selected account's own limit.
+ */
+export function entityFacilityLimit(accounts: AccountFacility[], entityId: string): number {
+  let total = 0;
+  for (const a of accounts) {
+    if (a.entity_id !== entityId) continue;
+    total += Number(a.facility_limit) || 0;
+  }
+  return total;
+}
+
+/**
+ * One account's facility limit, or null when it has none.
+ *
+ * Null rather than zero: an account with no limit recorded is not an account with
+ * a limit of nothing, and a ledger row with no account at all has no limit to
+ * report. Both render as an em dash.
+ */
+export function accountFacilityLimit(account: AccountFacility | null | undefined): number | null {
+  if (!account || account.facility_limit == null) return null;
+  return Number(account.facility_limit) || 0;
+}
+
 export interface LedgerFilters {
   entityId: string;
   bankId: string;
