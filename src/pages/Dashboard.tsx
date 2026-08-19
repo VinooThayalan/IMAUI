@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { formatAer } from '../lib/aer';
 import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
-import { loadShareMetrics } from '../services/shareMetrics.service';
+import { loadShareMetrics, type ShareMetric } from '../services/shareMetrics.service';
 import * as entitiesRepo from '../repositories/entities.repo';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
@@ -47,25 +47,11 @@ interface ShareRow {
   sectorColor: string | null;
 }
 
-interface ShareMetrics {
-  shareId: string;
-  ticker: string;
-  shareName: string;
-  sector: string;
-  sectorColor: string | null;
-  heldShares: number;
-  cost: number;        // cumulative cost of held shares
-  totalCostAll: number; // total cost ever (incl. sold)
-  marketValue: number;
-  dividends: number;
-  saleProceeds: number;
-  netMarketValue: number; // marketValue - cost (held)
-  totalReturns: number;   // (marketValue + saleProceeds + dividends) - totalCostAll
-  avgCostPerShare: number;
-  latestPrice: number;
-  /** XIRR annualised return % (matches ShareAnalytics), null when none solves. */
-  aer: number | null;
-}
+/**
+ * The shape the service returns. Declared there, not here: this page held its own
+ * copy, which is how it drifted out of step with what the service computes.
+ */
+type ShareMetrics = ShareMetric;
 
 // ── KPI summary card ─────────────────────────────────────────────────────────
 
@@ -666,11 +652,31 @@ export function Dashboard() {
                         </td>
                         <td className="py-1.5 text-right text-gray-600">{fmtNum(m.heldShares)}</td>
                         <td className="py-1.5 text-right text-gray-800 font-semibold">{fmtCur(m.marketValue)}</td>
-                        <td className={`py-1.5 text-right font-semibold ${m.aer === null ? 'text-gray-400' : m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatAer(m.aer, 1)}</td>
+                        <td
+                          className={`py-1.5 text-right font-semibold ${m.aer === null ? 'text-gray-400' : m.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                          title={m.entityCount > 1
+                            ? `Pooled across ${m.entityCount} entities. Share Analytics reports each holding separately: ${m.byEntity.map(b => `${b.entityName} ${formatAer(b.aer, 1)}`).join(', ')}`
+                            : undefined}
+                        >
+                          {formatAer(m.aer, 1)}
+                          {m.entityCount > 1 && <span className="ml-0.5 text-gray-400 font-normal">*</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {/* Only shown when pooling actually changes an answer. A pooled
+                    XIRR is not any single holding's AER, and Share Analytics and
+                    Portfolio Summary both report per (entity, share) -- so
+                    without this the two screens look like they disagree. */}
+                {metrics.some(m => m.entityCount > 1) && (
+                  <p className="mt-2 text-xs text-gray-400 leading-snug">
+                    * AER is pooled across the entities holding that share — the money-weighted
+                    return on the whole book, not any one holding. Share Analytics and Portfolio
+                    Summary report per entity; hover the figure to see each. Select a single entity
+                    above and the numbers line up.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -870,7 +876,7 @@ function Section6ShareCards({ metrics, entityName, sectorColor }: {
                 {/* 2-column metric cards */}
                 <div className="grid grid-cols-2 gap-3">
                   <MetricCard
-                    label="AER"
+                    label={selected.entityCount > 1 ? `AER (pooled, ${selected.entityCount} entities)` : 'AER'}
                     value={formatAer(selected.aer, 1)}
                     bg="bg-yellow-50"
                     textColor={selected.aer === null ? 'text-gray-400' : selected.aer >= 0 ? 'text-green-700' : 'text-red-600'}

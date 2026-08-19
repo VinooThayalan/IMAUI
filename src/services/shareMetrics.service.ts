@@ -20,6 +20,7 @@ import * as scripsRepo from '../repositories/scrips.repo';
 import * as pricesRepo from '../repositories/sharePrices.repo';
 import * as feeTypesRepo from '../repositories/brokerageFeeTypes.repo';
 import * as sharesRepo from '../repositories/shares.repo';
+import * as entitiesRepo from '../repositories/entities.repo';
 import {
   computeRows,
   type DividendRecord,
@@ -52,7 +53,33 @@ export interface ShareMetric {
   totalReturns: number;
   avgCostPerShare: number;
   latestPrice: number;
-  /** Pooled XIRR across the entities in scope, or null when none solves. */
+  /**
+   * Pooled XIRR across every entity holding this share, or null when none
+   * solves.
+   *
+   * Pooled, not averaged. Averaging internal rates of return is not a
+   * meaningful operation, so the cash flows of every entity's position are
+   * combined and discounted against one terminal value. That is the money
+   * weighted return the book earned on this share.
+   *
+   * It therefore does NOT equal any single holding's AER when more than one
+   * entity holds the share, and Share Analytics and Portfolio Summary both
+   * report per (entity, share). `byEntity` carries those figures so the
+   * difference can be traced rather than merely noticed.
+   */
+  aer: number | null;
+  /** Entities holding this share, and the AER each of them reports. */
+  byEntity: EntityAer[];
+  /** Convenience: pooling only changes the answer when this exceeds 1. */
+  entityCount: number;
+}
+
+/** One entity's holding of a share, with the AER the other screens show for it. */
+export interface EntityAer {
+  entityId: string;
+  entityName: string;
+  heldShares: number;
+  /** Computed exactly as Share Analytics computes it for this group. */
   aer: number | null;
 }
 
@@ -65,7 +92,7 @@ export interface ShareMetric {
  * share and discounting one combined terminal value.
  */
 export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]> {
-  const [notes, txns, openings, dividends, scrips, priceRows, feeTypes, shares] =
+  const [notes, txns, openings, dividends, scrips, priceRows, feeTypes, shares, entities] =
     await Promise.all([
       notesRepo.listProcessed(),
       txnRepo.listApproved(),
@@ -75,7 +102,11 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
       pricesRepo.listNewestFirst(),
       feeTypesRepo.listActive(),
       sharesRepo.listAll(),
+      entitiesRepo.listAll(),
     ]);
+
+  // Terminal values for every AER below discount to the same instant.
+  const asOf = new Date();
 
   const { price: priceByShare } = pricesRepo.latestByShare(priceRows);
   const defaultFeeRate = feeTypes.length > 0 ? num(feeTypes[0].rate) : 0;
@@ -177,6 +208,7 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
     cashFlows: CashFlow[];
     feeRateWeighted: number;
     feeRateWeight: number;
+    byEntity: EntityAer[];
   }
   const byShare = new Map<string, Acc>();
 
@@ -199,7 +231,7 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
     if (!acc) {
       acc = {
         heldShares: 0, cost: 0, totalCostAll: 0, dividends: 0, saleProceeds: 0,
-        cashFlows: [], feeRateWeighted: 0, feeRateWeight: 0,
+        cashFlows: [], feeRateWeighted: 0, feeRateWeight: 0, byEntity: [],
       };
       byShare.set(shareId, acc);
     }
@@ -216,19 +248,30 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
     acc.feeRateWeighted += feeRate * Math.max(0, last.share_cum_bal);
     acc.feeRateWeight += Math.max(0, last.share_cum_bal);
 
+    const groupFlows: CashFlow[] = [];
     for (const r of rows) {
       if (r.cash_flow !== 0 && r.trade_date) {
-        acc.cashFlows.push({
-          date: new Date(r.trade_date + 'T00:00:00'),
-          amount: r.cash_flow,
-        });
+        groupFlows.push({ date: new Date(r.trade_date + 'T00:00:00'), amount: r.cash_flow });
       }
     }
-    void gEntityId;
+    acc.cashFlows.push(...groupFlows);
+
+    // This group's own AER, computed the way Share Analytics computes it, so
+    // the pooled figure above can be reconciled against what that screen shows.
+    const groupTerminal = netMarketValue(last.share_cum_bal, marketPrice, feeRate);
+    const groupCfs = [...groupFlows];
+    if (groupTerminal > 0) groupCfs.push({ date: asOf, amount: groupTerminal });
+
+    acc.byEntity.push({
+      entityId: gEntityId,
+      entityName: '',
+      heldShares: last.share_cum_bal,
+      aer: aerPercent(groupCfs),
+    });
   }
 
   const shareById = new Map(shares.map(s => [s.id, s]));
-  const asOf = new Date();
+  const entityNameById = new Map(entities.map(e => [e.id, e.name]));
   const result: ShareMetric[] = [];
 
   for (const [shareId, acc] of byShare) {
@@ -259,6 +302,10 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
       avgCostPerShare: acc.heldShares > 0 ? acc.cost / acc.heldShares : 0,
       latestPrice,
       aer: aerPercent(cfs),
+      byEntity: acc.byEntity
+        .map(b => ({ ...b, entityName: entityNameById.get(b.entityId) ?? '—' }))
+        .sort((x, y) => y.heldShares - x.heldShares),
+      entityCount: acc.byEntity.length,
     });
   }
 
