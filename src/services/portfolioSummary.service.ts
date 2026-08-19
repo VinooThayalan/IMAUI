@@ -35,10 +35,23 @@ export interface SummaryRow {
   aer: number | null;
 }
 
+/**
+ * An AER position that still knows whose it is.
+ *
+ * `AerPosition` identifies itself only by `label`, which is the ticker. Callers
+ * that filter by entity cannot recover the owner from that: an exited position
+ * is not in `rows` to look up, and two entities holding the same ticker are
+ * indistinguishable. So the identity is carried here rather than matched back.
+ */
+export interface SummaryAerPosition extends AerPosition {
+  entityId: string;
+  shareId: string;
+}
+
 export interface SummaryResult {
   rows: SummaryRow[];
-  /** Positions for a pooled portfolio AER, in `lib/aer` terms. */
-  aerPositions: AerPosition[];
+  /** Every position, held or exited, for a pooled portfolio AER. */
+  aerPositions: SummaryAerPosition[];
 }
 
 const num = (v: number | string | null | undefined): number => Number(v) || 0;
@@ -108,6 +121,8 @@ export function summaryInWindow(
     // Every position, held or exited, belongs in the portfolio AER: a closed
     // position's cash flows are complete and are part of the return.
     result.aerPositions.push({
+      entityId: r.entity_id,
+      shareId: r.share_id,
       label: r.share_ticker || 'N/A',
       cashFlows: acc.cashFlows,
       heldShares: held,

@@ -147,8 +147,11 @@ export function PortfolioSummary() {
         };
       });
 
+      // entity_id comes from the position itself. Matching it back by ticker
+      // lost every exited position (absent from summaryRows) and confused two
+      // entities holding the same ticker.
       const aerRows: AerInput[] = aerPositions.map(p => ({
-        entity_id: summaryRows.find(r => r.ticker === p.label)?.entityId ?? '',
+        entity_id: p.entityId,
         ticker: p.label,
         cashFlows: p.cashFlows,
         heldShares: p.heldShares,
@@ -287,6 +290,26 @@ export function PortfolioSummary() {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-3">
               <Calendar className="w-5 h-5 text-gray-500" />
+              <div className="flex items-center space-x-2 mr-4">
+                <label htmlFor="ps-from" className="text-sm font-medium text-gray-700">From:</label>
+                <input
+                  id="ps-from"
+                  type="date"
+                  value={fromDate}
+                  max={asOfDate || undefined}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {fromDate && (
+                  <button
+                    onClick={() => setFromDate('')}
+                    className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+                    title="Clear the start date"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 mr-2">As of Date (to):</label>
                 <input
@@ -296,25 +319,6 @@ export function PortfolioSummary() {
                   className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <label htmlFor="ps-from" className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                id="ps-from"
-                type="date"
-                value={fromDate}
-                max={asOfDate || undefined}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {fromDate && (
-                <button
-                  onClick={() => setFromDate('')}
-                  className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
-                >
-                  Clear
-                </button>
-              )}
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mr-2">Entity:</label>
