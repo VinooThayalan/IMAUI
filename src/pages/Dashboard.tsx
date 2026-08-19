@@ -679,15 +679,15 @@ export function Dashboard() {
         <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #fff1f2 0%, #fff7ed 100%)', borderColor: '#fecdd3' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#e11d48' }}>Total Returns by Sector</p>
-            <PieChart data={sectorReturnsPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorReturnsPie} title="" size={210} formatValue={fmtCur} />
           </div>
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdfa 100%)', borderColor: '#a7f3d0' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#059669' }}>Total Dividends by Sector</p>
-            <PieChart data={sectorDivPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorDivPie} title="" size={210} formatValue={fmtCur} />
           </div>
           <div className="rounded-xl p-5 border" style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%)', borderColor: '#bfdbfe' }}>
             <p className="text-xs font-bold mb-4 text-center uppercase tracking-wide" style={{ color: '#2563eb' }}>Market Value by Sector</p>
-            <PieChart data={sectorMvPie.filter(d => d.value > 0)} title="" size={210} formatValue={fmtCur} />
+            <PieChart data={sectorMvPie} title="" size={210} formatValue={fmtCur} />
           </div>
         </div>
         {/* Sector breakdown table with color bands */}
@@ -754,11 +754,11 @@ export function Dashboard() {
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-emerald-50 rounded-xl p-6 border border-emerald-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Dividends by Share</p>
-            <PieChart data={top5DivPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
+            <PieChart data={top5DivPie} title="" size={260} formatValue={fmtCur} />
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-rose-50 rounded-xl p-6 border border-rose-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Returns by Share</p>
-            <PieChart data={top5ReturnsPie.filter(d => d.value > 0)} title="" size={260} formatValue={fmtCur} />
+            <PieChart data={top5ReturnsPie} title="" size={260} formatValue={fmtCur} />
           </div>
           <div className="bg-gradient-to-br from-slate-50 to-amber-50 rounded-xl p-6 border border-amber-100">
             <p className="text-sm font-bold text-slate-700 mb-4 text-center">Total Cost by Share</p>
@@ -903,7 +903,7 @@ function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
         {/* Overall sector returns pie — full width centred */}
         <div className="flex flex-col items-center">
           <PieChart
-            data={sectorReturnsPie.filter(d => d.value > 0)}
+            data={sectorReturnsPie}
             title="Total Returns by Sector"
             size={260}
           />
@@ -918,7 +918,7 @@ function Section5TotalReturnsBySector({ metrics, shareColor, sectorColor }: {
                   Total Returns in {sector} by Share
                 </p>
                 <PieChart
-                  data={pieData.filter(d => d.value > 0)}
+                  data={pieData}
                   title=""
                   size={220}
                 />
