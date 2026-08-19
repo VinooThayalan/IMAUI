@@ -1,8 +1,8 @@
 import { Plus, Search, Filter, CreditCard as Edit, Trash2, Eye, UserPlus, Building2, X, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { writeErrorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
+import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 
 interface Entity {
@@ -82,6 +82,7 @@ interface EntityBroker {
 
 export function Entities() {
   const { user, refreshPermissions } = useAuth();
+  const reportWriteError = useWriteError();
   const [showModal, setShowModal] = useState(false);
   const [showBrokerModal, setShowBrokerModal] = useState(false);
   const [editingBrokerId, setEditingBrokerId] = useState<string | null>(null);
@@ -481,7 +482,7 @@ export function Entities() {
       } else if (code === '42501') {
         alert('Permission denied. You do not have access to assign brokers to this entity.');
       } else {
-        alert(writeErrorMessage(error, 'assign this broker'));
+        await reportWriteError(error, 'assign this broker');
       }
     }
   }
@@ -515,7 +516,7 @@ export function Entities() {
       alert('Relationship removed successfully!');
     } catch (error) {
       console.error('Error removing broker:', error);
-      alert(writeErrorMessage(error, 'remove this relationship'));
+      await reportWriteError(error, 'remove this relationship');
     }
   }
 
@@ -605,7 +606,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error creating entity:', error);
-      alert(writeErrorMessage(error, 'create an entity'));
+      await reportWriteError(error, 'create an entity');
     } finally {
       setIsSubmitting(false);
     }
@@ -678,7 +679,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error updating entity:', error);
-      alert(writeErrorMessage(error, 'update this entity'));
+      await reportWriteError(error, 'update this entity');
     } finally {
       setIsSubmitting(false);
     }
@@ -757,7 +758,7 @@ export function Entities() {
       await fetchEntities();
     } catch (error) {
       console.error('Error deleting entity:', error);
-      alert(`${writeErrorMessage(error, 'delete this entity')}\n\nIt may also be linked to other records.`);
+      await reportWriteError(error, 'delete this entity');
     } finally {
       setDeletingId(null);
     }

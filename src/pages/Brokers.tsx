@@ -1,8 +1,8 @@
 import { Plus, Search, CreditCard as Edit, Trash2, UserPlus, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { writeErrorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
+import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
 import type { ExportColumn } from '../lib/exportData';
@@ -40,6 +40,7 @@ interface BrokerEntity {
 
 export function Brokers() {
   const { user } = useAuth();
+  const reportWriteError = useWriteError();
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [showEntityModal, setShowEntityModal] = useState(false);
@@ -197,7 +198,7 @@ export function Brokers() {
       // Writes to brokers are admin-only
       // (20260803060003_restrict_reference_table_writes_to_admins), so a
       // non-admin sees a row-level security error here rather than a fault.
-      alert(writeErrorMessage(error, 'save this broker'));
+      await reportWriteError(error, 'save this broker');
     }
   }
 
@@ -212,7 +213,7 @@ export function Brokers() {
       await fetchBrokers();
     } catch (error) {
       console.error('Error deleting broker:', error);
-      alert(`${writeErrorMessage(error, 'delete this broker')}\n\nIt may also be in use by existing records.`);
+      await reportWriteError(error, 'delete this broker');
     }
   }
 
@@ -265,7 +266,7 @@ export function Brokers() {
       if (error.code === '23505') {
         alert('This entity is already assigned to this broker.');
       } else {
-        alert(writeErrorMessage(error, 'assign this entity'));
+        await reportWriteError(error, 'assign this entity');
       }
     }
   }
@@ -287,7 +288,7 @@ export function Brokers() {
       alert('Entity relationship removed successfully!');
     } catch (error) {
       console.error('Error removing entity:', error);
-      alert(writeErrorMessage(error, 'remove this relationship'));
+      await reportWriteError(error, 'remove this relationship');
     }
   }
 

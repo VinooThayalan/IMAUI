@@ -1,8 +1,8 @@
 import { Plus, Search, DollarSign, Eye, Pencil, Building2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { writeErrorMessage } from '../lib/errorMessage';
 import { useAuth } from '../contexts/AuthContext';
+import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
 import type { ExportColumn } from '../lib/exportData';
@@ -65,6 +65,7 @@ const defaultForm: BankFormData = {
 
 export function Banks() {
   const { user } = useAuth();
+  const reportWriteError = useWriteError();
   const [banks, setBanks] = useState<EntityBank[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [bankMasters, setBankMasters] = useState<BankMasterItem[]>([]);
@@ -196,7 +197,7 @@ export function Banks() {
       closeModal();
     } catch (error) {
       console.error('Error saving entity bank:', error);
-      alert(writeErrorMessage(error, 'save this bank account'));
+      await reportWriteError(error, 'save this bank account');
     } finally {
       setSaving(false);
     }
