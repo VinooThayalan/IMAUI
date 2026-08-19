@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { aerPercent, formatAer } from '../lib/aer';
+import { sectorTotals, sectorSeries } from '../services/sectorBreakdown.service';
 import { PieChart } from '../components/PieChart';
 import { Building2 } from 'lucide-react';
 import {
@@ -513,19 +514,14 @@ export function Dashboard() {
   const totalMarketValue           = held.reduce((s, m) => s + m.marketValue, 0);
   const totalCostsBalShares        = held.reduce((s, m) => s + m.cost, 0);
 
-  // Sector aggregates
-  const sectorMap = new Map<string, { returns: number; dividends: number; marketValue: number }>();
-  held.forEach(m => {
-    if (!sectorMap.has(m.sector)) sectorMap.set(m.sector, { returns: 0, dividends: 0, marketValue: 0 });
-    const s = sectorMap.get(m.sector)!;
-    s.returns     += m.totalReturns;
-    s.dividends   += m.dividends;
-    s.marketValue += m.marketValue;
-  });
+  // Sector aggregates. Grouping and the rule that every sector is reported --
+  // including the ones a pie cannot draw -- live in sectorBreakdown.service.
+  const sectors = sectorTotals(held);
+  const sectorNames = sectors.map(s => s.sector);
 
-  const sectorReturnsPie   = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.returns,     color: sectorColor(k) })));
-  const sectorDivPie       = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.dividends,   color: sectorColor(k) })));
-  const sectorMvPie        = mkPiePct(Array.from(sectorMap.entries()).map(([k, v]) => ({ label: k, value: v.marketValue, color: sectorColor(k) })));
+  const sectorReturnsPie = sectorSeries(sectors, 'returns', sectorColor);
+  const sectorDivPie     = sectorSeries(sectors, 'dividends', sectorColor);
+  const sectorMvPie      = sectorSeries(sectors, 'marketValue', sectorColor);
 
   // Top-5 pie charts
   const top5NetMktPie  = mkPiePct(top5.map(m => ({ label: m.ticker, value: m.netMarketValue,  color: shareColor(m.ticker) })));
@@ -664,11 +660,11 @@ export function Dashboard() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-blue-50">
           <h2 className="text-lg font-bold text-gray-900">Portfolio by Sector</h2>
-          <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectorMap.size} sectors</p>
+          <p className="text-xs text-gray-500 mt-0.5">Breakdown across {sectors.length} sectors</p>
           {/* Sector color legend */}
-          {sectorMap.size > 0 && (
+          {sectors.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-3">
-              {Array.from(sectorMap.keys()).map(s => (
+              {sectorNames.map(s => (
                 <span key={s} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: sectorColor(s) }}>
                   {s}
                 </span>
@@ -691,7 +687,7 @@ export function Dashboard() {
           </div>
         </div>
         {/* Sector breakdown table with color bands */}
-        {sectorMap.size > 0 && (
+        {sectors.length > 0 && (
           <div className="px-6 pb-6">
             <div className="rounded-xl overflow-hidden border border-gray-100">
               <table className="w-full text-sm">
@@ -704,9 +700,9 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from(sectorMap.entries())
-                    .sort((a, b) => b[1].marketValue - a[1].marketValue)
-                    .map(([sector, vals]) => {
+                  {[...sectors]
+                    .sort((a, b) => b.marketValue - a.marketValue)
+                    .map(({ sector, ...vals }) => {
                       const sc = sectorColor(sector);
                       return (
                         <tr key={sector} className="border-b border-gray-50 hover:bg-gray-50/60" style={{ borderLeftColor: sc, borderLeftWidth: 4 }}>
