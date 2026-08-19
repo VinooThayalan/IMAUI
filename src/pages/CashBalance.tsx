@@ -8,6 +8,8 @@ import {
   matchesLedgerFilters,
   matchesPendingFilters,
   hasActiveFilter,
+  entityRunningBalance,
+  accountNetMovement,
   NO_FILTERS,
   type LedgerFilters,
   type TradeDates,
@@ -198,13 +200,9 @@ export function CashBalance() {
       const entity = entities.find(e => e.id === formData.entityId);
       if (!entity) return;
 
-      const entityTransactions = transactions
-        .filter(t => t.entity_id === formData.entityId)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-      const lastBalance = entityTransactions.length > 0
-        ? entityTransactions[entityTransactions.length - 1].running_balance
-        : 0;
+      // Same rule the form displays, so the figure saved cannot differ from the
+      // figure shown. Both had their own copy of this.
+      const lastBalance = entityRunningBalance(transactions, formData.entityId);
 
       const amount = parseFloat(formData.amount);
       const newBalance = transactionType === 'Addition'
@@ -999,23 +997,61 @@ export function CashBalance() {
                   const entity = entities.find(e => e.id === formData.entityId);
                   if (!entity) return null;
 
-                  const entityTransactions = transactions
-                    .filter(t => t.entity_id === formData.entityId)
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  /*
+                    This is the ENTITY's balance, not the selected account's.
 
-                  const openingBalance = entityTransactions.length > 0
-                    ? entityTransactions[entityTransactions.length - 1].running_balance
-                    : 0;
+                    `running_balance` accumulates per entity: the single ledger row
+                    against one account carries the whole entity's figure, and
+                    `banks.balance` is 0 everywhere because nothing maintains it.
+                    There is no per-account balance to show.
+
+                    Reported as "opening balance is wrong — no transactions on this
+                    account but it shows a minus value". The number was right for
+                    what it is and wrong for what the label promised, sitting under
+                    Account Number and Facility Limit where it reads as the
+                    account's. Naming the grain is the fix; the account's own
+                    movement is shown beneath it so the question that prompted the
+                    report has an answer on screen.
+                  */
+                  const openingBalance = entityRunningBalance(transactions, formData.entityId);
+                  const account = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
+                  const movement = formData.bankId
+                    ? accountNetMovement(transactions, formData.bankId)
+                    : null;
 
                   return (
-                    <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Opening Balance</label>
-                      <input
-                        type="text"
-                        value={`Rs. ${openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                        className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
-                        disabled
-                      />
+                    <div className="col-span-2 space-y-2">
+                      <div>
+                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                          Opening Balance — {entity.name}, all accounts
+                        </label>
+                        <input
+                          type="text"
+                          value={`Rs. ${openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-semibold"
+                          disabled
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          The entity's running balance across every account, which is what this
+                          entry will continue from. Individual accounts do not carry their own.
+                        </p>
+                      </div>
+
+                      {movement && (
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-2">
+                            Movement on {account?.account_number ?? 'this account'}
+                          </label>
+                          <input
+                            type="text"
+                            value={movement.entries === 0
+                              ? 'No entries on this account'
+                              : `Rs. ${movement.net.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} over ${movement.entries} ${movement.entries === 1 ? 'entry' : 'entries'}`}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-600"
+                            disabled
+                          />
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

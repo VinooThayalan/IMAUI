@@ -44,6 +44,58 @@ export function tradeDatesFor(
   return index.get(row.reference_id) ?? NO_TRADE_DATES;
 }
 
+/**
+ * The balance a new entry will build on.
+ *
+ * `running_balance` is a stored cumulative figure **per entity**, not per bank
+ * account: the one ledger row against account 1416173401 carries the whole
+ * entity's balance, and `banks.balance` is 0 for every account because nothing
+ * maintains it. So an account has no running balance of its own, and the number
+ * a new entry continues from is the entity's.
+ *
+ * Ordered by `timestamp`, not `date`. The stored figure accumulates in the order
+ * rows were written, so insertion time is what identifies the latest one — a
+ * back-dated entry still continues from the balance as it stood when it was
+ * entered.
+ *
+ * Extracted because the submit path and the form both need it. They each had
+ * their own copy, which is two chances for the figure shown to differ from the
+ * figure saved.
+ */
+export function entityRunningBalance(
+  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  entityId: string,
+): number {
+  let latest: { timestamp: string; running_balance: number } | null = null;
+  for (const r of rows) {
+    if (r.entity_id !== entityId) continue;
+    if (!latest || r.timestamp > latest.timestamp) latest = r;
+  }
+  return latest ? latest.running_balance : 0;
+}
+
+/**
+ * Net movement across one bank account: additions less deductions.
+ *
+ * Not a balance, and deliberately not called one. There is no opening figure per
+ * account to add it to — this is only what has moved through the account, which
+ * is the question behind "no transactions on this account but it shows a minus
+ * value".
+ */
+export function accountNetMovement(
+  rows: Array<{ bank_id?: string | null; type: string; amount: number }>,
+  bankId: string,
+): { net: number; entries: number } {
+  let net = 0;
+  let entries = 0;
+  for (const r of rows) {
+    if (r.bank_id !== bankId) continue;
+    entries++;
+    net += r.type === 'Addition' ? r.amount : -r.amount;
+  }
+  return { net, entries };
+}
+
 export interface LedgerFilters {
   entityId: string;
   bankId: string;

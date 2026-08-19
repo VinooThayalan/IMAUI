@@ -62,6 +62,45 @@ export async function listByBank(bankId: string): Promise<CashLedgerRow[]> {
   return rows as unknown as CashLedgerRow[];
 }
 
+/**
+ * The latest stored balance for each of the given bank accounts.
+ *
+ * The caller used to do this itself: select newest-first, unpaged, and take the
+ * first row seen per bank. Two ways that breaks. Past `db-max-rows` the response
+ * is silently short, so an account whose latest entry falls beyond the cap gets
+ * no entry in the map at all and renders as a zero balance rather than an error —
+ * the same shape as the truncated price lookup behind the AER defect. And `date`
+ * ties, so which same-day entry counted as "latest" was arbitrary.
+ *
+ * Paged, and ordered by `timestamp` within a date so the tie has an answer:
+ * `running_balance` accumulates in write order, so the most recently written row
+ * is the current one.
+ *
+ * Note the figure is the *entity's* running balance as at that row, not the
+ * account's — see `entityRunningBalance` in the service. Accounts do not carry
+ * their own.
+ */
+export async function latestBalanceByBank(bankIds: string[]): Promise<Map<string, number>> {
+  const latest = new Map<string, number>();
+  if (bankIds.length === 0) return latest;
+
+  const rows = await selectAll(() =>
+    supabase
+      .from('cash_balance_ledger')
+      .select('bank_id, running_balance, date, timestamp')
+      .in('bank_id', bankIds)
+      .order('date', { ascending: false })
+      .order('timestamp', { ascending: false })
+      .order('id', { ascending: true }),
+  );
+
+  for (const r of rows as unknown as Array<{ bank_id: string | null; running_balance: number | string }>) {
+    if (!r.bank_id || latest.has(r.bank_id)) continue;
+    latest.set(r.bank_id, Number(r.running_balance) || 0);
+  }
+  return latest;
+}
+
 export interface PendingTradeNoteRow {
   id: string;
   note_type: 'Buy' | 'Sell';

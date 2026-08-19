@@ -234,21 +234,10 @@ export function BankTransactionHistory() {
       if (error) throw error;
 
       const bankIds = (data || []).map((b: any) => b.id);
-      const balanceMap = new Map<string, number>();
-
-      if (bankIds.length > 0) {
-        const { data: ledgerData } = await supabase
-          .from('cash_balance_ledger')
-          .select('bank_id, running_balance, date')
-          .in('bank_id', bankIds)
-          .order('date', { ascending: false });
-
-        for (const row of (ledgerData || [])) {
-          if (!balanceMap.has(row.bank_id)) {
-            balanceMap.set(row.bank_id, Number(row.running_balance) || 0);
-          }
-        }
-      }
+      // Paged, with the tie broken, inside the repository. This was an unpaged
+      // newest-first read whose first row per bank was taken as the balance: past
+      // db-max-rows an account simply vanished from the map and rendered as zero.
+      const balanceMap = await cashLedgerRepo.latestBalanceByBank(bankIds);
 
       const result: Bank[] = (data || []).map((b: any) => ({
         id: b.id,
