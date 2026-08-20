@@ -84,18 +84,23 @@ export interface AccountEntryRow {
  * Paged, with `id` making the order total, so no account's entries are dropped
  * past `db-max-rows` — a short read here understates a balance instead of
  * erroring, which is the defect the deleted function was itself written to fix.
+ *
+ * Omit `bankIds` for every entry that names any account — what a screen needs
+ * when it must show a balance for each of many accounts at once. Entries with
+ * no `bank_id` are excluded either way: they belong to no account, and every
+ * trade-driven writer posts one, so they are the bulk of the table.
  */
-export async function listAccountEntries(bankIds: string[]): Promise<AccountEntryRow[]> {
-  if (bankIds.length === 0) return [];
-  const rows = await selectAll(() =>
-    supabase
+export async function listAccountEntries(bankIds?: string[]): Promise<AccountEntryRow[]> {
+  if (bankIds && bankIds.length === 0) return [];
+  const rows = await selectAll(() => {
+    const query = supabase
       .from('cash_balance_ledger')
       .select('id, bank_id, type, amount, date, timestamp')
-      .in('bank_id', bankIds)
       .order('date', { ascending: true })
       .order('timestamp', { ascending: true })
-      .order('id', { ascending: true }),
-  );
+      .order('id', { ascending: true });
+    return bankIds ? query.in('bank_id', bankIds) : query.not('bank_id', 'is', null);
+  });
   return rows as unknown as AccountEntryRow[];
 }
 
