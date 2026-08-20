@@ -127,8 +127,45 @@ These are settled decisions. Do not quietly reverse them.
 - **One definition per concept.** AER lives in `src/lib/aer.ts` and nowhere else. Four competing implementations once disagreed with each other on the same holding.
 - **No unbounded Supabase selects.** Every list read pages through `src/lib/selectAll.ts` with a unique tiebreaker in the `ORDER BY`. Unpaged reads are silently truncated at `db-max-rows`.
 - **Order by `row_index`, never `trade_date`,** when reading `share_analytics_cache`. Two events can share a date; the tie was breaking arbitrarily and losing a sell.
-- **Never invent a value to fill a gap.** No solution means `null` and an em dash, not `0` and not a guess. A guessed broker on a client's contract note, and a rejected note rendered as `Processed`, both shipped this way.
+- **Never invent a value to fill a gap.** No solution means `null` and an em dash, not `0` and not a guess. A guessed broker on a client's contract note, and a rejected note rendered as `Processed`, both shipped this way. See [None is not zero](#none-is-not-zero) — that is where this rule actually gets broken.
 - **Commits are attributed to the repository owner alone.** No `Co-Authored-By` trailer, no "Generated with" line.
+
+### None is not zero
+
+Most gap-filling comes from one mistake: a function that answers `0` for
+"nothing recorded" being used to render a cell. Decide which case you have.
+
+| Situation | Cell shows |
+|---|---|
+| No row recorded at all | `—` |
+| Rows that net to zero | `0.00` — zero *is* the answer |
+| A column explicitly holding `0` | `0.00` — a limit of nothing is a limit |
+| A column left `NULL` | `—` |
+| No related rows to derive from | `—` |
+
+**Two readings, one computation.** A write path needs a number — a new ledger
+entry has to continue from something, and zero is what it continues from. A cell
+must not claim a figure nobody stated. So keep the computation answering `0`, and
+add a display reading returning `number | null` that **delegates** to it. Never a
+second implementation; that is the other non-negotiable.
+
+```
+entityRunningBalance       number         what a new entry builds on
+entityBalance              number | null  what a cell may show
+entityFacilityLimit        number         summed, for arithmetic
+entityFacilityLimitOrNull  number | null  for a cell
+accountRunningBalances     the series     one accumulation
+accountBalance             number | null  null when the account has no entries
+```
+
+Type the field `number | null` and let `tsc` find the cells for you. It located
+all three on the Entity Cash Balances table the moment `CashPosition` went
+nullable — no hunting, and no cell missed.
+
+**Coercing `null` to `0` inside a sum is not gap-filling.** A total across
+accounts where some have none is still the sum of the ones that do, and those
+cells keep their dashes. Do not turn a total into a dash because one contributor
+is absent.
 
 ---
 
