@@ -545,14 +545,26 @@ export function CashBalance() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-bold text-gray-900">
-                        Rs. {position.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
+                      {/* Null means no ledger entry for this entity. An em dash,
+                          not Rs. 0.00, which states a balance the data never did. */}
+                      {position.balance === null ? (
+                        <div className="text-sm text-gray-400" title="No ledger entries for this entity">—</div>
+                      ) : (
+                        <div className="text-sm font-bold text-gray-900">
+                          Rs. {position.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
-                        Rs. {position.facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
+                      {/* Null when no account of this entity records a limit —
+                          including an entity with no accounts at all. */}
+                      {position.facilityLimit === null ? (
+                        <div className="text-sm text-gray-400" title="No facility limit recorded on this entity's accounts">—</div>
+                      ) : (
+                        <div className="text-sm text-gray-900">
+                          Rs. {position.facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {onHold > 0 ? (
@@ -564,9 +576,14 @@ export function CashBalance() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-semibold ${position.availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        Rs. {position.availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
+                      {/* No balance means no headroom to state. */}
+                      {position.availableCredit === null ? (
+                        <div className="text-sm text-gray-400">—</div>
+                      ) : (
+                        <div className={`text-sm font-semibold ${position.availableCredit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          Rs. {position.availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button

@@ -2,7 +2,14 @@ import { useState, useEffect } from 'react';
 import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X, Download, CalendarRange } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
-import { indexNoteDates, tradeDatesFor } from '../services/cashLedger.service';
+import * as banksRepo from '../repositories/banks.repo';
+import * as entitiesRepo from '../repositories/entities.repo';
+import {
+  indexNoteDates,
+  tradeDatesFor,
+  accountRunningBalances,
+  accountBalance,
+} from '../services/cashLedger.service';
 import { exportData, type ExportColumn } from '../lib/exportData';
 
 interface Entity {
@@ -17,7 +24,12 @@ interface Bank {
   entity_id: string;
   entity_name: string;
   is_active: boolean | null;
-  current_balance: number;
+  /**
+   * The balance implied by the entries recorded against this account, or
+   * null when it has none. Never the stored `running_balance`, which is the
+   * entity's.
+   */
+  current_balance: number | null;
 }
 
 interface LedgerEntry {
@@ -209,9 +221,11 @@ export function BankTransactionHistory() {
   const [noteLoading, setNoteLoading]         = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.from('entities').select('id, name').order('name').then(({ data }) =>
-      setEntities(data || [])
-    );
+    // Through the repository, and paged. This was an inline unpaged select, so
+    // past db-max-rows an entity would quietly stop being selectable.
+    entitiesRepo.listAll()
+      .then(rows => setEntities(rows.map(r => ({ id: r.id, name: r.name }))))
+      .catch(err => console.error(err));
   }, []);
 
   useEffect(() => {
@@ -223,30 +237,35 @@ export function BankTransactionHistory() {
   async function loadBanks() {
     setLoading(true);
     try {
-      let query = supabase
-        .from('banks')
-        .select('id, name, account_number, entity_id, is_active, entity:entities(name)')
-        .order('name');
+      // Through the repository, and paged with the order made total by `id`.
+      // This was an inline unpaged select ordered on `name` alone: past
+      // db-max-rows an account stops appearing, which reads as an account that
+      // does not exist rather than as a failed read.
+      const bankAccounts = await banksRepo.listWithEntity(selectedEntityId || undefined);
 
-      if (selectedEntityId) query = query.eq('entity_id', selectedEntityId);
+      const bankIds = bankAccounts.map(b => b.id);
+      // The account's own balance, from the entries recorded against it.
+      //
+      // This used to read the latest stored `running_balance` for the account.
+      // That column is the **entity's** cumulative — written at insert time from
+      // the entity's previous balance and never recomputed per account — so the
+      // cell showed the entity's cash under a heading beside an account number.
+      // For 1416173401 that was -426,197,711.24 against a single credit of
+      // +5,841,004.33, which is the reported defect.
+      const accountEntries = await cashLedgerRepo.listAccountEntries(bankIds);
+      const entryRows = accountEntries.map(r => ({ ...r, amount: Number(r.amount) || 0 }));
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      const bankIds = (data || []).map((b: any) => b.id);
-      // Paged, with the tie broken, inside the repository. This was an unpaged
-      // newest-first read whose first row per bank was taken as the balance: past
-      // db-max-rows an account simply vanished from the map and rendered as zero.
-      const balanceMap = await cashLedgerRepo.latestBalanceByBank(bankIds);
-
-      const result: Bank[] = (data || []).map((b: any) => ({
+      const result: Bank[] = bankAccounts.map(b => ({
         id: b.id,
         name: b.name,
         account_number: b.account_number,
         entity_id: b.entity_id,
-        entity_name: b.entity?.name ?? '—',
+        entity_name: banksRepo.entityNameOf(b) ?? '—',
         is_active: b.is_active,
-        current_balance: balanceMap.get(b.id) ?? 0,
+        // Null when the account has no entries, and rendered as an em dash.
+        // `Rs. 0.00` asserted a balance of nothing where the data says nothing
+        // at all — the gap-filling this repository does not allow.
+        current_balance: accountBalance(entryRows, b.id),
       }));
 
       setBanks(result);
@@ -277,15 +296,19 @@ export function BankTransactionHistory() {
       ]);
       const noteDates = indexNoteDates(noteDateRows);
 
-      const allEntries = [...bankRows].sort((a, b) => {
-        if (!a.date && !b.date) return 0;
-        if (!a.date) return -1;
-        if (!b.date) return 1;
-        return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-      });
+      // Sorted and accumulated in one place. The page sorted on `date` alone —
+      // which ties, so same-day entries fell in an arbitrary order — and then
+      // printed the stored `running_balance`, which accumulates per entity in
+      // write order. Two different orders and two different grains in one table,
+      // so the balance column could not be reconciled against the amount beside
+      // it: a credit of +5,841,004.33 sat next to -426,197,711.24.
+      const series = accountRunningBalances(
+        bankRows.map(r => ({ ...r, amount: Number(r.amount) || 0 })),
+        bankId,
+      );
 
       setLedger(
-        allEntries.map(r => {
+        series.map(({ row: r, balance }) => {
           const dates = tradeDatesFor(r, noteDates);
           return {
             id: r.id,
@@ -294,7 +317,7 @@ export function BankTransactionHistory() {
             description: r.description,
             code: r.code,
             amount: Number(r.amount) || 0,
-            running_balance: Number(r.running_balance) || 0,
+            running_balance: balance,
             reference_id: r.reference_id || null,
             tradeDate: dates.tradeDate,
             settlementDate: dates.settlementDate,
@@ -380,7 +403,10 @@ export function BankTransactionHistory() {
     );
   });
 
-  const totalBalance = filtered.reduce((s, b) => s + b.current_balance, 0);
+  // An account with no entries contributes nothing. Coercing null to 0 inside
+  // a sum is not gap-filling — the cell still shows an em dash; this is only
+  // the arithmetic of adding up the accounts that do have a balance.
+  const totalBalance = filtered.reduce((s, b) => s + (b.current_balance ?? 0), 0);
   const activeCount  = filtered.filter(b => b.is_active).length;
 
   // Period filter. Applied client-side on the already-loaded ledger rather than in
@@ -536,9 +562,15 @@ export function BankTransactionHistory() {
                         </td>
                         <td className="px-4 py-3 text-gray-600 text-sm">{bank.entity_name}</td>
                         <td className="px-4 py-3 text-right font-mono font-semibold">
-                          <span className={bank.current_balance >= 0 ? 'text-green-700' : 'text-red-600'}>
-                            Rs. {fmt(bank.current_balance)}
-                          </span>
+                          {/* No entries means no balance to report. An em dash, not
+                              Rs. 0.00, which would assert a balance of nothing. */}
+                          {bank.current_balance === null ? (
+                            <span className="text-gray-300" title="No entries recorded against this account">—</span>
+                          ) : (
+                            <span className={bank.current_balance >= 0 ? 'text-green-700' : 'text-red-600'}>
+                              Rs. {fmt(bank.current_balance)}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -751,9 +783,13 @@ export function BankTransactionHistory() {
                                           </span>
                                         </td>
                                         <td className="pr-6 pl-3 py-2 text-right font-mono">
-                                          <span className={bank.current_balance >= 0 ? 'text-green-700' : 'text-red-600'}>
-                                            Rs. {fmt(bank.current_balance)}
-                                          </span>
+                                          {bank.current_balance === null ? (
+                                            <span className="text-gray-300">—</span>
+                                          ) : (
+                                            <span className={bank.current_balance >= 0 ? 'text-green-700' : 'text-red-600'}>
+                                              Rs. {fmt(bank.current_balance)}
+                                            </span>
+                                          )}
                                         </td>
                                         <td />
                                       </tr>

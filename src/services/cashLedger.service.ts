@@ -75,12 +75,27 @@ export function entityRunningBalance(
 }
 
 /**
+ * An entry's effect on a balance. One place decides the sign.
+ *
+ * The table's CHECK constraint admits only `Addition` and `Deduction`, so the
+ * lower-case forms cannot reach here from the database — they are accepted
+ * because the screens were already testing for them, and a sign rule that
+ * disagrees with the one beside it is how a credit ends up subtracted.
+ */
+function signedAmount(row: { type: string; amount: number }): number {
+  return row.type === 'Addition' || row.type === 'addition' ? row.amount : -row.amount;
+}
+
+/**
  * Net movement across one bank account: additions less deductions.
  *
- * Not a balance, and deliberately not called one. There is no opening figure per
- * account to add it to — this is only what has moved through the account, which
- * is the question behind "no transactions on this account but it shows a minus
- * value".
+ * The same sum as `accountBalance` below, which is this figure with the grain
+ * named and an empty account distinguished from one that nets to nothing. Both
+ * sign a row through `signedAmount`, because they did not: this function read
+ * `type === 'Addition'` while the balance accepted `'addition'` too, so one
+ * lower-case row made them return **opposite signs** for the same entry. The
+ * CHECK constraint means no such row exists today, which is exactly why it
+ * would have gone unnoticed.
  */
 export function accountNetMovement(
   rows: Array<{ bank_id?: string | null; type: string; amount: number }>,
@@ -91,7 +106,7 @@ export function accountNetMovement(
   for (const r of rows) {
     if (r.bank_id !== bankId) continue;
     entries++;
-    net += r.type === 'Addition' ? r.amount : -r.amount;
+    net += signedAmount(r);
   }
   return { net, entries };
 }
@@ -136,14 +151,67 @@ export function accountFacilityLimit(account: AccountFacility | null | undefined
   return Number(account.facility_limit) || 0;
 }
 
+/**
+ * Does this entity have any ledger entry at all?
+ *
+ * The distinction the screens need. `entityRunningBalance` answers 0 for an
+ * entity with no rows, which is right for its job — a new entry has to continue
+ * from something, and zero is what it continues from. It is wrong as a *display*
+ * of a balance: an entity with nothing recorded does not have a balance of
+ * nothing, and `Rs. 0.00` in that cell is a figure the data never stated.
+ */
+function hasLedgerEntry(
+  rows: Array<{ entity_id?: string | null }>,
+  entityId: string,
+): boolean {
+  return rows.some(r => r.entity_id === entityId);
+}
+
+/**
+ * An entity's balance for display, or null when it has no entries.
+ *
+ * Delegates to `entityRunningBalance` rather than picking the latest row again,
+ * so there is still one rule for which row the balance comes from.
+ */
+export function entityBalance(
+  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  entityId: string,
+): number | null {
+  return hasLedgerEntry(rows, entityId) ? entityRunningBalance(rows, entityId) : null;
+}
+
+/**
+ * An entity's facility limit, or null when none of its accounts records one.
+ *
+ * Null covers two cases that look the same on screen and are the same in
+ * substance: an entity with no bank accounts, and one whose accounts all leave
+ * `facility_limit` unset. Neither has a limit; neither has a limit of zero.
+ * An account carrying 0 explicitly still counts as a limit, and sums as 0.
+ */
+export function entityFacilityLimitOrNull(
+  accounts: AccountFacility[],
+  entityId: string,
+): number | null {
+  const recorded = accounts.some(a => a.entity_id === entityId && a.facility_limit != null);
+  return recorded ? entityFacilityLimit(accounts, entityId) : null;
+}
+
 export interface CashPosition {
-  /** From the ledger, which is the authoritative record — see below. */
-  balance: number;
-  /** Sum of the entity's accounts' facility limits. */
-  facilityLimit: number;
+  /**
+   * From the ledger, which is the authoritative record — see below. Null when
+   * the entity has no entries: no balance to report, rendered as an em dash.
+   */
+  balance: number | null;
+  /** Sum of the entity's accounts' facility limits. Null when none records one. */
+  facilityLimit: number | null;
   onHold: number;
-  /** balance + facilityLimit - onHold. */
-  availableCredit: number;
+  /**
+   * balance + facilityLimit - onHold, and null when there is no balance to
+   * compute headroom from. A missing limit counts as nothing to draw on rather
+   * than voiding the figure, so an entity with entries and no facility still
+   * gets an available credit.
+   */
+  availableCredit: number | null;
 }
 
 /**
@@ -170,13 +238,13 @@ export function entityCashPosition(
   entityId: string,
   onHold: number,
 ): CashPosition {
-  const balance = entityRunningBalance(rows, entityId);
-  const facilityLimit = entityFacilityLimit(accounts, entityId);
+  const balance = entityBalance(rows, entityId);
+  const facilityLimit = entityFacilityLimitOrNull(accounts, entityId);
   return {
     balance,
     facilityLimit,
     onHold,
-    availableCredit: balance + facilityLimit - onHold,
+    availableCredit: balance === null ? null : balance + (facilityLimit ?? 0) - onHold,
   };
 }
 
@@ -233,4 +301,85 @@ export function matchesPendingFilters(
   if (f.from && (!date || date < f.from)) return false;
   if (f.to && (!date || date > f.to)) return false;
   return true;
+}
+
+/** A ledger row as a per-account balance needs it. */
+export interface AccountLedgerRow {
+  id: string;
+  bank_id?: string | null;
+  type: string;
+  amount: number;
+  date?: string | null;
+  timestamp?: string;
+}
+
+/**
+ * The order a printed balance accumulates in: posting date, then write order,
+ * then id.
+ *
+ * Posting date first, because a balance printed beside a date column has to
+ * accumulate down the page or it cannot be reconciled by a reader. `timestamp`
+ * breaks a same-date tie, and `id` makes the order total — the tiebreaker the
+ * cache reads already require, for the same reason: two entries sharing a date
+ * otherwise sort arbitrarily.
+ */
+function comparePostingOrder(a: AccountLedgerRow, b: AccountLedgerRow): number {
+  const ad = a.date ?? '';
+  const bd = b.date ?? '';
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  const at = a.timestamp ?? '';
+  const bt = b.timestamp ?? '';
+  if (at !== bt) return at < bt ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+export interface AccountBalancePoint<T> {
+  row: T;
+  /** The account's balance as at this row, from its own entries only. */
+  balance: number;
+}
+
+/**
+ * One account's entries in posting order, each with the balance as at that row.
+ *
+ * This exists because `running_balance` is a **stored** column, written at
+ * insert time from the entity's previous balance — never recomputed per account,
+ * because `bank_id` was added to the table three weeks after it was created.
+ * Printing it beside rows filtered to one account is the reported defect, and
+ * the arithmetic behind the report is exact: the entity stood at
+ * -432,038,715.57, a manual credit of 5,841,004.33 was posted against account
+ * 1416173401, and the row therefore stored -426,197,711.24 — the entity's new
+ * balance, not the account's. That single credit is the only entry on the
+ * account, so the account holds +5,841,004.33.
+ *
+ * Opens at zero, which is a statement about the entries and not about the bank:
+ * an account whose first entry is its `Initial` credit opens at zero and closes
+ * at that credit. An account funded by an entry posted with no `bank_id` opens
+ * at zero and stays understated — the write-path defect showing through rather
+ * than something to paper over here. Every trade-driven writer posts
+ * `bank_id: null` today.
+ */
+export function accountRunningBalances<T extends AccountLedgerRow>(
+  rows: T[],
+  bankId: string,
+): Array<AccountBalancePoint<T>> {
+  const own = rows.filter(r => r.bank_id === bankId).sort(comparePostingOrder);
+  let balance = 0;
+  return own.map(row => {
+    balance += signedAmount(row);
+    return { row, balance };
+  });
+}
+
+/**
+ * The account's closing balance, or null when it has no entries at all.
+ *
+ * Null rather than zero, so a caller can tell "nothing recorded here" from "it
+ * nets to nothing". The caller on Bank Transaction History currently coerces to
+ * zero to keep its cell unchanged; that reading is the screen's to make.
+ */
+export function accountBalance(rows: AccountLedgerRow[], bankId: string): number | null {
+  const series = accountRunningBalances(rows, bankId);
+  if (series.length === 0) return null;
+  return series[series.length - 1].balance;
 }
