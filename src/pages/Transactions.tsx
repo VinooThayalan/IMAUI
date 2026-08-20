@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import * as cashLedgerRepo from '../repositories/cashLedger.repo';
+import { accountBalance } from '../services/cashLedger.service';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -318,7 +320,7 @@ export function Transactions() {
         supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
         supabase.from('brokerage_fee_types').select('*').eq('is_active', true).order('min_price'),
         supabase.from('entity_brokers').select('*, bank:banks(id, name, balance)').eq('is_active', true),
-        supabase.from('cash_balance_ledger').select('bank_id, type, amount')
+        cashLedgerRepo.listAccountEntries()
       ]);
 
       if (transactionsRes.error) throw transactionsRes.error;
@@ -329,23 +331,33 @@ export function Transactions() {
       if (brokerageRes.error) throw brokerageRes.error;
       if (entityBrokersRes.error) throw entityBrokersRes.error;
 
-      const bankBalanceMap = new Map<string, number>();
-      (ledgerRes.data || []).forEach((entry: any) => {
-        if (!entry.bank_id) return;
-        const delta = entry.type === 'Addition' ? Number(entry.amount) : -Number(entry.amount);
-        bankBalanceMap.set(entry.bank_id, (bankBalanceMap.get(entry.bank_id) || 0) + delta);
-      });
+      // One definition of an account's balance, shared with Bank Transaction
+      // History. This screen had its own copy — an unpaged select summed inline
+      // here — so the same question had two answers, and the one this screen
+      // used is what marks a trade Insufficient / Sufficient / Excellent. The
+      // read is now paged through the repository, because a short response
+      // understated a balance rather than erroring, and the sum lives in the
+      // service where it is covered by assertions.
+      const ledgerRows = ledgerRes.map(r => ({ ...r, amount: Number(r.amount) || 0 }));
+
+      // Falls back to `banks.balance` when the account has no ledger entries at
+      // all, exactly as before. That column is 0 for every row because nothing
+      // maintains it, so the fallback is 0 in practice — kept rather than
+      // changed, because what an account with no entries should show on this
+      // screen is a separate question from which sum is correct.
+      const balanceOf = (id: string, stored: unknown) =>
+        accountBalance(ledgerRows, id) ?? Number(stored || 0);
 
       const banksWithBalance = (banksRes.data || []).map((b: any) => ({
         ...b,
-        balance: bankBalanceMap.has(b.id) ? bankBalanceMap.get(b.id) : Number(b.balance || 0)
+        balance: balanceOf(b.id, b.balance)
       }));
 
       const entityBrokersWithBalance = (entityBrokersRes.data || []).map((eb: any) => ({
         ...eb,
         bank: eb.bank ? {
           ...eb.bank,
-          balance: eb.bank.id && bankBalanceMap.has(eb.bank.id) ? bankBalanceMap.get(eb.bank.id) : Number(eb.bank.balance || 0)
+          balance: eb.bank.id ? balanceOf(eb.bank.id, eb.bank.balance) : Number(eb.bank.balance || 0)
         } : eb.bank
       }));
 
