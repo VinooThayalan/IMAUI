@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react';
 import { Search, TrendingUp, TrendingDown, Landmark, ChevronDown, ChevronUp, FileText, X, Download, CalendarRange } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
-import { indexNoteDates, tradeDatesFor } from '../services/cashLedger.service';
+import {
+  indexNoteDates,
+  tradeDatesFor,
+  accountRunningBalances,
+  accountBalance,
+} from '../services/cashLedger.service';
 import { exportData, type ExportColumn } from '../lib/exportData';
 
 interface Entity {
@@ -234,10 +239,16 @@ export function BankTransactionHistory() {
       if (error) throw error;
 
       const bankIds = (data || []).map((b: any) => b.id);
-      // Paged, with the tie broken, inside the repository. This was an unpaged
-      // newest-first read whose first row per bank was taken as the balance: past
-      // db-max-rows an account simply vanished from the map and rendered as zero.
-      const balanceMap = await cashLedgerRepo.latestBalanceByBank(bankIds);
+      // The account's own balance, from the entries recorded against it.
+      //
+      // This used to read the latest stored `running_balance` for the account.
+      // That column is the **entity's** cumulative — written at insert time from
+      // the entity's previous balance and never recomputed per account — so the
+      // cell showed the entity's cash under a heading beside an account number.
+      // For 1416173401 that was -426,197,711.24 against a single credit of
+      // +5,841,004.33, which is the reported defect.
+      const accountEntries = await cashLedgerRepo.listAccountEntries(bankIds);
+      const entryRows = accountEntries.map(r => ({ ...r, amount: Number(r.amount) || 0 }));
 
       const result: Bank[] = (data || []).map((b: any) => ({
         id: b.id,
@@ -246,7 +257,12 @@ export function BankTransactionHistory() {
         entity_id: b.entity_id,
         entity_name: b.entity?.name ?? '—',
         is_active: b.is_active,
-        current_balance: balanceMap.get(b.id) ?? 0,
+        // Zero when the account has no entries. `accountBalance` reports null
+        // there, which is the honest answer, but rendering an em dash would
+        // change this cell and the reported problem is the value, not the
+        // layout. Worth revisiting: `Rs. 0.00` still asserts a balance the data
+        // does not have.
+        current_balance: accountBalance(entryRows, b.id) ?? 0,
       }));
 
       setBanks(result);
@@ -277,15 +293,19 @@ export function BankTransactionHistory() {
       ]);
       const noteDates = indexNoteDates(noteDateRows);
 
-      const allEntries = [...bankRows].sort((a, b) => {
-        if (!a.date && !b.date) return 0;
-        if (!a.date) return -1;
-        if (!b.date) return 1;
-        return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
-      });
+      // Sorted and accumulated in one place. The page sorted on `date` alone —
+      // which ties, so same-day entries fell in an arbitrary order — and then
+      // printed the stored `running_balance`, which accumulates per entity in
+      // write order. Two different orders and two different grains in one table,
+      // so the balance column could not be reconciled against the amount beside
+      // it: a credit of +5,841,004.33 sat next to -426,197,711.24.
+      const series = accountRunningBalances(
+        bankRows.map(r => ({ ...r, amount: Number(r.amount) || 0 })),
+        bankId,
+      );
 
       setLedger(
-        allEntries.map(r => {
+        series.map(({ row: r, balance }) => {
           const dates = tradeDatesFor(r, noteDates);
           return {
             id: r.id,
@@ -294,7 +314,7 @@ export function BankTransactionHistory() {
             description: r.description,
             code: r.code,
             amount: Number(r.amount) || 0,
-            running_balance: Number(r.running_balance) || 0,
+            running_balance: balance,
             reference_id: r.reference_id || null,
             tradeDate: dates.tradeDate,
             settlementDate: dates.settlementDate,

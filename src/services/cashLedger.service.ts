@@ -234,3 +234,96 @@ export function matchesPendingFilters(
   if (f.to && (!date || date > f.to)) return false;
   return true;
 }
+
+/**
+ * An entry's effect on a balance. One place decides the sign.
+ *
+ * The table's CHECK constraint admits only `Addition` and `Deduction`, so the
+ * lower-case forms cannot reach here from the database — they are accepted
+ * because the screens were already testing for them, and a sign rule that
+ * disagrees with the one beside it is how a credit ends up subtracted.
+ */
+function signedAmount(row: { type: string; amount: number }): number {
+  return row.type === 'Addition' || row.type === 'addition' ? row.amount : -row.amount;
+}
+
+/** A ledger row as a per-account balance needs it. */
+export interface AccountLedgerRow {
+  id: string;
+  bank_id?: string | null;
+  type: string;
+  amount: number;
+  date?: string | null;
+  timestamp?: string;
+}
+
+/**
+ * The order a printed balance accumulates in: posting date, then write order,
+ * then id.
+ *
+ * Posting date first, because a balance printed beside a date column has to
+ * accumulate down the page or it cannot be reconciled by a reader. `timestamp`
+ * breaks a same-date tie, and `id` makes the order total — the tiebreaker the
+ * cache reads already require, for the same reason: two entries sharing a date
+ * otherwise sort arbitrarily.
+ */
+function comparePostingOrder(a: AccountLedgerRow, b: AccountLedgerRow): number {
+  const ad = a.date ?? '';
+  const bd = b.date ?? '';
+  if (ad !== bd) return ad < bd ? -1 : 1;
+  const at = a.timestamp ?? '';
+  const bt = b.timestamp ?? '';
+  if (at !== bt) return at < bt ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+export interface AccountBalancePoint<T> {
+  row: T;
+  /** The account's balance as at this row, from its own entries only. */
+  balance: number;
+}
+
+/**
+ * One account's entries in posting order, each with the balance as at that row.
+ *
+ * This exists because `running_balance` is a **stored** column, written at
+ * insert time from the entity's previous balance — never recomputed per account,
+ * because `bank_id` was added to the table three weeks after it was created.
+ * Printing it beside rows filtered to one account is the reported defect, and
+ * the arithmetic behind the report is exact: the entity stood at
+ * -432,038,715.57, a manual credit of 5,841,004.33 was posted against account
+ * 1416173401, and the row therefore stored -426,197,711.24 — the entity's new
+ * balance, not the account's. That single credit is the only entry on the
+ * account, so the account holds +5,841,004.33.
+ *
+ * Opens at zero, which is a statement about the entries and not about the bank:
+ * an account whose first entry is its `Initial` credit opens at zero and closes
+ * at that credit. An account funded by an entry posted with no `bank_id` opens
+ * at zero and stays understated — the write-path defect showing through rather
+ * than something to paper over here. Every trade-driven writer posts
+ * `bank_id: null` today.
+ */
+export function accountRunningBalances<T extends AccountLedgerRow>(
+  rows: T[],
+  bankId: string,
+): Array<AccountBalancePoint<T>> {
+  const own = rows.filter(r => r.bank_id === bankId).sort(comparePostingOrder);
+  let balance = 0;
+  return own.map(row => {
+    balance += signedAmount(row);
+    return { row, balance };
+  });
+}
+
+/**
+ * The account's closing balance, or null when it has no entries at all.
+ *
+ * Null rather than zero, so a caller can tell "nothing recorded here" from "it
+ * nets to nothing". The caller on Bank Transaction History currently coerces to
+ * zero to keep its cell unchanged; that reading is the screen's to make.
+ */
+export function accountBalance(rows: AccountLedgerRow[], bankId: string): number | null {
+  const series = accountRunningBalances(rows, bankId);
+  if (series.length === 0) return null;
+  return series[series.length - 1].balance;
+}
