@@ -75,12 +75,27 @@ export function entityRunningBalance(
 }
 
 /**
+ * An entry's effect on a balance. One place decides the sign.
+ *
+ * The table's CHECK constraint admits only `Addition` and `Deduction`, so the
+ * lower-case forms cannot reach here from the database — they are accepted
+ * because the screens were already testing for them, and a sign rule that
+ * disagrees with the one beside it is how a credit ends up subtracted.
+ */
+function signedAmount(row: { type: string; amount: number }): number {
+  return row.type === 'Addition' || row.type === 'addition' ? row.amount : -row.amount;
+}
+
+/**
  * Net movement across one bank account: additions less deductions.
  *
- * Not a balance, and deliberately not called one. There is no opening figure per
- * account to add it to — this is only what has moved through the account, which
- * is the question behind "no transactions on this account but it shows a minus
- * value".
+ * The same sum as `accountBalance` below, which is this figure with the grain
+ * named and an empty account distinguished from one that nets to nothing. Both
+ * sign a row through `signedAmount`, because they did not: this function read
+ * `type === 'Addition'` while the balance accepted `'addition'` too, so one
+ * lower-case row made them return **opposite signs** for the same entry. The
+ * CHECK constraint means no such row exists today, which is exactly why it
+ * would have gone unnoticed.
  */
 export function accountNetMovement(
   rows: Array<{ bank_id?: string | null; type: string; amount: number }>,
@@ -91,7 +106,7 @@ export function accountNetMovement(
   for (const r of rows) {
     if (r.bank_id !== bankId) continue;
     entries++;
-    net += r.type === 'Addition' ? r.amount : -r.amount;
+    net += signedAmount(r);
   }
   return { net, entries };
 }
@@ -233,18 +248,6 @@ export function matchesPendingFilters(
   if (f.from && (!date || date < f.from)) return false;
   if (f.to && (!date || date > f.to)) return false;
   return true;
-}
-
-/**
- * An entry's effect on a balance. One place decides the sign.
- *
- * The table's CHECK constraint admits only `Addition` and `Deduction`, so the
- * lower-case forms cannot reach here from the database — they are accepted
- * because the screens were already testing for them, and a sign rule that
- * disagrees with the one beside it is how a credit ends up subtracted.
- */
-function signedAmount(row: { type: string; amount: number }): number {
-  return row.type === 'Addition' || row.type === 'addition' ? row.amount : -row.amount;
 }
 
 /** A ledger row as a per-account balance needs it. */
