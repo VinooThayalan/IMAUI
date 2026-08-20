@@ -151,14 +151,67 @@ export function accountFacilityLimit(account: AccountFacility | null | undefined
   return Number(account.facility_limit) || 0;
 }
 
+/**
+ * Does this entity have any ledger entry at all?
+ *
+ * The distinction the screens need. `entityRunningBalance` answers 0 for an
+ * entity with no rows, which is right for its job — a new entry has to continue
+ * from something, and zero is what it continues from. It is wrong as a *display*
+ * of a balance: an entity with nothing recorded does not have a balance of
+ * nothing, and `Rs. 0.00` in that cell is a figure the data never stated.
+ */
+function hasLedgerEntry(
+  rows: Array<{ entity_id?: string | null }>,
+  entityId: string,
+): boolean {
+  return rows.some(r => r.entity_id === entityId);
+}
+
+/**
+ * An entity's balance for display, or null when it has no entries.
+ *
+ * Delegates to `entityRunningBalance` rather than picking the latest row again,
+ * so there is still one rule for which row the balance comes from.
+ */
+export function entityBalance(
+  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  entityId: string,
+): number | null {
+  return hasLedgerEntry(rows, entityId) ? entityRunningBalance(rows, entityId) : null;
+}
+
+/**
+ * An entity's facility limit, or null when none of its accounts records one.
+ *
+ * Null covers two cases that look the same on screen and are the same in
+ * substance: an entity with no bank accounts, and one whose accounts all leave
+ * `facility_limit` unset. Neither has a limit; neither has a limit of zero.
+ * An account carrying 0 explicitly still counts as a limit, and sums as 0.
+ */
+export function entityFacilityLimitOrNull(
+  accounts: AccountFacility[],
+  entityId: string,
+): number | null {
+  const recorded = accounts.some(a => a.entity_id === entityId && a.facility_limit != null);
+  return recorded ? entityFacilityLimit(accounts, entityId) : null;
+}
+
 export interface CashPosition {
-  /** From the ledger, which is the authoritative record — see below. */
-  balance: number;
-  /** Sum of the entity's accounts' facility limits. */
-  facilityLimit: number;
+  /**
+   * From the ledger, which is the authoritative record — see below. Null when
+   * the entity has no entries: no balance to report, rendered as an em dash.
+   */
+  balance: number | null;
+  /** Sum of the entity's accounts' facility limits. Null when none records one. */
+  facilityLimit: number | null;
   onHold: number;
-  /** balance + facilityLimit - onHold. */
-  availableCredit: number;
+  /**
+   * balance + facilityLimit - onHold, and null when there is no balance to
+   * compute headroom from. A missing limit counts as nothing to draw on rather
+   * than voiding the figure, so an entity with entries and no facility still
+   * gets an available credit.
+   */
+  availableCredit: number | null;
 }
 
 /**
@@ -185,13 +238,13 @@ export function entityCashPosition(
   entityId: string,
   onHold: number,
 ): CashPosition {
-  const balance = entityRunningBalance(rows, entityId);
-  const facilityLimit = entityFacilityLimit(accounts, entityId);
+  const balance = entityBalance(rows, entityId);
+  const facilityLimit = entityFacilityLimitOrNull(accounts, entityId);
   return {
     balance,
     facilityLimit,
     onHold,
-    availableCredit: balance + facilityLimit - onHold,
+    availableCredit: balance === null ? null : balance + (facilityLimit ?? 0) - onHold,
   };
 }
 
