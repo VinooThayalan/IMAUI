@@ -1,4 +1,4 @@
-import { Plus, BookOpen, Wallet, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark, Download } from 'lucide-react';
+import { Plus, BookOpen, TrendingUp, TrendingDown, Building2, ChevronRight, Landmark, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
@@ -276,12 +276,6 @@ export function CashBalance() {
     }
   }
 
-  // Same source as the rows, or the header would disagree with the table under it.
-  const totalBalance = entities.reduce(
-    (sum, entity) => sum + entityRunningBalance(transactions, entity.id),
-    0,
-  );
-  const totalOnHold = Array.from(entityPendingHold.values()).reduce((s, v) => s + v, 0);
   /*
     The drill-down and the filter bar are one filter.
 
@@ -437,53 +431,6 @@ export function CashBalance() {
             Clear Filters
           </button>
         )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-500">Total Cash Balance</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">
-                Rs. {totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">Settled across all entities</p>
-            </div>
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Wallet className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-amber-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-amber-600">Total On Hold</p>
-              <p className="text-2xl font-bold text-amber-700 mt-2">
-                Rs. {totalOnHold.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">{pendingNotes.filter(n => n.note_type === 'Buy').length} pending buy note{pendingNotes.filter(n => n.note_type === 'Buy').length !== 1 ? 's' : ''}</p>
-            </div>
-            <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-              <TrendingDown className="w-6 h-6 text-amber-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl border border-green-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-green-600">Net Available</p>
-              <p className={`text-2xl font-bold mt-2 ${(totalBalance - totalOnHold) >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                Rs. {(totalBalance - totalOnHold).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-              <p className="text-sm text-gray-500 mt-2">Balance minus on-hold amounts</p>
-            </div>
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <Building2 className="w-6 h-6 text-green-600" />
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200">
