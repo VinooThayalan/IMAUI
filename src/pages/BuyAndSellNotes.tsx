@@ -15,6 +15,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
+import { DateRangeField } from '../components/DateField';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
   getDocument: (src: { data: ArrayBuffer }) => {
@@ -3435,28 +3436,13 @@ export function BuyAndSellNotes() {
               className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">
-              From
-            </label>
-            <input
-              type="date"
-              value={filterDateFrom}
-              onChange={(e) => setFilterDateFrom(e.target.value)}
-              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">
-              To
-            </label>
-            <input
-              type="date"
-              value={filterDateTo}
-              onChange={(e) => setFilterDateTo(e.target.value)}
-              className="px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <DateRangeField
+            from={filterDateFrom}
+            to={filterDateTo}
+            onFromChange={setFilterDateFrom}
+            onToChange={setFilterDateTo}
+            labelStyle="filter"
+          />
           <select
             value={filterNoteType}
             onChange={(e) => setFilterNoteType(e.target.value)}

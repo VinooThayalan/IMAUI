@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
+import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 import {
@@ -1240,17 +1241,16 @@ export function ShareAnalytics() {
               />
             </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="sa-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
-            <input
-              id="sa-from"
-              type="date"
-              value={fromDate}
-              max={toDate || undefined}
-              onChange={e => setFromDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <DateRangeField
+            from={fromDate}
+            to={toDate}
+            onFromChange={setFromDate}
+            onToChange={setToDate}
+            fromLabel="From"
+            toLabel="To (as of)"
+            layout="stacked"
+            labelStyle="filter"
+          />
           <div className="flex flex-col gap-1">
             <label htmlFor="sa-to" className="text-xs font-semibold text-gray-500 uppercase">To (as of)</label>
             <input

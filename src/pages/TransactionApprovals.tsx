@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
+import { DateRangeField } from '../components/DateField';
 
 interface Transaction {
   id: string;
@@ -716,27 +717,14 @@ export function TransactionApprovals() {
             </select>
           </div>
 
-          {/* Date From */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">From</label>
-            <input
-              type="date"
-              value={filterDateFrom}
-              onChange={e => setFilterDateFrom(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Date To */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1">To</label>
-            <input
-              type="date"
-              value={filterDateTo}
-              onChange={e => setFilterDateTo(e.target.value)}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
+          <DateRangeField
+            from={filterDateFrom}
+            to={filterDateTo}
+            onFromChange={setFilterDateFrom}
+            onToChange={setFilterDateTo}
+            layout="stacked"
+            labelStyle="filter"
+          />
 
           {hasFilters && (
             <button

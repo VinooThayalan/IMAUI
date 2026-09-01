@@ -5,6 +5,7 @@ import { formatAer, portfolioAer, type CashFlow, type PortfolioAerResult } from 
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
 import { summaryInWindow } from '../services/portfolioSummary.service';
+import { DateRangeField } from '../components/DateField';
 
 function fmtCompact(v: number) {
   const abs = Math.abs(v);
@@ -241,16 +242,20 @@ export function PortfolioSummary() {
     new Date(),
   );
 
-  if (loading) {
-    return (
-      <div className="p-6 flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-500">Loading portfolio summary...</p>
-        </div>
-      </div>
-    );
-  }
+  /*
+    No early return on `loading`.
+
+    There used to be one, replacing the entire page — filter bar included — with
+    a spinner. Changing a date therefore unmounted the very date input being
+    used: the browser's calendar popup is owned by that DOM node, so it was
+    destroyed mid-interaction and the whole screen appeared to refresh. Reported
+    as "when you click the calendar arrow it refreshes"; Chrome commits a new
+    value when you step to the previous month, which fires the refetch, which
+    tore the picker out from under the click.
+
+    Controls must outlive a reload of the data they control. The spinner now sits
+    where the results are, and the filter bar keeps its DOM node throughout.
+  */
 
   return (
     <div className="p-6 space-y-6">
@@ -290,35 +295,21 @@ export function PortfolioSummary() {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-3">
               <Calendar className="w-5 h-5 text-gray-500" />
-              <div className="flex items-center space-x-2 mr-4">
-                <label htmlFor="ps-from" className="text-sm font-medium text-gray-700">From:</label>
-                <input
-                  id="ps-from"
-                  type="date"
-                  value={fromDate}
-                  max={asOfDate || undefined}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {fromDate && (
-                  <button
-                    onClick={() => setFromDate('')}
-                    className="px-2 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
-                    title="Clear the start date"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 mr-2">As of Date (to):</label>
-                <input
-                  type="date"
-                  value={asOfDate}
-                  onChange={(e) => setAsOfDate(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+              {/*
+                One component, so the label is attached to the field, the two
+                ends constrain each other, and the picker is disabled rather
+                than unmounted while the data behind it reloads.
+              */}
+              <DateRangeField
+                from={fromDate}
+                to={asOfDate}
+                onFromChange={setFromDate}
+                onToChange={setAsOfDate}
+                fromLabel="From:"
+                toLabel="As of Date (to):"
+                clearable
+                disabled={loading}
+              />
             </div>
             <div>
               <label className="text-sm font-medium text-gray-700 mr-2">Entity:</label>
@@ -384,7 +375,13 @@ export function PortfolioSummary() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        {loading && (
+          <div className="flex items-center justify-center gap-3 border-b border-gray-200 bg-gray-50 py-3">
+            <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-600"></div>
+            <p className="text-sm text-gray-500">Loading portfolio summary…</p>
+          </div>
+        )}
+        <div className={`overflow-x-auto ${loading ? 'pointer-events-none opacity-50' : ''}`}>
           <table className="w-full border-collapse">
             <thead className="bg-gray-50">
               <tr>
@@ -521,7 +518,8 @@ export function PortfolioSummary() {
           </table>
         </div>
 
-        {data.length === 0 && (
+        {/* Not while loading: an in-flight fetch is not an empty result. */}
+        {!loading && data.length === 0 && (
           <div className="p-12 text-center">
             <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
             <p className="text-gray-500">No portfolio data available for the selected date</p>

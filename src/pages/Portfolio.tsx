@@ -2,6 +2,7 @@ import { PieChart, TrendingUp, TrendingDown, Wallet, Percent, Download } from 'l
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
+import { DateRangeField } from '../components/DateField';
 import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
 import { holdingsInWindow, isFresh } from '../services/portfolioHoldings.service';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
@@ -563,16 +564,14 @@ export function Portfolio() {
     }, 300);
   }
 
-  if (loading) {
-    return (
-      <div className="p-6 flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-gray-500">Loading portfolio...</p>
-        </div>
-      </div>
-    );
-  }
+  /*
+    No early return on `loading` — see the same note in PortfolioSummary.
+
+    This screen refetches on `fromDate` and `toDate`, so a whole-page spinner
+    unmounted the date input the user was working in and destroyed the browser's
+    open calendar popup mid-click. Controls have to outlive a reload of the data
+    they control.
+  */
 
   const gainPositive = portfolioData.totalGainLoss >= 0;
 
@@ -593,32 +592,16 @@ export function Portfolio() {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <label htmlFor="pf-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
-          <input
-            id="pf-from"
-            type="date"
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          <DateRangeField
+            from={fromDate}
+            to={toDate}
+            onFromChange={setFromDate}
+            onToChange={setToDate}
+            fromLabel="From"
+            toLabel="To (as of)"
+            clearable
+            disabled={loading}
           />
-          <label htmlFor="pf-to" className="text-xs font-semibold text-gray-500 uppercase">To (as of)</label>
-          <input
-            id="pf-to"
-            type="date"
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={(e) => setToDate(e.target.value)}
-            className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-          />
-          {(fromDate || toDate) && (
-            <button
-              onClick={() => { setFromDate(''); setToDate(''); }}
-              className="px-3 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Clear dates
-            </button>
-          )}
           <select
             value={selectedEntityId}
             onChange={(e) => setSelectedEntityId(e.target.value)}
@@ -640,7 +623,14 @@ export function Portfolio() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      {loading && (
+        <div className="flex items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white py-3">
+          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-600" />
+          <p className="text-sm text-gray-500">Loading portfolio…</p>
+        </div>
+      )}
+
+      <div className={`grid grid-cols-1 md:grid-cols-4 gap-6 ${loading ? 'pointer-events-none opacity-50' : ''}`}>
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div>

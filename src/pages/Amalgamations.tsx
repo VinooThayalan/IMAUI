@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { DateField } from '../components/DateField';
 
 interface Amalgamation {
   id: string;
@@ -206,89 +207,23 @@ export function Amalgamations() {
           <form onSubmit={handleCreateAmalgamation} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Entity <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={formData.entity_id}
-                  onChange={(e) => setFormData({ ...formData, entity_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  <option value="">Select Entity</option>
-                  {entities.map(entity => (
-                    <option key={entity.id} value={entity.id}>{entity.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Transaction Type
-                </label>
-                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700 font-medium">
-                  Amalgamation
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Share <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={formData.share_id}
-                  onChange={(e) => setFormData({ ...formData, share_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  required
-                >
-                  <option value="">Select Share</option>
-                  {shares.map(share => (
-                    <option key={share.id} value={share.id}>
-                      {share.ticker} - {share.share_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Current Share Balance
-                </label>
-                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
-                  -
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Current Cost Per Share
-                </label>
-                <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
-                  -
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Announcement Date
-                </label>
-                <input
-                  type="date"
+                <DateField
                   value={formData.announcement_date}
-                  onChange={(e) => setFormData({ ...formData, announcement_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onChange={v => setFormData({ ...formData, announcement_date: v })}
+                  label="Entity setFormData({ ...formData, entity_id: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent&quot; required > Select Entity {entities.map(entity => ( {entity.name} ))} Transaction Type Amalgamation Share setFormData({ ...formData, share_id: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent&quot; required > Select Share {shares.map(share => ( {share.ticker} - {share.share_name} ))} Current Share Balance - Current Cost Per Share - Announcement Date"
+                  layout="stacked"
+                  required
+                  fullWidth
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amalgamation Date
-                </label>
-                <input
-                  type="date"
+                <DateField
                   value={formData.amalgamation_date}
-                  onChange={(e) => setFormData({ ...formData, amalgamation_date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onChange={v => setFormData({ ...formData, amalgamation_date: v })}
+                  label="Amalgamation Date"
+                  layout="stacked"
+                  fullWidth
                 />
               </div>
 
