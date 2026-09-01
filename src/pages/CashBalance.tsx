@@ -632,17 +632,6 @@ export function CashBalance() {
               labelStyle="filter"
             />
 
-            <div className="flex flex-col gap-1">
-              <label htmlFor="cb-to" className="text-xs font-semibold text-gray-500 uppercase">To</label>
-              <input
-                id="cb-to"
-                type="date"
-                value={filters.to}
-                min={filters.from || undefined}
-                onChange={e => setFilters({ ...filters, to: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
 
             {(hasActiveFilter(filters) || selectedEntity || selectedBank) && (
               <button
