@@ -13,6 +13,8 @@ import {
   entityFacilityLimit,
   accountFacilityLimit,
   entityCashPosition,
+  ledgerRowBalances,
+  pendingEntryPosition,
   NO_FILTERS,
   type LedgerFilters,
   type TradeDates,
@@ -201,24 +203,20 @@ export function CashBalance() {
       const entity = entities.find(e => e.id === formData.entityId);
       if (!entity) return;
 
-      // Same rule the form displays, so the figure saved cannot differ from the
-      // figure shown. Both had their own copy of this.
-      const lastBalance = entityRunningBalance(transactions, formData.entityId);
-
       const amount = parseFloat(formData.amount);
-      const newBalance = transactionType === 'Addition'
-        ? lastBalance + amount
-        : lastBalance - amount;
+      // Same rule the form previews, so the figure saved cannot differ from the
+      // figure shown. The submit path and both previews each had their own copy.
+      const position = pendingEntryPosition(
+        transactions, banks, formData.entityId, formData.bankId, transactionType, amount,
+      );
+      const newBalance = position.closing;
 
-      // Check the deduction does not exceed available credit (balance + facility limit)
+      // Check the deduction does not exceed available credit. The limit prefers
+      // the account's own; it used to fall back to entity.od_limit, a column that
+      // does not exist, so with no account selected every deduction was checked
+      // against a limit of zero.
       if (transactionType === 'Deduction') {
-        const selectedBankObj = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-        // Prefer the account's own limit; otherwise the entity's, which is the sum
-        // of its accounts'. This used to fall back to entity.od_limit, a column
-        // that does not exist, so with no account selected every deduction was
-        // checked against a limit of zero.
-        const facilityLimit = accountFacilityLimit(selectedBankObj) ?? entityFacilityLimit(banks, formData.entityId);
-        const maxDeductible = lastBalance + facilityLimit;
+        const maxDeductible = position.opening + position.facilityLimit;
         if (amount > maxDeductible) {
           alert(`Amount exceeds available credit. Maximum deductible: Rs. ${maxDeductible.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
           return;
@@ -294,11 +292,23 @@ export function CashBalance() {
   const filteredTransactions = transactions.filter(t => matchesLedgerFilters(t, activeFilters));
   const filteredPendingNotes = pendingNotes.filter(n => matchesPendingFilters(n, activeFilters));
 
+  /*
+    Balances for the listed rows, at the grain the filters imply: one bank
+    account selected means the account's own, otherwise the entity's. Computed
+    over every row rather than the filtered ones, so a date filter changes what
+    is listed and not what the first listed row opens at.
+  */
+  const ledgerBalances = ledgerRowBalances(transactions, activeFilters);
+  const balanceGrainLabel = ledgerBalances.grain === 'account' ? 'Account' : 'Entity';
+
   /** Exports exactly what the filters admit, pending trades included. */
   function exportLedger() {
     const headers = [
       'Date', 'Trade Date', 'Settlement Date', 'Source', 'Entity ID', 'Entity',
-      'Bank', 'Account Number', 'Type', 'Code', 'Description', 'Amount', 'On Hold', 'Running Balance',
+      'Bank', 'Account Number', 'Type', 'Code', 'Description', 'Amount', 'On Hold',
+      // Named, because a spreadsheet column called just "Running Balance" beside
+      // an account number gets summed across accounts by whoever opens it.
+      `${balanceGrainLabel} Opening Balance`, `${balanceGrainLabel} Closing Balance`,
     ];
 
     const pendingRows = filteredPendingNotes.map(note => {
@@ -315,7 +325,7 @@ export function CashBalance() {
         `${note.note_type} Note — Awaiting Approval`,
         (note.net_amount ?? 0).toFixed(2),
         (note.net_amount ?? 0).toFixed(2),
-        '',
+        '', '',
       ];
     });
 
@@ -323,6 +333,7 @@ export function CashBalance() {
       const entity = entities.find(e => e.id === t.entity_id);
       const bank = getBankById(t.bank_id || null);
       const dates = tradeDatesFor(t, noteDates);
+      const exported = ledgerBalances.byRowId.get(t.id);
       return [
         fmtLedgerDate(t.date || t.timestamp),
         fmtLedgerDate(dates.tradeDate),
@@ -333,7 +344,8 @@ export function CashBalance() {
         t.type, t.code ?? '', t.description ?? '',
         Number(t.amount).toFixed(2),
         Number(t.on_hold_amount || 0).toFixed(2),
-        Number(t.running_balance).toFixed(2),
+        exported?.opening?.toFixed(2) ?? '',
+        exported?.closing?.toFixed(2) ?? '',
       ];
     });
 
@@ -666,15 +678,15 @@ export function CashBalance() {
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Entity</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Bank</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Number</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Facility Limit</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Account Facility Limit</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Code</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Opening Balance</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{balanceGrainLabel} Opening Balance</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">On Hold</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Current]</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Closing Balance [Available]</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{balanceGrainLabel} Closing [Current]</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{balanceGrainLabel} Closing [Available]</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Created By</th>
               </tr>
@@ -739,21 +751,36 @@ export function CashBalance() {
                 const entity = entities.find(e => e.id === transaction.entity_id);
                 const bank = getBankById(transaction.bank_id || null);
 
-                // Opening balance: previous entry for the SAME entity, sorted by date then timestamp
-                const entitySortedTxns = [...transactions]
-                  .filter(t => t.entity_id === transaction.entity_id)
-                  .sort((a, b) => {
-                    const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
-                    return dateDiff !== 0 ? dateDiff : new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-                  });
-                const currentIndex = entitySortedTxns.findIndex(t => t.id === transaction.id);
-                const openingBalance = currentIndex > 0
-                  ? entitySortedTxns[currentIndex - 1].running_balance
-                  : 0;
+                /*
+                  One definition, from the service. The row's own grain decides
+                  the figures: filtered to a bank account these are the account's,
+                  accumulated from its own entries, so an account holding one
+                  credit opens at 0.00 and closes at that credit instead of
+                  carrying 29 entries that name no account.
+                */
+                const rowBalance = ledgerBalances.byRowId.get(transaction.id);
+                const openingBalance = rowBalance?.opening ?? 0;
+                const closingBalance = rowBalance?.closing ?? 0;
 
                 const onHoldAmount = transaction.on_hold_amount || 0;
-                const entityHold = entity ? (entityPendingHold.get(entity.id) ?? 0) : 0;
-                const availableBalance = transaction.running_balance + (entity ? entityFacilityLimit(banks, entity.id) : 0) - onHoldAmount - entityHold;
+                /*
+                  A pending trade is held against the entity, not against any one
+                  of its accounts — the settlement writer records no account. So
+                  it belongs in the entity reading and not in an account's: adding
+                  it here would charge one account for a hold that is not its own.
+                */
+                const entityHold = ledgerBalances.grain === 'account'
+                  ? 0
+                  : entity ? (entityPendingHold.get(entity.id) ?? 0) : 0;
+                /*
+                  Headroom has to be drawn on the same grain as the balance beside
+                  it. An account's balance against the entity's summed limits is
+                  not a figure either of them has.
+                */
+                const rowFacilityLimit = ledgerBalances.grain === 'account'
+                  ? (accountFacilityLimit(bank) ?? 0)
+                  : entity ? entityFacilityLimit(banks, entity.id) : 0;
+                const availableBalance = closingBalance + rowFacilityLimit - onHoldAmount - entityHold;
                 const isOnHold = onHoldAmount > 0;
 
                 return (
@@ -873,7 +900,7 @@ export function CashBalance() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-bold text-gray-900">
-                        Rs. {transaction.running_balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        Rs. {closingBalance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -974,12 +1001,21 @@ export function CashBalance() {
 
                 {formData.entityId && (() => {
                   const selectedEntity = entities.find(e => e.id === formData.entityId);
-                  const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = accountFacilityLimit(selectedBank)
-                    ?? entityFacilityLimit(banks, selectedEntity?.id ?? '');
-                  return selectedEntity ? (
+                  if (!selectedEntity) return null;
+                  /*
+                    The same limit the closing preview and the deduction guard use.
+                    This was a third copy of the rule; whose limit it is depends on
+                    whether an account is selected, so the label says which.
+                  */
+                  const { facilityLimit } = pendingEntryPosition(
+                    transactions, banks, formData.entityId, formData.bankId, transactionType, 0,
+                  );
+                  const limitScope = formData.bankId && accountFacilityLimit(getBankById(formData.bankId)) !== null
+                    ? 'this account'
+                    : `${selectedEntity.name}, all accounts`;
+                  return (
                     <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Facility Limit — {limitScope}</label>
                       <input
                         type="text"
                         value={`Rs. ${facilityLimit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -987,7 +1023,7 @@ export function CashBalance() {
                         disabled
                       />
                     </div>
-                  ) : null;
+                  );
                 })()}
 
                 {formData.entityId && (() => {
@@ -1107,28 +1143,25 @@ export function CashBalance() {
                 </div>
 
                 {formData.entityId && formData.amount && (() => {
-                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  /*
+                    Matched on `entity_id` here — the ENT003 text code — against a
+                    uuid, so it never found an entity and this field never
+                    rendered at all.
+                  */
+                  const entity = entities.find(e => e.id === formData.entityId);
                   if (!entity) return null;
 
-                  const entityTransactions = transactions
-                    .filter(t => t.entity_id === formData.entityId)
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-                  const lastBalance = entityTransactions.length > 0
-                    ? entityTransactions[entityTransactions.length - 1].running_balance
-                    : 0;
-
-                  const amount = parseFloat(formData.amount) || 0;
-                  const closingBalance = transactionType === 'Addition'
-                    ? lastBalance + amount
-                    : lastBalance - amount;
+                  const preview = pendingEntryPosition(
+                    transactions, banks, formData.entityId, formData.bankId,
+                    transactionType, parseFloat(formData.amount) || 0,
+                  );
 
                   return (
                     <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Current]</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Current] — {entity.name}, all accounts</label>
                       <input
                         type="text"
-                        value={`Rs. ${closingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        value={`Rs. ${preview.closing.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         className="w-full px-4 py-2 border border-green-300 bg-green-50 rounded-lg text-green-700 font-bold"
                         disabled
                       />
@@ -1137,34 +1170,28 @@ export function CashBalance() {
                 })()}
 
                 {formData.entityId && formData.amount && (() => {
-                  const entity = entities.find(e => e.entity_id === formData.entityId);
+                  /*
+                    Matched on `entity_id` here — the ENT003 text code — against a
+                    uuid, so it never found an entity and this field never
+                    rendered at all.
+                  */
+                  const entity = entities.find(e => e.id === formData.entityId);
                   if (!entity) return null;
 
-                  const entityTransactions = transactions
-                    .filter(t => t.entity_id === formData.entityId)
-                    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                  const preview = pendingEntryPosition(
+                    transactions, banks, formData.entityId, formData.bankId,
+                    transactionType, parseFloat(formData.amount) || 0,
+                  );
 
-                  const lastBalance = entityTransactions.length > 0
-                    ? entityTransactions[entityTransactions.length - 1].running_balance
-                    : 0;
-
-                  const amount = parseFloat(formData.amount) || 0;
-                  const closingBalance = transactionType === 'Addition'
-                    ? lastBalance + amount
-                    : lastBalance - amount;
-
-                  const selectedBank = formData.bankId ? banks.find(b => b.id === formData.bankId) : null;
-                  const facilityLimit = accountFacilityLimit(selectedBank) ?? entityFacilityLimit(banks, entity.id);
-                  const availableBalance = closingBalance + facilityLimit;
 
                   return (
                     <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Available]</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Closing Balance [Available] — {entity.name}, all accounts</label>
                       <input
                         type="text"
-                        value={`Rs. ${availableBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        value={`Rs. ${preview.available.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         className={`w-full px-4 py-2 border rounded-lg font-bold ${
-                          availableBalance >= 0
+                          preview.available >= 0
                             ? 'border-green-300 bg-green-50 text-green-700'
                             : 'border-red-300 bg-red-50 text-red-700'
                         }`}
