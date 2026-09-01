@@ -952,7 +952,22 @@ export function ShareAnalytics() {
         const notes   = notesByGroup.get(key) ?? [];
         const opening = openingMap.get(key) ?? null;
         const divs    = dividendMap.get(key) ?? [];
-        if (notes.length === 0 && !opening) continue;
+        /*
+          No emptiness test here. There used to be
+          `if (notes.length === 0 && !opening) continue;`, which discarded every
+          group that groupKeys had just added from scripMap — a share held only
+          through scrip entries, never bought and with no opening balance, was
+          added and then dropped before it could be computed.
+
+          Mr. DJ Ambani's NDB.N0000 is exactly that: two RECEIVED scrip entries
+          totalling 55,230 shares, no transaction, no opening balance. It was
+          absent from Share Analytics while the Dashboard counted it, because
+          `shareMetrics.service` asks the question the right way round.
+
+          `computeRows` already answers "is there anything here?" by returning no
+          rows, and `computed.length === 0` below acts on that. One definition of
+          empty, in the service, rather than a second guess in front of it.
+        */
 
         const [entityId, shareId] = key.split('__');
         const share            = shareMap.get(shareId) ?? { ticker: '—', name: '—' };
