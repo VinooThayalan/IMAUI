@@ -1,11 +1,13 @@
 import {
   CheckCircle, XCircle, Clock, CreditCard as Edit2, Pause, Eye,
-  Search, Filter, Mail, FileText, Ban, RotateCcw, X, Plus
+  Search, Filter, Mail, FileText, Ban, RotateCcw, X
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 
 interface Transaction {
   id: string;
@@ -141,7 +143,6 @@ export function TransactionApprovals() {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [ccAddresses, setCcAddresses] = useState<string[]>([]);
-  const [ccInput, setCcInput] = useState('');
   const [emailNote, setEmailNote] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
 
@@ -581,17 +582,15 @@ export function TransactionApprovals() {
   function openEmailModal(transaction: Transaction) {
     setSelectedTransaction(transaction);
     setEmailNote('');
-    setCcInput('');
-    // Pre-fill To with broker's contact email
-    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
+    /*
+      Resolve through entity_brokers, not transactions.broker_id, which is null
+      on essentially every row — this read it alone, so the To box came up empty
+      with nothing to click and no reason given. Same rule Transactions uses.
+    */
+    const { broker } = resolveTransactionRecipient(transaction, entityBrokers, brokers);
     setEmailAddress(broker?.contact_person_email || '');
-    // Auto-CC from entity cc_email
-    const entity = entities.find(e => e.id === transaction.entity_id);
-    const autoCc: string[] = [];
-    if (entity?.cc_email) autoCc.push(entity.cc_email);
-    if (entity?.cc_email_2) autoCc.push(entity.cc_email_2);
-    if (entity?.cc_email_3) autoCc.push(entity.cc_email_3);
-    setCcAddresses(autoCc);
+    // Auto-CC the entity's addresses. One rule, shared with Transactions.
+    setCcAddresses(entityCcAddresses(entities.find(e => e.id === transaction.entity_id)));
     setShowEmailModal(true);
   }
 
@@ -1294,8 +1293,23 @@ export function TransactionApprovals() {
 
       {/* Email Modal */}
       {showEmailModal && selectedTransaction && (() => {
-        const broker = selectedTransaction.broker_id ? brokers.find(b => b.id === selectedTransaction.broker_id) : null;
+        // Same resolver that prefilled the box, so what is offered below it can
+        // never name a different broker than the address above.
+        const { recipientOptions: brokerCandidates, ambiguous: ambiguousBroker } =
+          resolveTransactionRecipient(selectedTransaction, entityBrokers, brokers);
         const entity = entities.find(e => e.id === selectedTransaction.entity_id);
+        /*
+          What the dialog offers as one-click recipients: the entity's brokers,
+          then its own contact address, tagged so the two are never confused.
+        */
+        const recipientOptions: RecipientOption[] = [
+          ...brokerCandidates.map(b => ({
+            id: b.id, email: b.contact_person_email ?? null, label: b.broker_name, kind: 'broker' as const,
+          })),
+          ...(entity?.contact_email_company_individual
+            ? [{ id: `contact-${entity.id}`, email: entity.contact_email_company_individual, label: entity.name, kind: 'contact' as const }]
+            : []),
+        ];
         const data = buildEmailData(selectedTransaction);
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
@@ -1356,70 +1370,28 @@ export function TransactionApprovals() {
 
               {/* To / CC / Note / Actions */}
               <div className="px-5 py-3 space-y-2.5 flex-shrink-0">
-                {/* To */}
-                <div className="flex items-center gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0">To</label>
-                  <div className="flex-1">
-                    <input
-                      type="email"
-                      value={emailAddress}
-                      onChange={e => setEmailAddress(e.target.value)}
-                      placeholder="recipient@example.com"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      disabled={sendingEmail}
-                    />
-                    {broker?.contact_person_email && broker.contact_person_email !== emailAddress && (
-                      <button type="button" onClick={() => setEmailAddress(broker.contact_person_email!)} className="mt-0.5 text-xs text-blue-600 hover:underline">
-                        Use {broker.broker_name}: {broker.contact_person_email}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* CC */}
-                <div className="flex items-start gap-3">
-                  <div className="flex items-center justify-between w-full gap-3">
-                    <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0 pt-1.5">CC</label>
-                    <div className="flex-1 space-y-1.5">
-                      {ccAddresses.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {ccAddresses.map((addr, i) => {
-                            const isEntity = addr === entity?.contact_email_company_individual;
-                            return (
-                              <span key={i} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${isEntity ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-blue-50 text-blue-800 border-blue-200'}`}>
-                                {addr}
-                                <button onClick={() => setCcAddresses(ccAddresses.filter((_, idx) => idx !== i))} disabled={sendingEmail} className="hover:opacity-70"><X className="w-3 h-3" /></button>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <input
-                          type="email"
-                          value={ccInput}
-                          onChange={e => setCcInput(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter' && ccInput.trim()) { e.preventDefault(); setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }}
-                          placeholder="Add CC, press Enter"
-                          className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          disabled={sendingEmail}
-                        />
-                        <button type="button" onClick={() => { if (ccInput.trim()) { setCcAddresses([...ccAddresses, ccInput.trim()]); setCcInput(''); } }} disabled={sendingEmail || !ccInput.trim()} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm">
-                          <Plus className="w-4 h-4" />
-                        </button>
-                        {entity?.contact_email_company_individual && !ccAddresses.includes(entity.contact_email_company_individual) && (
-                          <button type="button" onClick={() => setCcAddresses([...ccAddresses, entity.contact_email_company_individual!])} className="px-2 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 whitespace-nowrap">
-                            + {entity.name}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <EmailRecipientsField
+                  to={emailAddress}
+                  onToChange={setEmailAddress}
+                  cc={ccAddresses}
+                  onCcChange={setCcAddresses}
+                  options={recipientOptions}
+                  toWarning={
+                    ambiguousBroker && !emailAddress
+                      ? 'This transaction has no broker saved, so nobody could be filled in. Choose who to send it to below.'
+                      : brokerCandidates.length === 0 && !emailAddress
+                        ? 'This entity has no brokers set up. Add one on the Brokers page, then reopen this.'
+                        : null
+                  }
+                  toInfo="Filled in from the broker saved on this transaction."
+                  ccInfo="Filled in from the entity's CC emails, set on the Entities page."
+                  ccSource={entity?.name ?? null}
+                  disabled={sendingEmail}
+                />
 
                 {/* Note */}
                 <div className="flex items-start gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-6 flex-shrink-0 pt-1.5">Note</label>
+                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0 pt-1.5">Note</label>
                   <textarea
                     value={emailNote}
                     onChange={e => setEmailNote(e.target.value)}
