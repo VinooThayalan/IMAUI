@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { createEntity } from '../services/entities.service';
 
 interface Entity {
   id: string;
@@ -533,60 +534,20 @@ export function Entities() {
     setIsSubmitting(true);
 
     try {
-      // No client-generated id: crypto.randomUUID() is undefined outside a
-      // secure context, and the app is served over plain http in deployment.
-      // The entities.id default (gen_random_uuid) supplies it instead.
-      const newEntityData = {
-        name: entityFormData.name,
-        entity_type_id: entityFormData.entity_type_id || null,
-        tax_name: entityFormData.tax_name || null,
-        nic_company_id: entityFormData.nic_company_id || null,
-        key_contact_name: entityFormData.key_contact_name || null,
-        company_individual_address: entityFormData.company_individual_address || null,
-        contact_email_company_individual: entityFormData.contact_email_company_individual || null,
-        cc_email: entityFormData.cc_email || null,
-        cc_email_2: entityFormData.cc_email_2 || null,
-        cc_email_3: entityFormData.cc_email_3 || null,
-        contact_phone: entityFormData.contact_phone || null,
-        contact_mobile: entityFormData.contact_mobile || null,
-        contact_mobile_number_2: entityFormData.contact_mobile_number_2 || null,
-        current_balance: 0
-      };
-      const { data: inserted, error } = await supabase
-        .from('entities')
-        .insert(newEntityData)
-        .select('id')
-        .single();
+      const { visibleToCreator } = await createEntity(entityFormData, user
+        ? { id: user.id, email: user.email ?? null }
+        : null);
 
-      if (error) throw error;
+      await refreshPermissions();
 
-      const newId = inserted.id;
-
-      if (user) {
-        await logAudit({
-          performedBy: user.email || 'system',
-          action: 'CREATE',
-          tableName: 'entities',
-          recordId: newId,
-          entityId: newId,
-          newValues: newEntityData
-        });
-        const { error: accessError } = await supabase
-          .from('user_entity_access')
-          .insert({
-            user_id: user.id,
-            entity_id: newId
-          });
-        // Self-granted entity access was revoked for non-admins
-        // (20260803050148_remove_self_granted_entity_access), so this is
-        // expected to fail for them — an admin grants access on Entity Access.
-        if (accessError) {
-          console.warn('Could not self-grant access to the new entity:', accessError);
-        }
-        await refreshPermissions();
-      }
-
-      alert('Entity created successfully!');
+      alert(
+        visibleToCreator
+          ? 'Entity created successfully!'
+          : 'Entity created successfully.\n\n' +
+            'It will not appear in your list yet: ' +
+            'access to an entity is granted by an administrator, so ask one to ' +
+            'grant you access on the Entity Access screen.',
+      );
       setShowModal(false);
       setEntityFormData({
         name: '',
