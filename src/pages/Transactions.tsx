@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
+import { entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -61,6 +63,7 @@ interface Entity {
   id: string;
   name: string;
   current_balance: number;
+  contact_email_company_individual: string | null;
   cc_email: string | null;
   cc_email_2: string | null;
   cc_email_3: string | null;
@@ -172,7 +175,6 @@ export function Transactions() {
   const [uploading, setUploading] = useState(false);
   const [emailAddress, setEmailAddress] = useState('');
   const [ccAddresses, setCcAddresses] = useState<string[]>([]);
-  const [ccInput, setCcInput] = useState('');
   const [emailNote, setEmailNote] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -314,7 +316,7 @@ export function Transactions() {
 
       const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
-        supabase.from('entities').select('id, name, current_balance, cc_email, cc_email_2, cc_email_3').order('name'),
+        supabase.from('entities').select('id, name, current_balance, contact_email_company_individual, cc_email, cc_email_2, cc_email_3').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
@@ -1164,8 +1166,10 @@ export function Transactions() {
     // every row -- see resolveTransactionBroker.
     const { broker } = resolveTransactionBroker(transaction);
     setEmailAddress(broker?.contact_person_email || '');
-    setCcAddresses([]);
-    setCcInput('');
+    // Auto-CC the entity's addresses, the same way every other opener of this
+    // dialog does. This cleared the field instead, so the CC row came up empty
+    // while the broker address resolved beside it.
+    setCcAddresses(entityCcAddresses(entities.find(e => e.id === transaction.entity_id)));
     setEmailNote('');
     setShowEmailModal(true);
   }
@@ -1176,13 +1180,7 @@ export function Transactions() {
     // every row -- see resolveTransactionBroker.
     const { broker } = resolveTransactionBroker(transaction);
     setEmailAddress(broker?.contact_person_email || '');
-    const entity = entities.find(e => e.id === transaction.entity_id);
-    const autoCc: string[] = [];
-    if (entity?.cc_email) autoCc.push(entity.cc_email);
-    if (entity?.cc_email_2) autoCc.push(entity.cc_email_2);
-    if (entity?.cc_email_3) autoCc.push(entity.cc_email_3);
-    setCcAddresses(autoCc);
-    setCcInput('');
+    setCcAddresses(entityCcAddresses(entities.find(e => e.id === transaction.entity_id)));
     setEmailNote('');
     setShowEmailModal(true);
   }
@@ -1273,8 +1271,7 @@ export function Transactions() {
       setShowEmailModal(false);
       setEmailAddress('');
       setCcAddresses([]);
-      setCcInput('');
-    } catch (error) {
+      } catch (error) {
       console.error('Error sending email:', error);
       alert('Failed to send email. Please try again.');
     } finally {
@@ -1303,73 +1300,14 @@ export function Transactions() {
    * Both the displayed name and the email address now come from here, so they
    * cannot disagree again.
    */
+  /**
+   * Who this transaction's confirmation is addressed to.
+   *
+   * The rule lives in `lib/emailRecipients` so Transaction Approvals answers it
+   * the same way; this binds it to the lists this page has loaded.
+   */
   function resolveTransactionBroker(transaction: Transaction) {
-    const entityBroker = entityBrokers.find(eb =>
-      eb.entity_id === transaction.entity_id && (
-        (transaction.broker_id && eb.broker_id === transaction.broker_id) ||
-        (transaction.cds_account_id && (
-          eb.broker_account_number === transaction.cds_account_id ||
-          eb.custodian_account_number === transaction.cds_account_id
-        ))
-      )
-    ) ?? null;
-
-    const fallbackEntityBroker = !transaction.broker_id && !entityBroker?.broker_id
-      ? entityBrokers.find(eb => eb.entity_id === transaction.entity_id && eb.broker_id) ?? null
-      : null;
-
-    // Every broker assigned to this entity, deduplicated, in a stable order. An
-    // entity commonly has several (Metrocorp has 4), and the caller needs all of
-    // them rather than one.
-    const candidates = Array.from(new Set(
-      entityBrokers
-        .filter(eb => eb.entity_id === transaction.entity_id && eb.broker_id)
-        .map(eb => eb.broker_id),
-    ))
-      .map(id => brokers.find(b => b.id === id))
-      .filter((b): b is typeof brokers[number] => Boolean(b))
-      .sort((a, b) => a.broker_name.localeCompare(b.broker_name));
-
-    // An exact match: the transaction's own FK, or the assignment whose account
-    // number matches its CDS account.
-    const exactId = transaction.broker_id || entityBroker?.broker_id || null;
-    const exact = exactId ? brokers.find(b => b.id === exactId) ?? null : null;
-
-    /*
-      `broker` is only set when the answer is unambiguous — an exact match, or a
-      single assigned broker. It is deliberately NOT the old
-      `fallbackEntityBroker` guess.
-
-      With several brokers assigned and no account number to match on, that guess
-      returned whichever happened to be first in the array. For a transaction
-      confirmation that is not a cosmetic problem: it would address a client's
-      trade details to an unrelated brokerage. Ambiguity is surfaced for the user
-      to resolve instead, via `candidates`.
-    */
-    const broker = exact ?? (candidates.length === 1 ? candidates[0] : null);
-
-    /*
-      What the modal offers as one-click recipients.
-
-      Once the broker is known -- the transaction names one, or its CDS account
-      matches an assignment -- that is the answer, and listing the entity's other
-      brokers beside it reads as though the choice were still open. Picking ACS
-      Capital on the transaction and then being shown two brokers in the email
-      modal is the reported symptom.
-
-      The full list is still offered when the transaction is genuinely ambiguous,
-      which is the case `candidates` was introduced for: several brokers assigned,
-      nothing to match on, and a user who has to choose.
-    */
-    const recipientOptions = exact ? [exact] : candidates;
-
-    return {
-      broker,
-      candidates,
-      recipientOptions,
-      ambiguous: !exact && candidates.length > 1,
-      entityBroker: entityBroker ?? fallbackEntityBroker,
-    };
+    return resolveTransactionRecipient(transaction, entityBrokers, brokers);
   }
 
   function getTransactionEmailData(transaction: Transaction) {
@@ -2819,6 +2757,19 @@ export function Transactions() {
         // entity's other brokers as if the choice were still open.
         const { recipientOptions: brokerCandidates, ambiguous: ambiguousBroker } =
           resolveTransactionBroker(selectedTransaction);
+        const emailEntity = entities.find(e => e.id === selectedTransaction.entity_id);
+        /*
+          One-click recipients: the entity's brokers, then its own contact
+          address, tagged so the two are never confused.
+        */
+        const recipientOptions: RecipientOption[] = [
+          ...brokerCandidates.map(b => ({
+            id: b.id, email: b.contact_person_email ?? null, label: b.broker_name, kind: 'broker' as const,
+          })),
+          ...(emailEntity?.contact_email_company_individual
+            ? [{ id: `contact-${emailEntity.id}`, email: emailEntity.contact_email_company_individual, label: emailEntity.name, kind: 'contact' as const }]
+            : []),
+        ];
         const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -2830,7 +2781,7 @@ export function Transactions() {
                   <Mail className="w-4 h-4 text-blue-600" />
                   <h2 className="text-base font-bold text-gray-900">Send Transaction Details</h2>
                 </div>
-                <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setEmailNote(''); setSelectedTransaction(null); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+                <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setEmailNote(''); setSelectedTransaction(null); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -2903,131 +2854,28 @@ export function Transactions() {
                   />
                 </div>
 
-                {/* To */}
-                <div className="flex items-center gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0">To</label>
-                  <div className="flex-1">
-                    <input
-                      type="email"
-                      value={emailAddress}
-                      onChange={(e) => setEmailAddress(e.target.value)}
-                      placeholder="recipient@example.com"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      disabled={sendingEmail}
-                    />
-                    {/* The broker this transaction resolves to, usable as the
-                        recipient or addable to CC without typing the address.
-
-                        Only when the transaction is ambiguous — several brokers
-                        assigned to the entity and none matching its CDS account —
-                        does this list them all for the user to choose between.
-                        Nothing is prefilled in that case on purpose: guessing
-                        would address a client's trade details to an unrelated
-                        brokerage. */}
-                    {brokerCandidates.length > 0 && (
-                      <div className="mt-1 space-y-0.5">
-                        {ambiguousBroker && (
-                          <p className="text-xs text-amber-600">
-                            No broker is recorded on this transaction, so the recipient cannot be
-                            determined — pick one of the {brokerCandidates.length} assigned to this entity.
-                            Editing the transaction and setting Broker Name will resolve it permanently.
-                          </p>
-                        )}
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                          {brokerCandidates.map(b => (
-                            <span key={b.id} className="inline-flex items-center gap-1.5 text-xs">
-                              {b.contact_person_email ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEmailAddress(b.contact_person_email!)}
-                                    disabled={sendingEmail || b.contact_person_email === emailAddress}
-                                    className="text-blue-600 hover:underline disabled:text-gray-400 disabled:no-underline disabled:cursor-default"
-                                  >
-                                    {b.contact_person_email === emailAddress ? '✓ ' : ''}
-                                    {b.broker_name}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const addr = b.contact_person_email!;
-                                      if (addr !== emailAddress && !ccAddresses.includes(addr)) {
-                                        setCcAddresses([...ccAddresses, addr]);
-                                      }
-                                    }}
-                                    disabled={
-                                      sendingEmail
-                                      || b.contact_person_email === emailAddress
-                                      || ccAddresses.includes(b.contact_person_email)
-                                    }
-                                    className="text-gray-400 hover:text-blue-600 disabled:text-gray-300 disabled:cursor-default"
-                                    title={`Add ${b.contact_person_email} to CC`}
-                                  >
-                                    +CC
-                                  </button>
-                                </>
-                              ) : (
-                                <span className="text-amber-600" title="No email on file for this broker">
-                                  {b.broker_name} (no email)
-                                </span>
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {brokerCandidates.length === 0 && (
-                      <p className="mt-0.5 text-xs text-amber-600">
-                        No broker assigned to this entity — assign one on Brokers &gt; Manage Entities.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* CC */}
-                <div className="flex items-start gap-3">
-                  <label className="text-xs font-semibold text-gray-500 w-10 flex-shrink-0 pt-1.5">CC</label>
-                  <div className="flex-1 space-y-1.5">
-                    {ccAddresses.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {ccAddresses.map((addr, idx) => (
-                          <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 text-xs rounded-full border border-blue-200">
-                            {addr}
-                            <button type="button" onClick={() => setCcAddresses(ccAddresses.filter((_, i) => i !== idx))} disabled={sendingEmail} className="text-blue-400 hover:text-blue-700"><X className="w-3 h-3" /></button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <input
-                        type="email"
-                        value={ccInput}
-                        onChange={(e) => setCcInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ',') {
-                            e.preventDefault();
-                            const val = ccInput.trim();
-                            if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); }
-                          }
-                        }}
-                        placeholder="Add CC, press Enter"
-                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        disabled={sendingEmail}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { const val = ccInput.trim(); if (val && !ccAddresses.includes(val)) { setCcAddresses([...ccAddresses, val]); setCcInput(''); } }}
-                        disabled={sendingEmail || !ccInput.trim()}
-                        className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm"
-                      >Add</button>
-                    </div>
-                  </div>
-                </div>
+                <EmailRecipientsField
+                  to={emailAddress}
+                  onToChange={setEmailAddress}
+                  cc={ccAddresses}
+                  onCcChange={setCcAddresses}
+                  options={recipientOptions}
+                  toWarning={
+                    ambiguousBroker && !emailAddress
+                      ? 'This transaction has no broker saved, so nobody could be filled in. Choose who to send it to below.'
+                      : brokerCandidates.length === 0 && !emailAddress
+                        ? 'This entity has no brokers set up. Add one on the Brokers page, then reopen this.'
+                        : null
+                  }
+                  toInfo="Filled in from the broker saved on this transaction."
+                  ccInfo="Filled in from the entity's CC emails, set on the Entities page."
+                  ccSource={emailEntity?.name ?? null}
+                  disabled={sendingEmail}
+                />
 
                 {/* Actions */}
                 <div className="flex justify-end gap-2 pt-1">
-                  <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setCcInput(''); setEmailNote(''); setSelectedTransaction(null); }} disabled={sendingEmail} className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
+                  <button onClick={() => { setShowEmailModal(false); setEmailAddress(''); setCcAddresses([]); setEmailNote(''); setSelectedTransaction(null); }} disabled={sendingEmail} className="px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
                     Cancel
                   </button>
                   <button onClick={sendEmail} disabled={sendingEmail || !emailAddress.trim()} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
