@@ -11,6 +11,7 @@ import {
   accountBalance,
 } from '../services/cashLedger.service';
 import { exportData, type ExportColumn } from '../lib/exportData';
+import { DateRangeField } from '../components/DateField';
 
 interface Entity {
   id: string;
@@ -617,33 +618,12 @@ export function BankTransactionHistory() {
                                   </div>
 
                                   <div className="flex items-center gap-2">
-                                    <label
-                                      htmlFor={`period-from-${bank.id}`}
-                                      className="text-xs font-medium text-gray-500"
-                                    >
-                                      From
-                                    </label>
-                                    <input
-                                      id={`period-from-${bank.id}`}
-                                      type="date"
-                                      value={periodFrom}
-                                      max={periodTo || undefined}
-                                      onChange={e => setPeriodFrom(e.target.value)}
-                                      className="px-2.5 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                    />
-                                    <label
-                                      htmlFor={`period-to-${bank.id}`}
-                                      className="text-xs font-medium text-gray-500 ml-1"
-                                    >
-                                      To
-                                    </label>
-                                    <input
-                                      id={`period-to-${bank.id}`}
-                                      type="date"
-                                      value={periodTo}
-                                      min={periodFrom || undefined}
-                                      onChange={e => setPeriodTo(e.target.value)}
-                                      className="px-2.5 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    <DateRangeField
+                                      from={periodFrom}
+                                      to={periodTo}
+                                      onFromChange={setPeriodFrom}
+                                      onToChange={setPeriodTo}
+                                      labelStyle="filter"
                                     />
                                     {periodActive && (
                                       <button
