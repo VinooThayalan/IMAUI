@@ -113,6 +113,8 @@ export function accountNetMovement(
 
 /** What a facility limit can be read from. Only accounts carry one. */
 export interface AccountFacility {
+  /** Present so a caller can name the selected account by id and no more. */
+  id?: string | null;
   entity_id?: string | null;
   facility_limit?: number | null;
 }
@@ -363,9 +365,21 @@ export function accountRunningBalances<T extends AccountLedgerRow>(
   rows: T[],
   bankId: string,
 ): Array<AccountBalancePoint<T>> {
-  const own = rows.filter(r => r.bank_id === bankId).sort(comparePostingOrder);
+  return postingSeries(rows.filter(r => r.bank_id === bankId));
+}
+
+/**
+ * The one accumulation: rows in posting order, each with the balance as at it.
+ *
+ * Every balance printed down a ledger column comes through here, whatever the
+ * grain, so an account series and an entity series cannot drift apart in their
+ * ordering or their signing. Which rows go in is the caller's decision; how they
+ * add up is not.
+ */
+function postingSeries<T extends AccountLedgerRow>(rows: T[]): Array<AccountBalancePoint<T>> {
+  const ordered = [...rows].sort(comparePostingOrder);
   let balance = 0;
-  return own.map(row => {
+  return ordered.map(row => {
     balance += signedAmount(row);
     return { row, balance };
   });
@@ -382,4 +396,136 @@ export function accountBalance(rows: AccountLedgerRow[], bankId: string): number
   const series = accountRunningBalances(rows, bankId);
   if (series.length === 0) return null;
   return series[series.length - 1].balance;
+}
+
+/**
+ * Whose balance a ledger column is showing.
+ *
+ * Not decoration. The same row belongs to an account *and* to an entity, and its
+ * balance is a different number in each — both correct, at different grains. A
+ * column that does not say which one it is cannot be reconciled, and the reader
+ * concludes it is broken. See rule 3 in `CLAUDE.md`.
+ */
+export type BalanceGrain = 'account' | 'entity';
+
+export interface LedgerRowBalance {
+  /** What this row builds on: the balance before it, at this grain. */
+  opening: number;
+  /** The balance as at this row. */
+  closing: number;
+}
+
+export interface LedgerBalances {
+  grain: BalanceGrain;
+  /** Keyed by row id. Rows the grain excludes are absent. */
+  byRowId: Map<string, LedgerRowBalance>;
+}
+
+/**
+ * Opening and closing balances for the cash ledger, at the grain the filters imply.
+ *
+ * Filtering to one bank account changes the question being asked. The reader is
+ * looking at one account, so the balances beside those rows have to be that
+ * account's own — accumulated from its own entries and nothing else.
+ *
+ * What went wrong before: the screen printed the stored `running_balance`, which
+ * accumulates **per entity**, against rows filtered to one account. Account
+ * 1416173401 holds exactly one entry, a credit of 5,841,004.33, and the ledger
+ * showed it opening at -432,038,715.57 and closing at -426,197,711.24 — the
+ * entity's balance either side of that credit, carrying 29 other entries that
+ * name no account at all. Hence the report: no transactions for the account, yet
+ * a large negative balance. Its own opening is 0.00 and its own closing is
+ * +5,841,004.33.
+ *
+ * A row that names no bank account contributes to no account's balance. That is
+ * not a filter applied for tidiness — such a row records money moving with no
+ * account stated, so attributing it to the account someone happens to be looking
+ * at would be inventing an attribution. Every trade-driven writer posts
+ * `bank_id: null` today, which is a write-path defect tracked separately; it
+ * makes an account's balance understated, and understated is not the same as
+ * wrong to state.
+ *
+ * Accumulation always runs over **every** row at the grain, not the visible
+ * ones, so a date filter narrows what is listed without changing what the first
+ * visible row opens at.
+ *
+ * Entity grain accumulates too, rather than reading the stored column, because
+ * that column is written in `timestamp` order and the page prints in posting-date
+ * order. A back-dated entry therefore carried a balance from the future and the
+ * column did not move by the Amount beside it. ENT003 has three such rows. The
+ * last row still closes at the entity's balance either way, because a total does
+ * not depend on the order it is added in.
+ */
+export function ledgerRowBalances<T extends AccountLedgerRow & { entity_id?: string | null }>(
+  allRows: T[],
+  filters: LedgerFilters,
+): LedgerBalances {
+  const byRowId = new Map<string, LedgerRowBalance>();
+
+  const record = (series: Array<AccountBalancePoint<T>>) => {
+    let opening = 0;
+    for (const point of series) {
+      byRowId.set(point.row.id, { opening, closing: point.balance });
+      opening = point.balance;
+    }
+  };
+
+  if (filters.bankId) {
+    record(accountRunningBalances(allRows, filters.bankId));
+    return { grain: 'account', byRowId };
+  }
+
+  const entityIds = new Set(allRows.map(r => r.entity_id ?? ''));
+  for (const entityId of entityIds) {
+    record(postingSeries(allRows.filter(r => (r.entity_id ?? '') === entityId)));
+  }
+  return { grain: 'entity', byRowId };
+}
+
+export interface PendingEntryPosition {
+  /** The entity balance the entry continues from. Zero when it has no entries. */
+  opening: number;
+  /** Where the entry lands: opening plus its signed amount. */
+  closing: number;
+  /** The limit that applies: the selected account's, else the entity's sum. */
+  facilityLimit: number;
+  /** Headroom once the entry is posted. Negative means it breaches the facility. */
+  available: number;
+}
+
+/**
+ * Where an entry the user is still typing would land.
+ *
+ * One rule for the figure the form previews and the figure the submit path
+ * saves. They each had their own copy — three, in fact: the submit path, the
+ * closing preview and the available preview — and the two previews sorted only
+ * by `timestamp` while the submit path went through `entityRunningBalance`. Two
+ * of them also matched the entity on `entity_id`, the `ENT003` text code, against
+ * a uuid, so they never found an entity and never rendered at all. A preview that
+ * disagrees with what gets written is worse than no preview, so there is now one
+ * of these and everything reads it.
+ *
+ * Entity grain throughout, and deliberately: `running_balance` is what a new
+ * entry continues from and it accumulates per entity, so this is the balance the
+ * row will actually store. The facility limit prefers the selected account's own
+ * — the reading the deduction guard already used — because a limit is the one
+ * thing here that genuinely belongs to an account.
+ *
+ * `opening` is zero for an entity with nothing recorded, which is correct for a
+ * write path: an entry has to continue from something. That is not a display
+ * reading — see `entityBalance` for the one a cell may show.
+ */
+export function pendingEntryPosition(
+  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  accounts: AccountFacility[],
+  entityId: string,
+  bankId: string,
+  type: string,
+  amount: number,
+): PendingEntryPosition {
+  const opening = entityRunningBalance(rows, entityId);
+  const closing = opening + signedAmount({ type, amount });
+  const selected = bankId ? accounts.find(a => a.id === bankId) ?? null : null;
+  const facilityLimit = accountFacilityLimit(selected) ?? entityFacilityLimit(accounts, entityId);
+  return { opening, closing, facilityLimit, available: closing + facilityLimit };
 }
