@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
+import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 import {
   computeRows,
@@ -717,32 +718,17 @@ export function ShareAnalytics() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // ── Cache layer ───────────────────────────────────────────────────────
-      // Compute a source hash from the latest updated_at timestamps of every
-      // source table that feeds the report. If the hash matches the most recent
-      // cached batch, serve rows directly from the cache table — no recompute.
-      const [bsnMax, txnMax, obMax, divMax, priceMax, scripMax, shareMax, entMax] = await Promise.all([
-        supabase.from('buy_sell_notes').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('transactions').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entity_share_opening_balances').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('dividends').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('daily_share_prices').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('scrip_entries').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('shares').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-        supabase.from('entities').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      ]);
+      /*
+        ── Cache layer ──────────────────────────────────────────────────────
+        If the fingerprint matches a cached batch, serve it — no recompute.
 
-      const fingerprint = [
-        bsnMax.data?.[0]?.updated_at   ?? '0',
-        txnMax.data?.[0]?.updated_at   ?? '0',
-        obMax.data?.[0]?.updated_at    ?? '0',
-        divMax.data?.[0]?.updated_at   ?? '0',
-        priceMax.data?.[0]?.updated_at ?? '0',
-        scripMax.data?.[0]?.updated_at ?? '0',
-        shareMax.data?.[0]?.updated_at ?? '0',
-        entMax.data?.[0]?.updated_at   ?? '0',
-      ].join('|');
-      const sourceHash = btoa(fingerprint).replace(/[/+=]/g, '');
+        This screen is the one that *writes* `share_analytics_cache`, while
+        Portfolio and Portfolio Summary read it. It kept its own inline copy of
+        the eight probes, so writer and readers each had their own idea of what
+        the key was; any drift between them means the cache is written under a
+        key nobody looks up. One definition, in the repository.
+      */
+      const sourceHash = await sourceFingerprintRepo.current();
 
       // Check whether we already have a cached batch with this exact hash
       const { data: existingBatch } = await supabase
