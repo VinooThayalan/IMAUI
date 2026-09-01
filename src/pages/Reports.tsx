@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { aerPercent, formatAer, netMarketValue, type CashFlow } from '../lib/aer';
 import { useAuth } from '../contexts/AuthContext';
+import { DateRangeField } from '../components/DateField';
 
 interface ShareHolding {
   share_id: string;
@@ -1223,24 +1224,14 @@ export function Reports() {
             <span>Close</span>
           </button>
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">To:</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <DateRangeField
+              from={fromDate}
+              to={toDate}
+              onFromChange={setFromDate}
+              onToChange={setToDate}
+              fromLabel="From:"
+              toLabel="To:"
+            />
             <button
               onClick={generateShareReport}
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
@@ -1373,24 +1364,14 @@ export function Reports() {
             <span>Close</span>
           </button>
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">To:</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <DateRangeField
+              from={fromDate}
+              to={toDate}
+              onFromChange={setFromDate}
+              onToChange={setToDate}
+              fromLabel="From:"
+              toLabel="To:"
+            />
             <button
               onClick={generateDetailedShareReport}
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
@@ -1539,24 +1520,14 @@ export function Reports() {
             <span>Close</span>
           </button>
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">To:</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <DateRangeField
+              from={fromDate}
+              to={toDate}
+              onFromChange={setFromDate}
+              onToChange={setToDate}
+              fromLabel="From:"
+              toLabel="To:"
+            />
             <button
               onClick={generateCashbookReport}
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
@@ -1908,24 +1879,14 @@ export function Reports() {
             <span>Close</span>
           </button>
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">From:</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">To:</label>
-              <input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <DateRangeField
+              from={fromDate}
+              to={toDate}
+              onFromChange={setFromDate}
+              onToChange={setToDate}
+              fromLabel="From:"
+              toLabel="To:"
+            />
             <button
               onClick={generatePortfolioReport}
               className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"

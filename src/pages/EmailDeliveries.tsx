@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Filter, X, Mail, MailOpen, MailX, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { DateField } from '../components/DateField';
 
 const PAGE_SIZE = 25;
 
@@ -225,14 +226,23 @@ export function EmailDeliveries() {
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">From Date</label>
-              <input type="date" value={filterDateFrom} onChange={e => { setFilterDateFrom(e.target.value); setPage(0); }} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">To Date</label>
-              <input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setPage(0); }} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg" />
-            </div>
+            {/* min/max were absent here, so the range could be inverted. */}
+            <DateField
+              label="From Date"
+              value={filterDateFrom}
+              max={filterDateTo}
+              onChange={v => { setFilterDateFrom(v); setPage(0); }}
+              layout="stacked"
+              labelStyle="filter"
+            />
+            <DateField
+              label="To Date"
+              value={filterDateTo}
+              min={filterDateFrom}
+              onChange={v => { setFilterDateTo(v); setPage(0); }}
+              layout="stacked"
+              labelStyle="filter"
+            />
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Search Subject</label>
               <div className="relative">

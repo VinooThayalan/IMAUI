@@ -2,6 +2,7 @@ import { Plus, BookOpen, TrendingUp, TrendingDown, Building2, ChevronRight, Land
 import { useState, useEffect } from 'react';
 import { supabase, type CashTransaction } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
+import { DateRangeField } from '../components/DateField';
 import {
   indexNoteDates,
   tradeDatesFor,
@@ -622,17 +623,14 @@ export function CashBalance() {
               </select>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label htmlFor="cb-from" className="text-xs font-semibold text-gray-500 uppercase">From</label>
-              <input
-                id="cb-from"
-                type="date"
-                value={filters.from}
-                max={filters.to || undefined}
-                onChange={e => setFilters({ ...filters, from: e.target.value })}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <DateRangeField
+              from={filters.from}
+              to={filters.to}
+              onFromChange={v => setFilters({ ...filters, from: v })}
+              onToChange={v => setFilters({ ...filters, to: v })}
+              layout="stacked"
+              labelStyle="filter"
+            />
 
             <div className="flex flex-col gap-1">
               <label htmlFor="cb-to" className="text-xs font-semibold text-gray-500 uppercase">To</label>

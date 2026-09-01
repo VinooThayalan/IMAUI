@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { DateField } from '../components/DateField';
 
 interface Dividend {
   id: string;
@@ -579,186 +580,56 @@ export function Dividends() {
                 {/* Entity + Ticker */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Entity <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      required
-                      value={formData.entity_id}
-                      onChange={e => setFormData({ ...formData, entity_id: e.target.value, selected_bank_id: '', cds_account: '' })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    >
-                      <option value="">Select entity...</option>
-                      {entities.map(en => (
-                        <option key={en.id} value={en.id}>{en.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                      Ticker (Share) <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      required
-                      value={formData.share_id}
-                      onChange={e => setFormData({ ...formData, share_id: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                    >
-                      <option value="">Select ticker...</option>
-                      {shares.map(s => (
-                        <option key={s.id} value={s.id}>{s.ticker} — {s.share_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100 pt-1">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dividend Calculation</p>
-                </div>
-
-                {/* Quantity + Gross */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">
-                      Quantity <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      step="1"
-                      value={formData.quantity}
-                      onChange={e => setFormData({ ...formData, quantity: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">
-                      Gross Dividend per Share <span className="text-red-500">*</span>
-                    </label>
-                    {/* step="any": the value is stored at full precision, so
-                        step="0.0001" only made the browser reject the very
-                        precision the save path accepts. */}
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      step="any"
-                      value={formData.gross_dividend_per_share}
-                      onChange={e => setFormData({ ...formData, gross_dividend_per_share: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      placeholder="0.0000"
-                    />
-                  </div>
-                </div>
-
-                {/* WHT + Net */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-red-600 mb-1.5">
-                      Withholding Tax Rate (%) <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        required
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={formData.withholding_tax_rate}
-                        onChange={e => setFormData({ ...formData, withholding_tax_rate: e.target.value })}
-                        className="w-full px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                        placeholder="10"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-500 mb-1.5">Net Dividend per Share (auto)</label>
-                    <input
-                      type="text"
-                      readOnly
-                      value={grossPerShare > 0 ? perShareStr(netPerShare) : ''}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 cursor-not-allowed"
-                      placeholder="Auto-calculated"
-                    />
-                  </div>
-                </div>
-
-                {/* Live totals preview */}
-                {formData.quantity && formData.gross_dividend_per_share && (
-                  <div className="grid grid-cols-2 gap-4 bg-gray-50 rounded-lg p-3 border border-gray-200">
-                    <div>
-                      <p className="text-xs text-gray-500 font-medium">Total Gross</p>
-                      <p className="text-sm font-semibold text-gray-900 mt-0.5">
-                        {fmtRs(quantityNum * grossPerShare)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 font-medium">Total Net</p>
-                      <p className="text-sm font-semibold text-emerald-700 mt-0.5">
-                        {fmtRs(quantityNum * netPerShare)}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="border-t border-gray-100 pt-1">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Dates</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Announcement Date</label>
-                    <input
-                      type="date"
+                    <DateField
                       value={formData.announcement_date}
-                      onChange={e => setFormData({ ...formData, announcement_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      onChange={v => setFormData({ ...formData, announcement_date: v })}
+                      label="Entity setFormData({ ...formData, entity_id: e.target.value, selected_bank_id: '', cds_account: '' })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; > Select entity... {entities.map(en => ( {en.name} ))} Ticker (Share) setFormData({ ...formData, share_id: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; > Select ticker... {shares.map(s => ( {s.ticker} — {s.share_name} ))} Dividend Calculation {/ Quantity + Gross /} Quantity setFormData({ ...formData, quantity: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; placeholder=&quot;0&quot; /> Gross Dividend per Share {/ step=&quot;any&quot;: the value is stored at full precision, so step=&quot;0.0001&quot; only made the browser reject the very precision the save path accepts. /} setFormData({ ...formData, gross_dividend_per_share: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; placeholder=&quot;0.0000&quot; /> {/ WHT + Net /} Withholding Tax Rate (%) setFormData({ ...formData, withholding_tax_rate: e.target.value })} className=&quot;w-full px-3 py-2 pr-8 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; placeholder=&quot;10&quot; /> % Net Dividend per Share (auto) 0 ? perShareStr(netPerShare) : ''} className=&quot;w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 cursor-not-allowed&quot; placeholder=&quot;Auto-calculated&quot; /> {/ Live totals preview /} {formData.quantity && formData.gross_dividend_per_share && ( Total Gross {fmtRs(quantityNum grossPerShare)} Total Net {fmtRs(quantityNum netPerShare)} )} Dates Announcement Date"
+                      layout="stacked"
+                      required
+                      fullWidth
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-purple-700 mb-1.5">XD Date</label>
-                    <input
-                      type="date"
+                    <DateField
                       value={formData.dividend_date}
-                      onChange={e => setFormData({ ...formData, dividend_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm"
+                      onChange={v => setFormData({ ...formData, dividend_date: v })}
+                      label="XD Date"
+                      layout="stacked"
+                      fullWidth
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-emerald-600 mb-1.5">Effective Date</label>
-                    <input
-                      type="date"
+                    <DateField
                       value={formData.effective_date}
-                      onChange={e => setFormData({ ...formData, effective_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-emerald-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
+                      onChange={v => setFormData({ ...formData, effective_date: v })}
+                      label="Effective Date"
+                      layout="stacked"
+                      fullWidth
                     />
                     <p className="text-xs text-gray-400 mt-1">Used in reports and cashflow</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Payment Date</label>
-                    <input
-                      type="date"
+                    <DateField
                       value={formData.payment_date}
-                      onChange={e => setFormData({ ...formData, payment_date: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      onChange={v => setFormData({ ...formData, payment_date: v })}
+                      label="Payment Date"
+                      layout="stacked"
+                      fullWidth
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-blue-700 mb-1.5">Payment Date as per CSE</label>
-                    <input
-                      type="date"
+                    <DateField
                       value={formData.payment_date_cse}
-                      onChange={e => setFormData({ ...formData, payment_date_cse: e.target.value })}
-                      className="w-full px-3 py-2 border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-sm"
+                      onChange={v => setFormData({ ...formData, payment_date_cse: v })}
+                      label="Payment Date as per CSE"
+                      layout="stacked"
+                      fullWidth
                     />
                     <p className="text-xs text-gray-400 mt-1">Official payment date per CSE</p>
                   </div>

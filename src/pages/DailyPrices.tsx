@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { DateField } from '../components/DateField';
 
 interface Share {
   id: string;
@@ -203,11 +204,9 @@ export function DailyPrices() {
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2 px-3 py-2 bg-white border border-gray-300 rounded-lg">
             <Calendar className="w-5 h-5 text-gray-500" />
-            <input
-              type="date"
+            <DateField
               value={effectiveDate}
-              onChange={(e) => setEffectiveDate(e.target.value)}
-              className="outline-none text-sm font-medium text-gray-900"
+              onChange={v => setEffectiveDate(v)}
             />
           </div>
           <button
