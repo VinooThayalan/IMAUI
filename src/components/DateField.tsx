@@ -50,7 +50,11 @@ export interface DateFieldProps {
    * does not exist to keep anything.
    */
   disabled?: boolean;
-  /** `inline` puts the label beside the field, `stacked` above it. */
+  /**
+   * Where the label sits relative to **its own** input: `inline` beside it,
+   * `stacked` above it. It says nothing about how two fields in a range sit
+   * relative to each other — see `DateRangeField`, which is always a row.
+   */
   layout?: 'inline' | 'stacked';
   /**
    * `field` is a form label; `filter` is the small uppercase style the filter
@@ -175,7 +179,13 @@ export function DateRangeField({
   const toValue = toDateInputValue(to);
 
   return (
-    <div className={layout === 'stacked' ? 'space-y-3' : 'flex flex-wrap items-center gap-3'}>
+    /*
+      Always a row. `layout` says where each label sits relative to its own
+      input — it must not also decide how the two fields sit relative to each
+      other. Conflating the two put From above To, when a range reads as one
+      control and belongs on one line.
+    */
+    <div className={`flex flex-wrap gap-3 ${layout === 'stacked' ? 'items-end' : 'items-center'}`}>
       <DateField
         label={fromLabel}
         value={fromValue}

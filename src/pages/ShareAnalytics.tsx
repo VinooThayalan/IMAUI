@@ -1251,17 +1251,6 @@ export function ShareAnalytics() {
             layout="stacked"
             labelStyle="filter"
           />
-          <div className="flex flex-col gap-1">
-            <label htmlFor="sa-to" className="text-xs font-semibold text-gray-500 uppercase">To (as of)</label>
-            <input
-              id="sa-to"
-              type="date"
-              value={toDate}
-              min={fromDate || undefined}
-              onChange={e => setToDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
           {(fromDate || toDate) && (
             <button
               onClick={() => { setFromDate(''); setToDate(''); }}
