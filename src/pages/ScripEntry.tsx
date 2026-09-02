@@ -349,21 +349,51 @@ export function ScripEntry() {
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
               <div className="grid grid-cols-2 gap-5">
                 <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Entity <span className="text-red-500">*</span></label>
+                  <select
+                    required
+                    value={formData.entity_id}
+                    onChange={e => setFormData({ ...formData, entity_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">Select Entity</option>
+                    {entities.map(entity => (
+                      <option key={entity.id} value={entity.id}>{entity.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1.5">Ticker <span className="text-red-500">*</span></label>
+                  <select
+                    required
+                    value={formData.share_id}
+                    onChange={e => setFormData({ ...formData, share_id: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">Select Ticker</option>
+                    {shares.map(share => (
+                      <option key={share.id} value={share.id}>{share.ticker} — {share.share_name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
                   <DateField
+                    label="Entry Date"
+                    required
                     value={formData.entry_date}
                     onChange={v => setFormData({ ...formData, entry_date: v })}
-                    label="Entity setFormData({ ...formData, entity_id: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; > Select Entity {entities.map(entity => ( {entity.name} ))} Ticker setFormData({ ...formData, share_id: e.target.value })} className=&quot;w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm&quot; > Select Ticker {shares.map(share => ( {share.ticker} — {share.share_name} ))} Entry Date"
                     layout="stacked"
-                    required
                     fullWidth
                   />
                 </div>
 
                 <div>
                   <DateField
+                    label="Announcement Date"
                     value={formData.announcement_date}
                     onChange={v => setFormData({ ...formData, announcement_date: v })}
-                    label="Announcement Date"
                     layout="stacked"
                     fullWidth
                   />
@@ -371,21 +401,21 @@ export function ScripEntry() {
 
                 <div>
                   <DateField
+                    label="Effective Date"
                     value={formData.effective_date}
                     onChange={v => setFormData({ ...formData, effective_date: v })}
-                    label="Effective Date"
                     layout="stacked"
                     fullWidth
                   />
                 </div>
 
                 <div>
-                  <DateField
+                  <label className="block text-sm font-semibold text-purple-700 mb-1.5">XD Date</label>
+                  <input
+                    type="date"
                     value={formData.xd_date}
-                    onChange={v => setFormData({ ...formData, xd_date: v })}
-                    label="XD Date"
-                    layout="stacked"
-                    fullWidth
+                    onChange={e => setFormData({ ...formData, xd_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-purple-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 text-sm"
                   />
                   <p className="text-xs text-gray-400 mt-1">Ex-dividend date</p>
                 </div>
