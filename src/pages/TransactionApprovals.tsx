@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
-import { entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 
@@ -560,7 +560,7 @@ export function TransactionApprovals() {
         },
         body: JSON.stringify({
           to: emailAddress.trim(),
-          cc: ccAddresses.filter(e => e.trim()),
+          cc: ccForSend(emailAddress, ccAddresses),
           triggered_by: user?.email || null,
           source: 'transaction-approvals',
           transaction: buildEmailData(selectedTransaction, emailNote.trim() || undefined),
@@ -1374,6 +1374,9 @@ export function TransactionApprovals() {
                   toInfo="Filled in from the broker saved on this transaction."
                   ccInfo="Filled in from the entity's CC emails, set on the Entities page."
                   ccSource={entity?.name ?? null}
+                  ccSuggestions={entityCcAddresses(entity).map(email => ({
+                    email, label: entity?.name ?? null,
+                  }))}
                   disabled={sendingEmail}
                 />
 

@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase, getAccessToken } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { ccForSend, entityCcAddresses } from '../lib/emailRecipients';
+import { CcField } from '../components/EmailRecipientsField';
 
 interface BuyAndSellNote {
   id: string;
@@ -59,6 +61,8 @@ interface Entity {
   entity_id: string;
   name: string;
   cc_email: string | null;
+  cc_email_2: string | null;
+  cc_email_3: string | null;
 }
 
 interface Share {
@@ -84,6 +88,21 @@ interface EntityBroker {
   custodian_account_number?: string;
 }
 
+/**
+ * The review notification emails — approval and rejection both — switched off at
+ * the UI and at the send path together.
+ *
+ * Hidden rather than deleted: it is coming back, so flipping this to `true`
+ * restores both dialogs and nothing else is needed. UI and send hang off the one
+ * constant on purpose. Hiding just the checkboxes would leave `sendEmail` at its
+ * default of `true`, so the notification would still reach the broker with
+ * nothing on screen saying so and no way to stop it.
+ *
+ * The Email Broker dialog is a different thing and is not affected — it is an
+ * explicit "email this broker" action, not a side effect of a review.
+ */
+const REVIEW_EMAIL_ENABLED: boolean = false;
+
 type ModalAction = 'approve' | 'reject' | null;
 type EmailModalNote = BuyAndSellNote | null;
 
@@ -107,6 +126,7 @@ export function BuyAndSellApprovals() {
   const [sendEmail, setSendEmail] = useState(true);
   const [ccEntityEmail, setCcEntityEmail] = useState(true);
   const [emailModalNote, setEmailModalNote] = useState<EmailModalNote>(null);
+  const [emailCc, setEmailCc] = useState<string[]>([]);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
   useEffect(() => { loadData(); }, []);
@@ -117,7 +137,7 @@ export function BuyAndSellApprovals() {
       const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date, fees, brokerage_fee, cse_fee, cds_fee, clearing_fee, sec_cess, share_transaction_levy'),
-        supabase.from('entities').select('id, entity_id, name, cc_email').order('name'),
+        supabase.from('entities').select('id, entity_id, name, cc_email, cc_email_2, cc_email_3').order('name'),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         // No is_active filter. This list is only ever used to look up the broker on
         // an existing note (see resolveNoteRefs), never to populate a picker, so
@@ -184,6 +204,22 @@ export function BuyAndSellApprovals() {
     setCcEntityEmail(true);
   }
 
+  /*
+    CC is prefilled from the entity's CC slots, through the same three columns
+    and the same dedupe rule the other two senders use. This dialog sent with no
+    CC at all before, so the client never saw the query raised on their own trade.
+  */
+  function openEmailModal(note: BuyAndSellNote) {
+    const { entity } = getDetails(note);
+    setEmailModalNote(note);
+    setEmailCc(entityCcAddresses(entity));
+  }
+
+  function closeEmailModal() {
+    setEmailModalNote(null);
+    setEmailCc([]);
+  }
+
   function closeModal() {
     setModalAction(null);
     setSelectedNote(null);
@@ -200,12 +236,15 @@ export function BuyAndSellApprovals() {
     broker: Broker | null,
     txn: Transaction | null,
     rows: Array<{ label: string; txnVal: string; noteVal: string; mismatch?: boolean }>,
+    cc: string[],
   ) {
     const brokerEmail = broker?.contact_person_email;
     // Throws rather than returning quietly: the only caller reports success to the
     // user straight afterwards, so a silent return was indistinguishable from a
     // send.
     if (!brokerEmail) throw new Error('No email address on file for this broker.');
+
+    const ccList = ccForSend(brokerEmail, cc);
 
     const fmtDate = (d?: string | null) =>
       d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -221,6 +260,9 @@ export function BuyAndSellApprovals() {
       body: JSON.stringify({
         type: 'broker_comparison',
         to: brokerEmail,
+        // Absent rather than empty: an empty recipient reaching the send path is
+        // a bounce, not a CC.
+        cc: ccList.length > 0 ? ccList : undefined,
         triggered_by: user?.email || null,
         source: 'buy-sell-approvals',
         comparison: {
@@ -251,6 +293,8 @@ export function BuyAndSellApprovals() {
         `Email service returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`,
       );
     }
+
+    return ccList;
   }
 
   async function sendBrokerNotification(
@@ -446,7 +490,7 @@ export function BuyAndSellApprovals() {
         });
       }
 
-      const emailResult = sendEmail
+      const emailResult = REVIEW_EMAIL_ENABLED && sendEmail
         ? await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail)
         : null;
 
@@ -514,7 +558,7 @@ export function BuyAndSellApprovals() {
       });
 
       const linkedTxn = transactions.find(t => t.id === selectedNote.transaction_id) ?? null;
-      const emailResult = sendEmail
+      const emailResult = REVIEW_EMAIL_ENABLED && sendEmail
         ? await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn)
         : null;
 
@@ -690,7 +734,7 @@ const displayNotes = notes.filter(n => {
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
                           <button
-                            onClick={() => setEmailModalNote(note)}
+                            onClick={() => openEmailModal(note)}
                             className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
                             title="Email broker"
                           >
@@ -712,7 +756,7 @@ const displayNotes = notes.filter(n => {
                       ) : (
                         <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => setEmailModalNote(note)}
+                            onClick={() => openEmailModal(note)}
                             className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
                             title="Email broker"
                           >
@@ -849,39 +893,41 @@ const displayNotes = notes.filter(n => {
                   placeholder="Add any notes about this approval..."
                 />
               </div>
-              {/* Email options */}
-              <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+              {/* Email options — hidden by REVIEW_EMAIL_ENABLED. */}
+              {REVIEW_EMAIL_ENABLED && (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sendEmail}
+                      onChange={e => setSendEmail(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
+                    <span className="text-sm text-gray-700">
+                      Send approval notification to broker
+                      {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
+                    </span>
+                  </label>
+                  {sendEmail && (() => {
+                    const { entity } = getDetails(selectedNote!);
+                    return entity?.cc_email ? (
+                      <label className="flex items-center gap-2 cursor-pointer ml-6">
+                        <input
+                          type="checkbox"
+                          checked={ccEntityEmail}
+                          onChange={e => setCcEntityEmail(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                      </label>
+                    ) : null;
+                  })()}
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={sendEmail}
-                    onChange={e => setSendEmail(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                  />
-                  <span className="text-sm text-gray-700">
-                    Send approval notification to broker
-                    {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
-                  </span>
-                </label>
-                {sendEmail && (() => {
-                  const { entity } = getDetails(selectedNote!);
-                  return entity?.cc_email ? (
-                    <label className="flex items-center gap-2 cursor-pointer ml-6">
-                      <input
-                        type="checkbox"
-                        checked={ccEntityEmail}
-                        onChange={e => setCcEntityEmail(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
-                      />
-                      <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
-                    </label>
-                  ) : null;
-                })()}
-              </div>
+              )}
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
                 <button
@@ -953,9 +999,11 @@ const displayNotes = notes.filter(n => {
           }
           setIsSendingEmail(true);
           try {
-            await sendBrokerComparisonEmail(note, entity, share, broker, txn, rows);
-            alert(`Email sent to ${broker.contact_person_email}`);
-            setEmailModalNote(null);
+            const cc = await sendBrokerComparisonEmail(note, entity, share, broker, txn, rows, emailCc);
+            // Names the CC list rather than only the broker: the copy going to
+            // the client is the part a sender wants confirmed.
+            alert(`Email sent to ${broker.contact_person_email}${cc.length ? ` (CC: ${cc.join(', ')})` : ''}`);
+            closeEmailModal();
           } catch (err) {
             console.error('Broker email failed:', err);
             // Show the real reason. This used to say "please try again" for every
@@ -980,7 +1028,7 @@ const displayNotes = notes.filter(n => {
                     <p className="text-xs text-gray-500">{note.contract_no || note.note_number} · {share?.ticker || '—'} · {entity?.name || '—'}</p>
                   </div>
                 </div>
-                <button onClick={() => setEmailModalNote(null)} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+                <button onClick={closeEmailModal} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
                   <XCircle className="w-5 h-5" />
                 </button>
               </div>
@@ -1008,6 +1056,24 @@ const displayNotes = notes.filter(n => {
                     </div>
                   </div>
                 </div>
+
+                {/*
+                  Only the CC half of the recipients component. The broker above
+                  is fixed by the note — an editable To box would say the address
+                  is a choice when it is not — but who else sees the query is a
+                  choice, and it is the same choice the other two dialogs offer,
+                  so it is the same component rather than a third copy.
+                */}
+                <CcField
+                  cc={emailCc}
+                  onCcChange={setEmailCc}
+                  suggestions={entityCcAddresses(entity).map(email => ({
+                    email, label: entity?.name ?? null,
+                  }))}
+                  info="Filled in from the entity's CC emails, set on the Entities page."
+                  source={entity?.name ?? null}
+                  disabled={isSendingEmail}
+                />
 
                 {/* Comparison table */}
                 <div>
@@ -1053,7 +1119,7 @@ const displayNotes = notes.filter(n => {
 
               {/* Footer */}
               <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">
-                <button onClick={() => setEmailModalNote(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
+                <button onClick={closeEmailModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
                   Cancel
                 </button>
                 <button
@@ -1097,39 +1163,41 @@ const displayNotes = notes.filter(n => {
                   placeholder="Describe why this note is being rejected..."
                 />
               </div>
-              {/* Email options */}
-              <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+              {/* Email options — hidden by REVIEW_EMAIL_ENABLED. */}
+              {REVIEW_EMAIL_ENABLED && (
+                <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-gray-700">Email Notification</span>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sendEmail}
+                      onChange={e => setSendEmail(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                    />
+                    <span className="text-sm text-gray-700">
+                      Send rejection notification to broker
+                      {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
+                    </span>
+                  </label>
+                  {sendEmail && (() => {
+                    const { entity } = getDetails(selectedNote!);
+                    return entity?.cc_email ? (
+                      <label className="flex items-center gap-2 cursor-pointer ml-6">
+                        <input
+                          type="checkbox"
+                          checked={ccEntityEmail}
+                          onChange={e => setCcEntityEmail(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        />
+                        <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                      </label>
+                    ) : null;
+                  })()}
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={sendEmail}
-                    onChange={e => setSendEmail(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                  />
-                  <span className="text-sm text-gray-700">
-                    Send rejection notification to broker
-                    {(() => { const { broker } = getDetails(selectedNote!); return broker?.contact_person_email ? <span className="text-gray-400 ml-1">({broker.contact_person_email})</span> : null; })()}
-                  </span>
-                </label>
-                {sendEmail && (() => {
-                  const { entity } = getDetails(selectedNote!);
-                  return entity?.cc_email ? (
-                    <label className="flex items-center gap-2 cursor-pointer ml-6">
-                      <input
-                        type="checkbox"
-                        checked={ccEntityEmail}
-                        onChange={e => setCcEntityEmail(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                      />
-                      <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
-                    </label>
-                  ) : null;
-                })()}
-              </div>
+              )}
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={closeModal} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
                 <button
