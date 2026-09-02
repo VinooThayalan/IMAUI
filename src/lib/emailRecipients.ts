@@ -195,3 +195,33 @@ export function ccForSend(to: string | null | undefined, cc: string[]): string[]
 
   return out;
 }
+
+/**
+ * Which known addresses the CC field should offer back.
+ *
+ * Removing a CC chip used to be one-way: the prefilled addresses come from the
+ * entity's CC slots, and once a chip was gone nothing in the dialog named it, so
+ * undoing a mis-click meant retyping an address from memory. The field offers
+ * back every address it knows about and is not currently holding — which is
+ * nothing at all until something has been removed, so the row stays invisible
+ * while it has no work to do.
+ *
+ * `suggestions` must be the *source* list, not a snapshot of what CC held a
+ * moment ago. A snapshot would re-offer a typo the instant it was deleted, and
+ * would forget the real addresses as soon as the dialog reopened.
+ */
+export function ccToOffer<T extends { email: string }>(cc: string[], suggestions: T[]): T[] {
+  const held = new Set(cc.map(a => a.trim().toLowerCase()).filter(Boolean));
+  const out: T[] = [];
+  const seen = new Set<string>();
+
+  for (const suggestion of suggestions) {
+    if (typeof suggestion?.email !== 'string') continue;
+    const key = suggestion.email.trim().toLowerCase();
+    if (!key || seen.has(key) || held.has(key)) continue;
+    seen.add(key);
+    out.push(suggestion);
+  }
+
+  return out;
+}

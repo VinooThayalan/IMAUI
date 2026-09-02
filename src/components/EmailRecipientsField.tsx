@@ -29,6 +29,7 @@
 
 import { useEffect, useState } from 'react';
 import { Info, Plus, X } from 'lucide-react';
+import { ccToOffer } from '../lib/emailRecipients';
 
 export interface RecipientOption {
   id: string;
@@ -230,15 +231,7 @@ export function CcField({
   const tagFor = (address: string) =>
     contacts.some(c => c.toLowerCase() === address.trim().toLowerCase()) ? 'contact' : null;
 
-  /* Deduplicated: two CC slots can hold the same person. */
-  const offered: CcSuggestion[] = [];
-  const seen = new Set<string>();
-  for (const sg of suggestions) {
-    const key = sg.email.trim().toLowerCase();
-    if (!key || seen.has(key) || held(sg.email)) continue;
-    seen.add(key);
-    offered.push(sg);
-  }
+  const offered = ccToOffer(cc, suggestions);
 
   return (
     <div className="flex items-start gap-3">

@@ -46,6 +46,32 @@ export async function listAll(): Promise<EntityMasterRow[]> {
 }
 
 /**
+ * The entity columns the transactional email dialogs read.
+ *
+ * A second projection rather than widening `listAll`: that one feeds the cash
+ * screens, and pulling three email columns through it would make every one of
+ * them read wider for nothing.
+ */
+export interface EntityEmailContactRow {
+  id: string;
+  name: string;
+  cc_email: string | null;
+  cc_email_2: string | null;
+  cc_email_3: string | null;
+}
+
+export async function listEmailContacts(): Promise<EntityEmailContactRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('entities')
+      .select('id, name, cc_email, cc_email_2, cc_email_3')
+      .order('name', { ascending: true })
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as EntityEmailContactRow[];
+}
+
+/**
  * Insert one entity.
  *
  * No `.select()`, deliberately, and the caller supplies `id`. Asking for the
