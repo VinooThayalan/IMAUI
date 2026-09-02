@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
-import { entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 
@@ -1257,7 +1257,7 @@ export function Transactions() {
         },
         body: JSON.stringify({
           to: emailAddress.trim(),
-          cc: ccAddresses.filter(e => e.trim()),
+          cc: ccForSend(emailAddress, ccAddresses),
           triggered_by: user?.email || null,
           source: 'transactions',
           transaction: transactionData
@@ -2860,6 +2860,9 @@ export function Transactions() {
                   toInfo="Filled in from the broker saved on this transaction."
                   ccInfo="Filled in from the entity's CC emails, set on the Entities page."
                   ccSource={emailEntity?.name ?? null}
+                  ccSuggestions={entityCcAddresses(emailEntity).map(email => ({
+                    email, label: emailEntity?.name ?? null,
+                  }))}
                   disabled={sendingEmail}
                 />
 

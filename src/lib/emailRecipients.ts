@@ -165,3 +165,33 @@ export function resolveTransactionRecipient<B extends BrokerContact, L extends E
     entityBroker: entityBroker ?? fallbackEntityBroker,
   };
 }
+
+/**
+ * The CC list as the send path should carry it.
+ *
+ * Three senders each trimmed their own way, and none of them checked the CC list
+ * against the To address. Nothing stops a user pasting the broker's address into
+ * CC — or the entity holding it in a CC slot — and the recipient then gets the
+ * same email twice, which reads as a system fault rather than a data one.
+ *
+ * Blank entries are dropped for the reason `entityCcAddresses` drops blank
+ * slots: an empty recipient reaching Brevo is a bounce, not a CC. Duplicates
+ * within the list go too, keeping the first spelling seen.
+ */
+export function ccForSend(to: string | null | undefined, cc: string[]): string[] {
+  const primary = (to ?? '').trim().toLowerCase();
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of cc) {
+    if (typeof entry !== 'string') continue;
+    const address = entry.trim();
+    if (!address) continue;
+    const key = address.toLowerCase();
+    if (key === primary || seen.has(key)) continue;
+    seen.add(key);
+    out.push(address);
+  }
+
+  return out;
+}
