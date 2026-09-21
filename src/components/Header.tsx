@@ -21,8 +21,10 @@ export function Header() {
   }
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="flex items-center justify-between">
+    // h-topbar, matching the sidebar's brand block — see tailwind.config.js.
+    // Centred rather than padded so the height does not follow the avatar.
+    <header className="h-topbar flex-shrink-0 bg-white border-b border-gray-200 px-6 flex items-center">
+      <div className="flex items-center justify-between w-full">
         <div className="flex-1" />
 
         <div className="flex items-center space-x-4">

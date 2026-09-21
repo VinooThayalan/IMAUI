@@ -149,7 +149,9 @@ export function Sidebar() {
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-      <div className="p-6 border-b border-gray-200">
+      {/* h-topbar, matching Header — see tailwind.config.js. Centred rather than
+          padded so the height does not follow the logo. */}
+      <div className="h-topbar flex-shrink-0 px-6 flex items-center border-b border-gray-200">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-[#3e5a7d] rounded-lg flex items-center justify-center shadow-md">
             <span className="text-lg font-bold text-white">M</span>
