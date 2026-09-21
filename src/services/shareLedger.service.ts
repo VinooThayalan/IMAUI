@@ -1,3 +1,5 @@
+import { aerPercent, netMarketValue } from '../lib/aer';
+
 /**
  * The share ledger: the one computation of what a holding is.
  *
@@ -87,6 +89,51 @@ export interface ShareGroup {
   brokerage_fee_rate: number;
   rows: ComputedRow[];
 }
+/**
+ * One holding's dated cash flows, in the form the AER helpers want.
+ *
+ * Lived in ShareAnalytics.tsx, where the CSV export could not reach it without
+ * the page handing it down. Here because it belongs to `ShareGroup`, and because
+ * a second copy written for the export is exactly how four AER implementations
+ * came to disagree on the same holding.
+ */
+export function groupCashFlows(rows: ComputedRow[]): Array<{ date: Date; amount: number }> {
+  return rows
+    .filter(r => r.cash_flow !== 0 && r.trade_date)
+    .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
+}
+
+/**
+ * AER for a single share holding: every dated cash flow, plus the net market
+ * value of whatever is still held as a terminal inflow.
+ *
+ * Null when there is no solution — no flows, or a series XIRR cannot discount.
+ * Null, not zero: "we cannot say" is not "it returned nothing".
+ */
+export function groupAerPercent(group: ShareGroup, asOf: Date): number | null {
+  const last = group.rows[group.rows.length - 1];
+  if (!last) return null;
+  const cfs = groupCashFlows(group.rows);
+  const terminal = netMarketValue(last.share_cum_bal, group.market_price, group.brokerage_fee_rate);
+  if (terminal > 0) cfs.push({ date: asOf, amount: terminal });
+  return aerPercent(cfs);
+}
+
+/**
+ * What one share is worth after the fees selling it would cost.
+ *
+ * `netMarketValue` for a single share rather than a second formula — the pill on
+ * screen reads "MV After Fees Per Share" and must not be able to disagree with
+ * the total beside it.
+ *
+ * Null when no market price is recorded. A share with no price is not worth
+ * zero; nobody has said what it is worth.
+ */
+export function marketPricePerShareAfterFees(group: ShareGroup): number | null {
+  if (!(group.market_price > 0)) return null;
+  return netMarketValue(1, group.market_price, group.brokerage_fee_rate);
+}
+
 /**
  * Notes in the order they are replayed: by trade date, then by the order
  * someone stated for that date.
