@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart2, X, Search, FileText, ChevronDown, ChevronUp, Download, ListOrdered } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
+import * as notesRepo from '../repositories/notes.repo';
+import { TradeOrderPanel } from '../components/TradeOrderPanel';
+import { useTradeOrder } from '../hooks/useTradeOrder';
 import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 import {
   computeRows,
@@ -14,6 +17,7 @@ import {
   type ScripRecord,
   type ShareGroup,
 } from '../services/shareLedger.service';
+import { undecidedDays } from '../services/tradeOrder.service';
 
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
@@ -138,11 +142,21 @@ interface NoteDetail {
 
 // ── Breakdown modal ──────────────────────────────────────────────────────────
 
-function BreakdownModal({ group, onClose, fromDate }: { group: ShareGroup; onClose: () => void; fromDate: string }) {
+function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
+  group: ShareGroup;
+  onClose: () => void;
+  fromDate: string;
+  /** Run after a same-day order is written — the report has to be reread. */
+  onOrderSaved: () => void;
+}) {
   const last = group.rows[group.rows.length - 1];
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   const [noteDetails, setNoteDetails]       = useState<Map<string, NoteDetail>>(new Map());
   const [noteLoading, setNoteLoading]       = useState<string | null>(null);
+  const [orderOpen, setOrderOpen]           = useState(false);
+
+  const order    = useTradeOrder(group.rows, group.entity_id, onOrderSaved);
+  const undecided = undecidedDays(order.groups);
 
   // XIRR for this group — terminal value uses market value after brokerage fees
   const groupAer = groupAerPercent(group, new Date());
@@ -396,6 +410,25 @@ function BreakdownModal({ group, onClose, fromDate }: { group: ShareGroup; onClo
             </div>
           </div>
 
+          {order.groups.length > 0 && (
+            <button
+              onClick={() => setOrderOpen(true)}
+              title="Set the order of trades that share a date"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 mr-2 transition-colors ${
+                undecided > 0
+                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              Same-day order
+              {undecided > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] leading-none">
+                  {undecided}
+                </span>
+              )}
+            </button>
+          )}
           <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
             <Download className="w-5 h-5" />
           </button>
@@ -691,6 +724,21 @@ function BreakdownModal({ group, onClose, fromDate }: { group: ShareGroup; onClo
           </table>
         </div>
       </div>
+
+      {orderOpen && (
+        <TradeOrderPanel
+          shareTicker={group.share_ticker}
+          entityName={group.entity_name}
+          days={order.groups}
+          draft={order.draft}
+          saving={order.saving}
+          isDirty={order.isDirty}
+          onMove={order.move}
+          onSave={d => void order.save(d)}
+          onClear={d => void order.clear(d)}
+          onClose={() => setOrderOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -715,6 +763,22 @@ export function ShareAnalytics() {
   }, []);
 
   useEffect(() => { fetchData(); }, [selectedEntityId]);
+
+  /*
+    Keep the open breakdown pointing at the refreshed group.
+
+    `activeGroup` holds the object, not a key, so after a refetch it is a
+    detached copy of the pre-refetch numbers. Saving a same-day order refetches
+    precisely so the figures move, and without this the modal the user is looking
+    at would go on showing the ones they just changed. Cleared, rather than left
+    stale, if the holding is no longer in the result.
+  */
+  useEffect(() => {
+    setActiveGroup(prev => {
+      if (!prev) return prev;
+      return groups.find(g => g.entity_id === prev.entity_id && g.share_id === prev.share_id) ?? null;
+    });
+  }, [groups]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -790,6 +854,10 @@ export function ShareAnalytics() {
               market_value: Number(c.market_value) || 0,
               cash_flow: Number(c.cash_flow) || 0,
               total_surplus: Number(c.total_surplus) || 0,
+              // Null, not 0: a row with no stated position has not been given
+              // position zero, and the panel reads this to decide whether a day
+              // has been decided at all.
+              intraday_seq: c.intraday_seq != null ? Number(c.intraday_seq) : null,
             };
             let grp = groupMap.get(key);
             if (!grp) {
@@ -901,14 +969,11 @@ export function ShareAnalytics() {
         }
       }
 
-      const notesData = await selectAll(() =>
-        supabase
-          .from('buy_sell_notes')
-          .select('id, note_type, trade_date, no_of_shares, price_avg, gross_amount, net_amount, transaction_id')
-          .eq('status', 'PROCESSED')
-          .order('trade_date', { ascending: true })
-          .order('id', { ascending: true }),
-      );
+      // Through the repository rather than inline, because the note read now
+      // carries `intraday_seq` and its ORDER BY has to agree with `sortNotes`.
+      // Two copies of that ordering is exactly the divergence the repo exists to
+      // prevent — the Dashboard reads the same function.
+      const notesData = await notesRepo.listProcessed();
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
@@ -929,6 +994,7 @@ export function ShareAnalytics() {
             entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
             share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
             cds_account: txn.cds_account_id ?? null,
+            intraday_seq: n.intraday_seq,
           };
         });
 
@@ -1012,6 +1078,7 @@ export function ShareAnalytics() {
               trade_date: r.trade_date, no_of_shares: r.no_of_shares,
               price_avg: r.price_avg, gross_amount: r.gross_amount ?? 0, net_amount: r.net_amount ?? 0,
               cds_account: r.cds_account,
+              intraday_seq: r.intraday_seq ?? null,
               purchase_cost: r.purchase_cost, sale_value: r.sale_value, dividend: r.dividend,
               share_cum_bal: r.share_cum_bal, av_cost: r.av_cost, av_price: r.av_price,
               cum_purchase_cost: r.cum_purchase_cost, cum_sale_value: r.cum_sale_value,
@@ -1458,7 +1525,14 @@ export function ShareAnalytics() {
       )}
 
       {/* Breakdown modal */}
-      {activeGroup && <BreakdownModal group={activeGroup} onClose={() => setActiveGroup(null)} fromDate={fromDate} />}
+      {activeGroup && (
+        <BreakdownModal
+          group={activeGroup}
+          onClose={() => setActiveGroup(null)}
+          fromDate={fromDate}
+          onOrderSaved={() => void fetchData()}
+        />
+      )}
       </>}
     </div>
   );

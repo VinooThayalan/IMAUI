@@ -147,6 +147,9 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
       share_ticker: '',
       share_name: '',
       cds_account: txn.cds_account_id ?? null,
+      // Same-day order, so the Dashboard replays a contested day the way Share
+      // Analytics does. Dropping it here is how the two would drift again.
+      intraday_seq: n.intraday_seq,
     });
     notesByGroup.set(key, list);
   }
