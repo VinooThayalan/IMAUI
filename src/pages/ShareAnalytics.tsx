@@ -4,10 +4,9 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
-import * as notesRepo from '../repositories/notes.repo';
 import { TradeOrderPanel } from '../components/TradeOrderPanel';
 import { useTradeOrder } from '../hooks/useTradeOrder';
-import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
+import { formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 import {
   computeRows,
   type ComputedRow,
@@ -16,15 +15,27 @@ import {
   type RawNote,
   type ScripRecord,
   type ShareGroup,
+  groupAerPercent,
+  groupCashFlows,
+  closingRows,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
+import { loadProcessedNotes } from '../services/shareAnalytics.service';
+import {
+  detailExport,
+  detailFilename,
+  summaryExport,
+} from '../services/shareAnalyticsExport.service';
 
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
     const s = String(v ?? '');
     return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  // Leading BOM, matching lib/exportData.ts. Without it Excel reads the file as
+  // the system codepage, and any non-ASCII character in an entity or share name
+  // opens as mojibake.
+  const csv = '﻿' + [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -41,25 +52,6 @@ interface Entity { id: string; name: string; }
 // xirr / aerPercent / netMarketValue / portfolioAer now live in ../lib/aer so
 // that this screen, Portfolio Summary, the Dashboard and Reports all answer the
 // same question the same way.
-
-/** Cash flows for one group, in the form the AER helpers want. */
-function groupCashFlows(rows: ComputedRow[]): Array<{ date: Date; amount: number }> {
-  return rows
-    .filter(r => r.cash_flow !== 0 && r.trade_date)
-    .map(r => ({ date: new Date(r.trade_date! + 'T00:00:00'), amount: r.cash_flow }));
-}
-
-/**
- * AER for a single share holding: every dated cash flow, plus the net market
- * value of whatever is still held as a terminal inflow.
- */
-function groupAerPercent(group: ShareGroup, asOf: Date): number | null {
-  const last = group.rows[group.rows.length - 1];
-  const cfs = groupCashFlows(group.rows);
-  const terminal = netMarketValue(last.share_cum_bal, group.market_price, group.brokerage_fee_rate);
-  if (terminal > 0) cfs.push({ date: asOf, amount: terminal });
-  return aerPercent(cfs);
-}
 
 /**
  * Everything an error actually carries, in one line.
@@ -162,58 +154,9 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
   const groupAer = groupAerPercent(group, new Date());
 
   function exportDetail() {
-    const headers = ['Date','Status','Unit Price','No. of shares','Share cum bal','purchase cost','sale value','Sale Cost','Av Cost','av price','Dividend','Market value','Cash flow +/-','Total Surplus','Cum surplus','CDS Account','Note'];
-    const rows = group.rows.map(r => [
-      r.trade_date ?? '',
-      r.note_type,
-      r.price_avg ?? '',
-      r.no_of_shares > 0 ? r.no_of_shares : '',
-      r.share_cum_bal,
-      r.purchase_cost > 0 ? r.purchase_cost.toFixed(2) : '',
-      r.sale_value > 0 ? r.sale_value.toFixed(2) : '',
-      r.row_type === 'sell' && r.no_of_shares > 0 ? (r.no_of_shares * r.av_price).toFixed(2) : '',
-      r.av_cost.toFixed(2),
-      r.av_price.toFixed(2),
-      r.dividend > 0 ? r.dividend.toFixed(2) : '',
-      group.market_price > 0 ? r.market_value.toFixed(2) : '',
-      r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
-      r.cash_flow !== 0 ? r.cash_flow.toFixed(2) : '',
-      r.cum_surplus.toFixed(2),
-      r.cds_account ?? '',
-    ]);
-    // Append Cost row + Cost per share row if market price is available
-    if (group.market_price > 0) {
-      const feeRate      = group.brokerage_fee_rate / 100;
-      const cumShares    = last.share_cum_bal;
-      const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
-      const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-      const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
-      const today           = new Date().toISOString().split('T')[0];
-      // Cost row
-      rows.push([
-        today, 'Market Value',
-        group.market_price.toFixed(4), cumShares, cumShares,
-        '', mvAfterFees.toFixed(2),
-        last.av_cost.toFixed(2), last.av_price.toFixed(2),
-        '', mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
-        mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
-      ]);
-      // Cost per share row
-      const totalSharesBought = group.rows
-        .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
-        .reduce((s, r) => s + r.no_of_shares, 0);
-      const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
-      rows.push([
-        '', 'Cost per share',
-        costPerShare.toFixed(4), totalSharesBought, '',
-        totalPC.toFixed(2), totalSV.toFixed(2),
-        last.av_cost.toFixed(2), last.av_price.toFixed(2),
-        '', mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
-        mvAfterFees.toFixed(2), mvAfterFees.toFixed(2),
-      ]);
-    }
-    const date = new Date().toISOString().split('T')[0];
-    exportCsv(`${group.share_ticker}_${group.entity_name}_analytics_${date}.csv`, headers, rows);
+    const asOf = new Date();
+    const { headers, rows } = detailExport(group, asOf);
+    exportCsv(detailFilename(group, asOf), headers, rows);
   }
 
   async function resolveFileUrl(fileUrl: string) {
@@ -652,71 +595,54 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
               })}
             </tbody>
             <tfoot className="sticky bottom-0 border-t-2 border-gray-300 text-xs font-bold">
-              {/* Cost row + Cost per share row */}
-              {group.market_price > 0 && (() => {
-                const cumShares    = last.share_cum_bal;
-                const feeRate      = group.brokerage_fee_rate / 100;
-                const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
-                const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-                const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
-                const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
-                const realizedSurplus = totalSV + totalDiv - totalPC;
-                const totalSurplus    = mvAfterFees + realizedSurplus;
-                const today        = new Date().toLocaleDateString('en-GB');
+              {/*
+                Market Value row + Cost per share row.
 
-                // Cost per share: unit price = totalPC / totalSharesBought (SUMIF positive)
-                const totalSharesBought = group.rows
-                  .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
-                  .reduce((s, r) => s + r.no_of_shares, 0);
-                const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
+                Both come from `closingRows` in the service, which the CSV export
+                projects as well. They used to be computed here and rebuilt a
+                second time in `exportDetail`, and the two copies disagreed on
+                four separate figures. One definition, two readers.
+
+                A null cell is an em dash — the row has nothing to say there, and
+                a zero would claim it did.
+              */}
+              {closingRows(group, new Date()).map(c => {
+                const isMv  = c.label === 'Market Value';
+                const tone  = isMv
+                  ? { row: 'bg-slate-800 text-white', dim: 'text-slate-300', val: 'text-white', pos: 'text-emerald-300', cost: 'text-blue-300', badge: 'bg-slate-600 text-white', pill: 'text-slate-400' }
+                  : { row: 'bg-amber-50 border-t-2 border-amber-300', dim: 'text-amber-700', val: 'text-amber-900', pos: 'text-amber-900', cost: 'text-blue-700', badge: 'bg-amber-400 text-white', pill: 'text-amber-700' };
+                const cell  = (v: number | null, cls: string, d = 2) =>
+                  <td className={`px-3 py-2.5 text-right font-mono ${v == null ? tone.dim : cls}`}>{v == null ? '—' : fmt(v, d)}</td>;
+                const count = (v: number | null) =>
+                  <td className={`px-3 py-2.5 text-right font-mono ${v == null ? tone.dim : tone.val}`}>{v == null ? '—' : fmtN(v)}</td>;
+                const signed = (v: number) =>
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <span className={isMv ? (v >= 0 ? 'text-emerald-300' : 'text-red-400') : clsSurplus(v)}>{fmt(v)}</span>
+                  </td>;
 
                 return (
-                  <>
-                    {/* Cost row */}
-                    <tr className="bg-slate-800 text-white">
-                      <td className="px-3 py-2.5 text-slate-300">{today}</td>
-                      <td className="px-3 py-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Market Value</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(group.market_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmtN(cumShares)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">{fmtN(cumShares)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-300">{fmt(last.av_cost)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(last.av_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-slate-400">—</td>
-                    </tr>
-                    {/* Cost per share row */}
-                    <tr className="bg-amber-50 border-t-2 border-amber-300">
-                      <td className="px-3 py-2.5 text-amber-700">—</td>
-                      <td className="px-3 py-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-white">Cost per share</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900 font-bold">{fmt(costPerShare)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmtN(totalSharesBought)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(totalPC)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(totalSV + mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(last.av_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}>{fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(totalSurplus)}>{fmt(totalSurplus)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(mvAfterFees)}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-amber-700">—</td>
-                    </tr>
-                  </>
+                  <tr key={c.label} className={tone.row}>
+                    <td className={`px-3 py-2.5 ${tone.dim}`}>{c.date ? fmtDate(c.date) : '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${tone.badge}`}>{c.label}</span>
+                    </td>
+                    {cell(c.unitPrice, `${tone.val} font-bold`)}
+                    {count(c.shares)}
+                    {count(c.shareCumBal)}
+                    {cell(c.purchaseCost, tone.val)}
+                    {cell(c.saleValue, tone.pos)}
+                    {cell(c.saleCost, tone.val)}
+                    {cell(c.avCost, tone.cost)}
+                    {cell(c.avPrice, tone.val)}
+                    {cell(c.dividend, tone.val)}
+                    {cell(c.marketValue, isMv ? tone.pos : tone.cost)}
+                    {signed(c.cashFlow)}
+                    {signed(c.totalSurplus)}
+                    {signed(c.cumSurplus)}
+                    <td className={`px-3 py-2.5 ${tone.pill}`}>—</td>
+                  </tr>
                 );
-              })()}
+              })}
               {/* The "Totals / Final" row was removed here — reported as not
                   required. The Market Value and Cost per share rows above stay:
                   they are the closing position, not a column summary. */}
@@ -969,11 +895,11 @@ export function ShareAnalytics() {
         }
       }
 
-      // Through the repository rather than inline, because the note read now
-      // carries `intraday_seq` and its ORDER BY has to agree with `sortNotes`.
-      // Two copies of that ordering is exactly the divergence the repo exists to
-      // prevent — the Dashboard reads the same function.
-      const notesData = await notesRepo.listProcessed();
+      // Through the service rather than inline, because the note read now carries
+      // `intraday_seq` and its ORDER BY has to agree with `sortNotes`. Two copies
+      // of that ordering is exactly the divergence the repository exists to
+      // prevent — the Dashboard reads the same one.
+      const notesData = await loadProcessedNotes();
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
@@ -1243,30 +1169,9 @@ export function ShareAnalytics() {
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
   function exportSummary() {
-    const headers = ['Share','Share Name','Entity','CDS Accounts','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus'];
-    const rows = filtered.map(g => {
-      const last = g.rows[g.rows.length - 1];
-      const act  = activityRows(g);
-      const mvAfterFees = g.market_price > 0 ? netMarketValue(last.share_cum_bal, g.market_price, g.brokerage_fee_rate).toFixed(2) : '';
-      return [
-        g.share_ticker,
-        g.share_name,
-        g.entity_name,
-        g.cds_accounts.join('; '),
-        last.share_cum_bal,
-        act.reduce((s, r) => s + r.purchase_cost, 0).toFixed(2),
-        act.reduce((s, r) => s + r.sale_value, 0).toFixed(2),
-        last.av_cost.toFixed(2),
-        last.av_price.toFixed(2),
-        act.reduce((s, r) => s + r.dividend, 0).toFixed(2),
-        last.cum_surplus.toFixed(2),
-        g.market_price > 0 ? last.market_value.toFixed(2) : '',
-        mvAfterFees,
-        act.reduce((s, r) => s + r.cash_flow, 0).toFixed(2),
-        g.market_price > 0 ? last.total_surplus.toFixed(2) : '',
-      ];
-    });
-    const date = new Date().toISOString().split('T')[0];
+    const asOf = new Date();
+    const { headers, rows } = summaryExport(filtered, activityRows, asOf);
+    const date  = asOf.toISOString().split('T')[0];
     const label = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? 'all') : 'all';
     exportCsv(`share_analytics_${label}_${date}.csv`, headers, rows);
   }

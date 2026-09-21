@@ -69,10 +69,50 @@ function AccessDenied() {
   );
 }
 
+/**
+ * Something stopped the account loading, and it is not a permission problem.
+ *
+ * Deliberately not the Access Denied screen and deliberately not the login page:
+ * the person is signed in, and telling them otherwise is what made this
+ * confusing enough to be reported.
+ */
+function AuthProblem({ title, detail, onRetry, onSignOut }: {
+  title: string;
+  detail: string;
+  onRetry?: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-center h-screen bg-gray-50 p-8">
+      <div className="text-center max-w-md">
+        <Shield className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+        <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+        <p className="text-gray-500 mt-2 text-sm">{detail}</p>
+        <div className="flex items-center justify-center gap-3 mt-5">
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors"
+            >
+              Try again
+            </button>
+          )}
+          <button
+            onClick={onSignOut}
+            className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-100 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const adminPages = new Set(['user-management', 'menu-access', 'entity-access', 'test-email', 'email-deliveries']);
 
 function App() {
-  const { user, appUser, loading, hasMenuAccess, isAdmin } = useAuth();
+  const { user, appUser, loading, hasMenuAccess, isAdmin, status, statusReason, retryIdentity, signOut } = useAuth();
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   useEffect(() => {
@@ -180,6 +220,32 @@ function App() {
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
+  }
+
+  /*
+    A failed load is not a denial.
+
+    These two screens exist because the alternative was showing the app shell
+    with an invented account in it: "Access Denied" on every page, the person's
+    own email in the menu, and their name rendered as "User". Whatever went wrong
+    is said out loud, and the way out is a retry rather than a reload the user
+    has to think of themselves.
+  */
+  if (user && status === 'unavailable') {
+    return <AuthProblem
+      title="Could not load your account"
+      detail={statusReason ?? 'The server did not answer.'}
+      onRetry={() => void retryIdentity()}
+      onSignOut={() => void signOut()}
+    />;
+  }
+
+  if (user && status === 'not-provisioned') {
+    return <AuthProblem
+      title="Your account is not set up"
+      detail={`${user.email ?? 'This login'} signed in, but has no profile in this application. An administrator needs to add it.`}
+      onSignOut={() => void signOut()}
+    />;
   }
 
   if (!user || !appUser) {

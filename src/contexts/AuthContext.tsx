@@ -1,15 +1,26 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { shouldEndSession } from '../lib/session';
+import {
+  canReachEntity,
+  canReachMenu,
+  loadIdentity,
+  type AppUser,
+  type Identity,
+} from '../services/permissions.service';
 
-export interface AppUser {
-  id: string;
-  email: string;
-  full_name: string | null;
-  role: 'admin' | 'user';
-  is_active: boolean;
-}
+export type { AppUser };
+
+/**
+ * How far the account load got.
+ *
+ * `unavailable` is the one that matters. It used to be folded into "signed in as
+ * a user with no permissions", which is a claim about the person rather than
+ * about the request, and it is why an admin could be shown Access Denied on
+ * every page with their own email in the menu.
+ */
+export type AuthStatus = 'loading' | 'ready' | 'not-provisioned' | 'unavailable';
 
 interface AuthContextType {
   user: User | null;
@@ -18,6 +29,12 @@ interface AuthContextType {
   menuAccess: string[];
   entityAccess: string[];
   isAdmin: boolean;
+  /** How the account load ended. See `AuthStatus`. */
+  status: AuthStatus;
+  /** Why the account could not be read, when `status` is `unavailable`. */
+  statusReason: string | null;
+  /** Try the account load again, for the retry a failed load offers. */
+  retryIdentity: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   /**
@@ -34,157 +51,150 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [appUser, setAppUser] = useState<AppUser | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [menuAccess, setMenuAccess] = useState<string[]>([]);
-  const [entityAccess, setEntityAccess] = useState<string[]>([]);
+  /*
+    One object, replaced as a whole.
 
+    The account and its grants used to be three independent pieces of state set
+    at three different moments, so there were renders where the app knew who
+    somebody was and had not yet heard what they could reach. Every guard read
+    that as a denial. Holding them together means there is no such moment: either
+    the identity is there in full, or it is null.
+  */
+  const [identity, setIdentity] = useState<Identity | null>(null);
+  const [status, setStatus] = useState<AuthStatus>('loading');
+  const [statusReason, setStatusReason] = useState<string | null>(null);
+
+  // Read inside the auth listener, which is registered once and would otherwise
+  // close over the identity as it was at mount.
+  const identityRef = useRef<Identity | null>(null);
+  useEffect(() => { identityRef.current = identity; }, [identity]);
+
+  const appUser = identity?.appUser ?? null;
+  const menuAccess = identity?.menuAccess ?? [];
+  const entityAccess = identity?.entityAccess ?? [];
   const isAdmin = appUser?.role === 'admin';
+  const loading = status === 'loading';
+
+  /*
+    Apply a verdict from the service.
+
+    Every branch either installs a complete identity or clears it. Nothing here
+    fabricates an account: the case this whole rewrite exists for --
+    `unavailable` -- leaves `identity` null and says so, rather than answering
+    "a user with no permissions" to a question that was never answered.
+  */
+  const applyResult = useCallback(async (result: Awaited<ReturnType<typeof loadIdentity>>) => {
+    if (result.status === 'ok') {
+      setIdentity(result.identity);
+      setStatusReason(null);
+      setStatus('ready');
+      return;
+    }
+    if (result.status === 'deactivated') {
+      // The database enforces this too; this only stops the app showing a shell
+      // it cannot use.
+      await supabase.auth.signOut().catch(() => {});
+      setUser(null);
+      setIdentity(null);
+      setStatusReason(null);
+      setStatus('ready');
+      return;
+    }
+    setIdentity(null);
+    setStatusReason(result.status === 'unavailable' ? result.reason : null);
+    setStatus(result.status === 'unavailable' ? 'unavailable' : 'not-provisioned');
+  }, []);
+
+  const loadFor = useCallback(async (userId: string) => {
+    setStatus('loading');
+    await applyResult(await loadIdentity(userId));
+  }, [applyResult]);
+
+  const retryIdentity = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
+    const id = data.session?.user?.id;
+    if (!id) {
+      setUser(null);
+      setIdentity(null);
+      setStatus('ready');
+      return;
+    }
+    await loadFor(id);
+  }, [loadFor]);
 
   useEffect(() => {
-    const hardTimeout = setTimeout(() => setLoading(false), 4000);
-    checkUser().finally(() => clearTimeout(hardTimeout));
+    let cancelled = false;
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      (async () => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled) return;
         setUser(session?.user ?? null);
         if (session?.user) {
-          await loadAppUser(session.user.id, session.user.email);
+          await loadFor(session.user.id);
         } else {
-          setAppUser(null);
-          setMenuAccess([]);
-          setEntityAccess([]);
+          setIdentity(null);
+          setStatus('ready');
         }
+      } catch (error) {
+        if (cancelled) return;
+        // Could not even ask whether there is a session. Not a denial either.
+        setStatusReason(error instanceof Error ? error.message : String(error));
+        setStatus('unavailable');
+      }
+    })();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      (async () => {
+        if (cancelled) return;
+        setUser(session?.user ?? null);
+        if (!session?.user) {
+          setIdentity(null);
+          setStatusReason(null);
+          setStatus('ready');
+          return;
+        }
+        /*
+          A token refresh fires this with the same account already loaded, and a
+          tab waking from sleep fires it with the network not yet back. Reloading
+          from scratch there is what used to demote a working session: the read
+          failed and the catch invented a plain user.
+
+          The identity we already hold is still correct -- the refresh proves the
+          session, it does not change who anyone is -- so a background reload is
+          only worth doing when we have nothing, or when the account changed.
+        */
+        const sameAccount = identityRef.current?.appUser.id === session.user.id;
+        if (sameAccount && event === 'TOKEN_REFRESHED') return;
+        await loadFor(session.user.id);
       })();
     });
 
     return () => {
+      cancelled = true;
       authListener?.subscription.unsubscribe();
     };
-  }, []);
-
-  function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
-    return Promise.race([
-      Promise.resolve(p),
-      new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-      ),
-    ]);
-  }
-
-  async function checkUser() {
-    try {
-      const { data: { session } } = await withTimeout(
-        supabase.auth.getSession(),
-        3000,
-        'getSession'
-      );
-      setUser(session?.user ?? null);
-      setLoading(false);
-
-      if (session?.user) {
-        void loadAppUser(session.user.id, session.user.email);
-      }
-    } catch (error) {
-      console.error('Error checking user session:', error);
-      setLoading(false);
-    }
-  }
-
-  async function loadAppUser(userId: string, userEmail?: string) {
-    try {
-      const { data: appUserData, error: appUserError } = await withTimeout(
-        supabase.from('app_users').select('*').eq('id', userId).maybeSingle(),
-        5000,
-        'loadAppUser'
-      );
-      if (appUserError) throw appUserError;
-
-      if (appUserData) {
-        // A deactivated account keeps no session. The database enforces this
-        // too; this only makes the app stop showing a shell it cannot use.
-        if (appUserData.is_active === false) {
-          await supabase.auth.signOut();
-          setUser(null);
-          setAppUser(null);
-          setMenuAccess([]);
-          setEntityAccess([]);
-          return;
-        }
-        setAppUser(appUserData as AppUser);
-        void loadPermissions(userId, appUserData.role);
-        return;
-      }
-      setAppUser({
-        id: userId,
-        email: userEmail ?? '',
-        full_name: null,
-        role: 'user',
-        is_active: false,
-      });
-    } catch (error) {
-      console.error('Error loading app user:', error);
-      setAppUser({
-        id: userId,
-        email: userEmail ?? '',
-        full_name: null,
-        role: 'user',
-        is_active: false,
-      });
-    }
-  }
-
-  async function loadPermissions(userId: string, role: string) {
-    try {
-      if (role === 'admin') {
-        setMenuAccess([]);
-        setEntityAccess([]);
-        return;
-      }
-
-      const [menuResult, entityResult] = await Promise.all([
-        supabase
-          .from('user_menu_access')
-          .select('menu_item_id, menu_items(menu_name)')
-          .eq('user_id', userId),
-        supabase
-          .from('user_entity_access')
-          .select('entity_id')
-          .eq('user_id', userId),
-      ]);
-
-      if (menuResult.data) {
-        const menuNames = menuResult.data
-          .map((r: any) => r.menu_items?.menu_name)
-          .filter(Boolean);
-        setMenuAccess(menuNames);
-      }
-
-      if (entityResult.data) {
-        const entityIds = entityResult.data.map((r: any) => r.entity_id);
-        setEntityAccess(entityIds);
-      }
-    } catch (error) {
-      console.error('Error loading permissions:', error);
-    }
-  }
+  }, [loadFor]);
 
   const refreshPermissions = useCallback(async () => {
-    if (appUser) {
-      await loadPermissions(appUser.id, appUser.role);
-    }
-  }, [appUser]);
+    if (identity) await loadFor(identity.appUser.id);
+  }, [identity, loadFor]);
 
-  const hasMenuAccess = useCallback((menuName: string) => {
-    if (isAdmin) return true;
-    if (menuName === 'settings') return true;
-    return menuAccess.includes(menuName);
-  }, [isAdmin, menuAccess]);
+  /*
+    Both answer `false` only when an identity is loaded and genuinely lacks the
+    grant. With no identity there is nothing to ask, and the callers must not be
+    handed a denial they would render as one -- App decides what to show for
+    `loading`, `unavailable` and `not-provisioned` before it ever asks these.
+  */
+  const hasMenuAccess = useCallback(
+    (menuName: string) => (identity ? canReachMenu(identity, menuName) : false),
+    [identity],
+  );
 
-  const hasEntityAccess = useCallback((entityId: string) => {
-    if (isAdmin) return true;
-    return entityAccess.includes(entityId);
-  }, [isAdmin, entityAccess]);
+  const hasEntityAccess = useCallback(
+    (entityId: string) => (identity ? canReachEntity(identity, entityId) : false),
+    [identity],
+  );
 
   async function signIn(email: string, password: string) {
     const { error } = await supabase.auth.signInWithPassword({
@@ -204,9 +214,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // the local state is the part that has to happen either way.
     }
     setUser(null);
-    setAppUser(null);
-    setMenuAccess([]);
-    setEntityAccess([]);
+    setIdentity(null);
+    setStatusReason(null);
+    setStatus('ready');
   }
 
   /**
@@ -240,9 +250,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
 
     setUser(null);
-    setAppUser(null);
-    setMenuAccess([]);
-    setEntityAccess([]);
+    setIdentity(null);
+    setStatusReason(null);
+    setStatus('ready');
   }
 
   const value = {
@@ -252,6 +262,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     menuAccess,
     entityAccess,
     isAdmin,
+    status,
+    statusReason,
+    retryIdentity,
     signIn,
     signOut,
     signOutIfSessionLost,
