@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 Working rules for this repository. Read `docs/ARCHITECTURE.md` before writing
-code in a new area — this file is the short version.
+code in a new area, and `docs/RELEASING.md` before cutting a release — this file
+is the short version of both.
 
 ---
 
@@ -185,3 +186,32 @@ reads a new column deploys, or PostgREST returns 400 for the missing column.
 
 State plainly what was verified and what was not. "Typecheck passes" and "I
 watched it work" are different claims.
+
+---
+
+## Releasing
+
+Full process in `docs/RELEASING.md`. The parts that are settled:
+
+- **A release tags a commit that is already deployed.** It does not ship
+  anything. A tag naming a commit nobody is running is worse than no tag,
+  because the next person rolls back to it.
+- **Cut from `main`.** `migrations` and `prod` are from the earlier flow and are
+  being wound down; neither gets tagged.
+- **Migrations are applied before the tag, not with it.** Run the runner's
+  `--dry-run` first; it must print nothing outstanding. PostgREST answers 400
+  for a column it cannot see, so the screen breaks for everyone the moment the
+  build lands.
+- **Semver read against what a user sees.** A batch that corrects a figure
+  people have been reading is a **minor** at least, never a patch — "patch"
+  tells a reader they can skip the notes, and they cannot if a number they wrote
+  down last month has moved. `package.json` carries the same number as the tag.
+- **`CHANGELOG.md` is written before the tag**, newest first, for the people who
+  use the system. A figure that changed says what it changed *from*, with the
+  holding named. Migrations are named by filename. `gh release --generate-notes`
+  on its own is not a release note: a list of commit subjects says what was
+  touched, not what changed for the reader.
+- **Annotated tags only** (`git tag -a`). A lightweight tag records no author and
+  no date, and `git describe` ignores it.
+- **The release note repeats what was and was not verified.** If nobody opened
+  the app, it says so.
