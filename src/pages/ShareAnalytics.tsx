@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
-import * as notesRepo from '../repositories/notes.repo';
 import { TradeOrderPanel } from '../components/TradeOrderPanel';
 import { useTradeOrder } from '../hooks/useTradeOrder';
 import { aerPercent, formatAer, netMarketValue, portfolioAer } from '../lib/aer';
@@ -18,6 +17,7 @@ import {
   type ShareGroup,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
+import { loadProcessedNotes } from '../services/shareAnalytics.service';
 
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
   const escape = (v: string | number) => {
@@ -969,11 +969,11 @@ export function ShareAnalytics() {
         }
       }
 
-      // Through the repository rather than inline, because the note read now
-      // carries `intraday_seq` and its ORDER BY has to agree with `sortNotes`.
-      // Two copies of that ordering is exactly the divergence the repo exists to
-      // prevent — the Dashboard reads the same function.
-      const notesData = await notesRepo.listProcessed();
+      // Through the service rather than inline, because the note read now carries
+      // `intraday_seq` and its ORDER BY has to agree with `sortNotes`. Two copies
+      // of that ordering is exactly the divergence the repository exists to
+      // prevent — the Dashboard reads the same one.
+      const notesData = await loadProcessedNotes();
 
       const raw: RawNote[] = (notesData || [])
         .filter((n: any) => txnMap.has(n.transaction_id))
