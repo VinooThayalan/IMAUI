@@ -32,13 +32,28 @@ export interface CsvTable {
 }
 
 /**
- * Money and prices are written as fixed strings, not numbers.
+ * Money, prices and counts are written grouped: `270,430.10`, not `270430.10`.
  *
- * Excel parses "125734153.89" into a number either way, and a fixed string stops
- * a float's 8th decimal place turning up in a cell that is stated to the cent.
+ * Fixed to `en-US` rather than the browser's locale. An export is a file two
+ * people compare against each other and against the workbook, so it must not
+ * come out differently depending on who pressed the button — and a locale that
+ * groups with `.` and decimalises with `,` would turn every amount in this file
+ * into a different number.
+ *
+ * A grouped value contains a comma, so the writer quotes it. Excel reads a
+ * quoted `"270,430.10"` back as the number 270430.1 under a matching locale, and
+ * the fixed decimal places stop a float's eighth decimal turning up in a cell
+ * stated to the cent. Anything that must survive as an unambiguous number rather
+ * than be read by a person — a date, a ticker — is not put through these.
  */
-const money = (n: number) => n.toFixed(2);
-const price = (n: number) => n.toFixed(4);
+const GROUPED = 'en-US';
+const money = (n: number) =>
+  n.toLocaleString(GROUPED, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const price = (n: number) =>
+  n.toLocaleString(GROUPED, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+/** Share counts: grouped, no decimal places, matching the screen. */
+const count = (n: number) =>
+  n.toLocaleString(GROUPED, { maximumFractionDigits: 0 });
 
 /**
  * Nothing recorded is an empty cell, never a zero.
@@ -129,8 +144,8 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
       'Date': r.trade_date ?? '',
       'Status': r.note_type,
       'Unit Price': r.price_avg != null ? price(r.price_avg) : '',
-      'No. of Shares': r.no_of_shares > 0 ? r.no_of_shares : '',
-      'Share Cum Bal': r.share_cum_bal,
+      'No. of Shares': r.no_of_shares > 0 ? count(r.no_of_shares) : '',
+      'Share Cum Bal': count(r.share_cum_bal),
       'Purchase Cost': r.purchase_cost > 0 ? money(r.purchase_cost) : '',
       'Sale Value': r.sale_value > 0 ? money(r.sale_value) : '',
       // What the shares sold had been carried at, which is the figure the
@@ -169,10 +184,8 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
       'Date': c.date ?? '',
       'Status': c.label,
       'Unit Price': price(c.unitPrice),
-      'No. of Shares': c.shares,
-      // Left a number, like the event rows above it — `orBlank` would stringify
-      // it and the column would be mixed-typed for no gain.
-      'Share Cum Bal': c.shareCumBal ?? '',
+      'No. of Shares': count(c.shares),
+      'Share Cum Bal': orBlank(c.shareCumBal, count),
       'Purchase Cost': orBlank(c.purchaseCost, money),
       'Sale Value': money(c.saleValue),
       'Sale Cost': orBlank(c.saleCost, money),
@@ -252,7 +265,7 @@ export function summaryExport(
       'Share Name': g.share_name,
       'Entity Name': g.entity_name,
       'CDS Accounts': g.cds_accounts.join('; '),
-      'Share Cum Bal': last ? last.share_cum_bal : '',
+      'Share Cum Bal': last ? count(last.share_cum_bal) : '',
       'Purchase Cost': money(sum(r => r.purchase_cost)),
       'Sale Value': money(sum(r => r.sale_value)),
       'Av Cost': last ? money(last.av_cost) : '',
