@@ -51,6 +51,11 @@ export interface RawNote {
   share_ticker: string;
   share_name: string;
   cds_account: string | null;
+  /**
+   * Stated position within this note's own trade date, 1-based, or null when
+   * nobody has stated one. See `sortNotes` — null is "unstated", not "first".
+   */
+  intraday_seq?: number | null;
 }
 
 export interface ComputedRow extends RawNote {
@@ -82,6 +87,60 @@ export interface ShareGroup {
   brokerage_fee_rate: number;
   rows: ComputedRow[];
 }
+/**
+ * Notes in the order they are replayed: by trade date, then by the order
+ * someone stated for that date.
+ *
+ * A contract note carries a trade date and no trade time, so which of a same-day
+ * buy and sell came first is not in the data. For a day of only buys, or only
+ * sells, that does not matter -- both are commutative under average cost and the
+ * day closes on the same position either way. For a day holding both it decides
+ * the answer, which is why `intraday_seq` exists and why this is the only place
+ * that reads it.
+ *
+ * `intraday_seq` is 1-based and scoped to the note's own (entity, share, date):
+ * `computeRows` is called per group and a note carries one date, so a bare
+ * integer is unambiguous.
+ *
+ * A null sequence means *unstated*, not zero and not first. Unstated notes run
+ * after every sequenced note on their date, keeping the order they arrived in --
+ * which the caller's `ORDER BY trade_date, id` makes deterministic. So a day
+ * nobody has touched replays exactly as it did before this field existed.
+ */
+export function sortNotes<T extends { trade_date: string | null; intraday_seq?: number | null }>(
+  notes: T[],
+): T[] {
+  // Unstated sorts after every stated position rather than before it, so adding
+  // a sequence to one note of a day does not silently push the untouched ones in
+  // front of it.
+  const rank = (n: T) =>
+    n.intraday_seq != null && n.intraday_seq > 0 ? n.intraday_seq : Number.MAX_SAFE_INTEGER;
+
+  return [...notes].sort((a, b) => {
+    const da = a.trade_date ?? '';
+    const db = b.trade_date ?? '';
+    if (da !== db) return da < db ? -1 : 1;
+    return rank(a) - rank(b);
+  });
+}
+
+/**
+ * Does the order of this day's notes change where the day ends up?
+ *
+ * Only a day mixing a buy with a sell does. Buys commute: cost and quantity both
+ * add. Sells commute too, and less obviously -- removing `qty * (C / S)` leaves
+ * `C * (S - qty) / S` over `S - qty`, which is `C / S` again, so a sell never
+ * moves the average and a run of them cannot. Mixed, the sell is costed at the
+ * average either before or after the buy, and those are different numbers.
+ *
+ * Reported so the screen can point at the handful of days worth arguing about
+ * instead of every day that happens to hold two notes.
+ */
+export function orderAffectsAverage(noteTypes: string[]): boolean {
+  const isBuy = (t: string) => t === 'Buy' || t === 'BUY';
+  return noteTypes.some(isBuy) && noteTypes.some(t => !isBuy(t));
+}
+
 export function computeRows(
   notes: RawNote[],
   opening: OpeningBalance | null,
@@ -101,14 +160,10 @@ export function computeRows(
     Returning 0 makes the sort stable by specification, so same-date events keep
     the order they arrived in -- the query sorts by (trade_date, id), so that
     order is itself deterministic. Same data in, same numbers out.
-
-    Which of a same-day buy and sell truly came first is not recorded anywhere:
-    the notes carry a trade date but no trade time. Deterministic is the most
-    this can be without that.
   */
   const byDate = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-  const sorted     = [...notes].sort((a, b) => byDate(a.trade_date ?? '', b.trade_date ?? ''));
+  const sorted     = sortNotes(notes);
   const sortedDivs = [...dividends].sort((a, b) => byDate(a.payment_date ?? '', b.payment_date ?? ''));
   const sortedScrips = [...scrips].sort((a, b) =>
     byDate(a.effective_date ?? a.entry_date, b.effective_date ?? b.entry_date));
