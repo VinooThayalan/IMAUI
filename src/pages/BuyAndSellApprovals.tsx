@@ -1,9 +1,11 @@
 import { CheckCircle, XCircle, FileText, Eye, AlertTriangle, ChevronDown, ChevronUp, Mail } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase, getAccessToken } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
-import { ccForSend, entityCcAddresses } from '../lib/emailRecipients';
+import { entityCcAddresses } from '../lib/emailRecipients';
+import { listEmailContacts } from '../repositories/entities.repo';
+import { sendComparisonEmail, sendReviewNotification } from '../services/brokerEmail.service';
 import { CcField } from '../components/EmailRecipientsField';
 
 interface BuyAndSellNote {
@@ -56,9 +58,14 @@ interface Transaction {
   share_transaction_levy?: number | null;
 }
 
+/*
+  The shape the repository returns. `entity_id` was declared here and read
+  nowhere, so it is neither selected nor typed any more — the column is
+  nullable, and carrying a nullable field no cell touches only invites one to
+  start guessing at it.
+*/
 interface Entity {
   id: string;
-  entity_id: string;
   name: string;
   cc_email: string | null;
   cc_email_2: string | null;
@@ -137,7 +144,10 @@ export function BuyAndSellApprovals() {
       const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date, fees, brokerage_fee, cse_fee, cds_fee, clearing_fee, sec_cess, share_transaction_levy'),
-        supabase.from('entities').select('id, entity_id, name, cc_email, cc_email_2, cc_email_3').order('name'),
+        // Through the repository, and paged: an unbounded select is capped
+        // server-side at db-max-rows, and a truncated entity list means a note
+        // whose entity fell past the cap loses its CC prefill and its name.
+        listEmailContacts(),
         supabase.from('shares').select('id, ticker, share_name').order('share_name'),
         // No is_active filter. This list is only ever used to look up the broker on
         // an existing note (see resolveNoteRefs), never to populate a picker, so
@@ -151,7 +161,7 @@ export function BuyAndSellApprovals() {
       if (notesRes.error) throw notesRes.error;
       setNotes(notesRes.data || []);
       setTransactions(txnRes.data || []);
-      setEntities(entitiesRes.data || []);
+      setEntities(entitiesRes);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
       setEntityBrokers(ebRes.data || []);
@@ -227,161 +237,6 @@ export function BuyAndSellApprovals() {
     setIsSubmitting(false);
     setSendEmail(true);
     setCcEntityEmail(true);
-  }
-
-  async function sendBrokerComparisonEmail(
-    note: BuyAndSellNote,
-    entity: Entity | null,
-    share: Share | null,
-    broker: Broker | null,
-    txn: Transaction | null,
-    rows: Array<{ label: string; txnVal: string; noteVal: string; mismatch?: boolean }>,
-    cc: string[],
-  ) {
-    const brokerEmail = broker?.contact_person_email;
-    // Throws rather than returning quietly: the only caller reports success to the
-    // user straight afterwards, so a silent return was indistinguishable from a
-    // send.
-    if (!brokerEmail) throw new Error('No email address on file for this broker.');
-
-    const ccList = ccForSend(brokerEmail, cc);
-
-    const fmtDate = (d?: string | null) =>
-      d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${await getAccessToken()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'broker_comparison',
-        to: brokerEmail,
-        // Absent rather than empty: an empty recipient reaching the send path is
-        // a bounce, not a CC.
-        cc: ccList.length > 0 ? ccList : undefined,
-        triggered_by: user?.email || null,
-        source: 'buy-sell-approvals',
-        comparison: {
-          contract_no: note.contract_no || note.note_number || '—',
-          note_type: note.note_type,
-          entity_name: entity?.name || '—',
-          share_name: share?.share_name || '—',
-          ticker: share?.ticker || '—',
-          broker_name: broker?.broker_name || note.broker || '—',
-          broker_email: brokerEmail,
-          contact_person: broker?.contact_person_name || undefined,
-          contact_person_designation: broker?.contact_person_designation || undefined,
-          rows,
-          trade_date_txn: fmtDate(txn?.transaction_date),
-          trade_date_note: fmtDate(note.trade_date),
-          settlement_date_note: fmtDate(note.settlement_date),
-          remarks: note.remarks || undefined,
-        },
-      }),
-    });
-
-    // fetch only rejects on a network error, so without this a 4xx/5xx from the
-    // function -- a missing BREVO_API_KEY, an address Brevo refuses -- resolved
-    // successfully and the caller told the user the email had been sent.
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(
-        `Email service returned ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`,
-      );
-    }
-
-    return ccList;
-  }
-
-  async function sendBrokerNotification(
-    note: BuyAndSellNote,
-    action: 'APPROVED' | 'REJECTED',
-    reviewRemarks: string,
-    entity: Entity | null,
-    share: Share | null,
-    broker: Broker | null,
-    withCcEntity: boolean,
-    transaction?: Transaction | null,
-  ): Promise<{ sent: boolean; reason?: string }> {
-    // Reports its outcome instead of throwing. It runs after the approval has
-    // already been written, so a throw would land in the caller's catch and tell
-    // the user "Could not approve this note" about a note that was approved.
-    const brokerEmail = broker?.contact_person_email;
-    if (!brokerEmail) {
-      return {
-        sent: false,
-        reason: broker
-          ? `No email address on file for ${broker.broker_name}.`
-          : 'This note has no broker on record.',
-      };
-    }
-    const ccEmails: string[] = [];
-    if (withCcEntity && entity?.cc_email) ccEmails.push(entity.cc_email);
-
-    const reviewedAt = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const fmt = (n?: number | null) => n != null ? Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
-    const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-
-    const request: RequestInit = {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${await getAccessToken()}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        type: 'approval_notification',
-        to: brokerEmail,
-        cc: ccEmails.length > 0 ? ccEmails : undefined,
-        triggered_by: user?.email || null,
-        source: 'buy-sell-approvals',
-        notification: {
-          action,
-          contract_no: note.contract_no || note.note_number || '-',
-          note_type: note.note_type,
-          entity_name: entity?.name || '-',
-          share_name: share?.share_name || '-',
-          ticker: share?.ticker || '-',
-          no_of_shares: note.no_of_shares?.toLocaleString() || '-',
-          price_avg: fmt(note.price_avg),
-          gross_amount: fmt(note.gross_amount),
-          brokerage: fmt(note.brokerage),
-          net_amount: fmt(note.net_amount),
-          trade_date: fmtDate(note.trade_date),
-          settlement_date: fmtDate(note.settlement_date),
-          broker_name: broker?.broker_name || note.broker || '-',
-          dealer_name: note.dealer_name || undefined,
-          remarks: note.remarks || undefined,
-          approval_notes: reviewRemarks || undefined,
-          reviewed_by: user?.email || 'Reviewer',
-          reviewed_at: reviewedAt,
-          // Transaction (system) values for comparison — included on rejections
-          txn_no_of_shares: transaction?.no_of_shares != null ? transaction.no_of_shares.toLocaleString() : undefined,
-          txn_price_per_share: transaction?.price_per_share != null ? fmt(transaction.price_per_share) : undefined,
-          txn_total_amount: transaction?.total_amount != null ? fmt(transaction.total_amount) : undefined,
-        },
-      }),
-    };
-
-    try {
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, request);
-      // fetch resolves on 4xx/5xx, so without this check a failing email service
-      // looked identical to a successful send.
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        console.error('Email notification failed:', response.status, detail);
-        return { sent: false, reason: `Email service returned ${response.status}.` };
-      }
-      return { sent: true };
-    } catch (err) {
-      console.error('Email notification failed:', err);
-      return { sent: false, reason: 'Could not reach the email service.' };
-    }
   }
 
   async function handleApprove() {
@@ -491,7 +346,10 @@ export function BuyAndSellApprovals() {
       }
 
       const emailResult = REVIEW_EMAIL_ENABLED && sendEmail
-        ? await sendBrokerNotification(selectedNote, 'APPROVED', actionRemarks, entity, share, broker, ccEntityEmail)
+        ? await sendReviewNotification({
+            note: selectedNote, action: 'APPROVED', reviewRemarks: actionRemarks,
+            entity, share, broker, withCcEntity: ccEntityEmail, reviewedBy: user?.email || null,
+          })
         : null;
 
       await loadData();
@@ -559,7 +417,11 @@ export function BuyAndSellApprovals() {
 
       const linkedTxn = transactions.find(t => t.id === selectedNote.transaction_id) ?? null;
       const emailResult = REVIEW_EMAIL_ENABLED && sendEmail
-        ? await sendBrokerNotification(selectedNote, 'REJECTED', actionRemarks, entity, share, broker, ccEntityEmail, linkedTxn)
+        ? await sendReviewNotification({
+            note: selectedNote, action: 'REJECTED', reviewRemarks: actionRemarks,
+            entity, share, broker, transaction: linkedTxn,
+            withCcEntity: ccEntityEmail, reviewedBy: user?.email || null,
+          })
         : null;
 
       await loadData();
@@ -914,7 +776,8 @@ const displayNotes = notes.filter(n => {
                   </label>
                   {sendEmail && (() => {
                     const { entity } = getDetails(selectedNote!);
-                    return entity?.cc_email ? (
+                    const ccAddresses = entityCcAddresses(entity);
+                    return ccAddresses.length > 0 ? (
                       <label className="flex items-center gap-2 cursor-pointer ml-6">
                         <input
                           type="checkbox"
@@ -922,7 +785,10 @@ const displayNotes = notes.filter(n => {
                           onChange={e => setCcEntityEmail(e.target.checked)}
                           className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500"
                         />
-                        <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                        <span className="text-sm text-gray-700">
+                          CC entity {ccAddresses.length === 1 ? 'email' : 'emails'}{' '}
+                          <span className="text-gray-400">({ccAddresses.join(', ')})</span>
+                        </span>
                       </label>
                     ) : null;
                   })()}
@@ -999,7 +865,10 @@ const displayNotes = notes.filter(n => {
           }
           setIsSendingEmail(true);
           try {
-            const cc = await sendBrokerComparisonEmail(note, entity, share, broker, txn, rows, emailCc);
+            const cc = await sendComparisonEmail({
+              note, entity, share, broker, transaction: txn, rows,
+              cc: emailCc, triggeredBy: user?.email || null,
+            });
             // Names the CC list rather than only the broker: the copy going to
             // the client is the part a sender wants confirmed.
             alert(`Email sent to ${broker.contact_person_email}${cc.length ? ` (CC: ${cc.join(', ')})` : ''}`);
@@ -1184,7 +1053,8 @@ const displayNotes = notes.filter(n => {
                   </label>
                   {sendEmail && (() => {
                     const { entity } = getDetails(selectedNote!);
-                    return entity?.cc_email ? (
+                    const ccAddresses = entityCcAddresses(entity);
+                    return ccAddresses.length > 0 ? (
                       <label className="flex items-center gap-2 cursor-pointer ml-6">
                         <input
                           type="checkbox"
@@ -1192,7 +1062,10 @@ const displayNotes = notes.filter(n => {
                           onChange={e => setCcEntityEmail(e.target.checked)}
                           className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
                         />
-                        <span className="text-sm text-gray-700">CC entity email <span className="text-gray-400">({entity.cc_email})</span></span>
+                        <span className="text-sm text-gray-700">
+                          CC entity {ccAddresses.length === 1 ? 'email' : 'emails'}{' '}
+                          <span className="text-gray-400">({ccAddresses.join(', ')})</span>
+                        </span>
                       </label>
                     ) : null;
                   })()}
