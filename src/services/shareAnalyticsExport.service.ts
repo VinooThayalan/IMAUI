@@ -17,6 +17,7 @@
  */
 
 import {
+  closingRows,
   groupAerPercent,
   marketPricePerShareAfterFees,
   type ComputedRow,
@@ -107,7 +108,6 @@ const projectDetail = (row: DetailRow): Cell[] =>
  *             this can be asserted
  */
 export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
-  const last = group.rows[group.rows.length - 1];
   const aer = groupAerPercent(group, asOf);
   const afterFees = marketPricePerShareAfterFees(group);
   const priced = group.market_price > 0;
@@ -141,7 +141,17 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
       'Av Cost': money(r.av_cost),
       'Av Price': money(r.av_price),
       'Dividend': r.dividend > 0 ? money(r.dividend) : '',
-      'Market Value': priced ? money(r.market_value) : '',
+      /*
+        Blank, deliberately.
+
+        A market value per transaction is a number nobody asked this report for:
+        it restates today's price against a historic balance, so a row from 2021
+        reads as though it were worth that on the day. The screen has always
+        shown an em dash here; the file was the only place it appeared. The two
+        closing rows below carry the market value, which is where it means
+        something.
+      */
+      'Market Value': '',
       'Cash Flow +/-': r.cash_flow !== 0 ? money(r.cash_flow) : '',
       'Total Surplus': r.cash_flow !== 0 ? money(r.cash_flow) : '',
       'Cum Surplus': money(r.cum_surplus),
@@ -149,49 +159,30 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
     }),
   );
 
-  // The two closing rows only mean anything once a price is known. Testing
-  // `afterFees` rather than `priced` is what narrows it to a number — coercing a
-  // null away with `?? 0` here would be the gap-filling this file exists to
-  // avoid, even where a guard happens to make it unreachable.
-  if (last && afterFees != null) {
-    const mvAfterFees = afterFees * last.share_cum_bal;
-    const totalPC = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-    const totalSV = group.rows.reduce((s, r) => s + r.sale_value, 0);
-
+  // The two closing rows come from `closingRows`, which the screen's footer
+  // draws from too. They used to be rebuilt here out of the same parts, and the
+  // two copies disagreed on the sale value, the cash flow, the total surplus and
+  // the cumulative surplus.
+  for (const c of closingRows(group, asOf)) {
     rows.push(projectDetail({
       ...identity,
-      'Date': asOf.toISOString().split('T')[0],
-      'Status': 'Market Value',
-      'Unit Price': price(group.market_price),
-      'No. of Shares': last.share_cum_bal,
-      'Share Cum Bal': last.share_cum_bal,
-      'Sale Value': money(mvAfterFees),
-      'Av Cost': money(last.av_cost),
-      'Av Price': money(last.av_price),
-      'Market Value': money(mvAfterFees),
-      'Cash Flow +/-': money(mvAfterFees),
-      'Total Surplus': money(mvAfterFees),
-      'Cum Surplus': money(mvAfterFees),
-    }));
-
-    const totalSharesBought = group.rows
-      .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
-      .reduce((s, r) => s + r.no_of_shares, 0);
-    const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
-
-    rows.push(projectDetail({
-      ...identity,
-      'Status': 'Cost per share',
-      'Unit Price': price(costPerShare),
-      'No. of Shares': totalSharesBought,
-      'Purchase Cost': money(totalPC),
-      'Sale Value': money(totalSV),
-      'Av Cost': money(last.av_cost),
-      'Av Price': money(last.av_price),
-      'Market Value': money(mvAfterFees),
-      'Cash Flow +/-': money(mvAfterFees),
-      'Total Surplus': money(mvAfterFees),
-      'Cum Surplus': money(mvAfterFees),
+      'Date': c.date ?? '',
+      'Status': c.label,
+      'Unit Price': price(c.unitPrice),
+      'No. of Shares': c.shares,
+      // Left a number, like the event rows above it — `orBlank` would stringify
+      // it and the column would be mixed-typed for no gain.
+      'Share Cum Bal': c.shareCumBal ?? '',
+      'Purchase Cost': orBlank(c.purchaseCost, money),
+      'Sale Value': money(c.saleValue),
+      'Sale Cost': orBlank(c.saleCost, money),
+      'Av Cost': money(c.avCost),
+      'Av Price': money(c.avPrice),
+      'Dividend': orBlank(c.dividend, money),
+      'Market Value': money(c.marketValue),
+      'Cash Flow +/-': money(c.cashFlow),
+      'Total Surplus': money(c.totalSurplus),
+      'Cum Surplus': money(c.cumSurplus),
     }));
   }
 

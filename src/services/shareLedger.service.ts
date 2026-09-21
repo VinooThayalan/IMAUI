@@ -135,6 +135,120 @@ export function marketPricePerShareAfterFees(group: ShareGroup): number | null {
 }
 
 /**
+ * The two rows that close a holding's breakdown.
+ *
+ * The screen drew these in its `tfoot` and the CSV export built them again from
+ * the same parts, and the two disagreed — on the sale value, on the cash flow,
+ * on the total surplus, and on whether an event row carries a market value at
+ * all. Six separate reports came out of that one divergence. They are computed
+ * here now and both readers project these objects; there is no second answer to
+ * disagree with.
+ *
+ * `null` means the cell has nothing to say — an em dash on screen, an empty cell
+ * in the file. It is not zero. "Market Value" has no purchase cost because it is
+ * not a purchase; "Cost per share" has no closing balance because it is a unit
+ * rate, not a position.
+ *
+ * Empty when the holding has no market price: both rows are statements about
+ * what the position is worth, and nobody has said what it is worth.
+ */
+export interface ClosingRow {
+  label: 'Market Value' | 'Cost per share';
+  date: string | null;
+  unitPrice: number;
+  shares: number;
+  shareCumBal: number | null;
+  purchaseCost: number | null;
+  saleValue: number;
+  saleCost: number | null;
+  avCost: number;
+  avPrice: number;
+  dividend: number | null;
+  marketValue: number;
+  cashFlow: number;
+  totalSurplus: number;
+  cumSurplus: number;
+}
+
+export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
+  const last = group.rows[group.rows.length - 1];
+  const perShareAfterFees = marketPricePerShareAfterFees(group);
+  if (!last || perShareAfterFees == null) return [];
+
+  const mvAfterFees = perShareAfterFees * last.share_cum_bal;
+  const totalPurchase = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
+  const totalSale     = group.rows.reduce((s, r) => s + r.sale_value, 0);
+  const totalDividend = group.rows.reduce((s, r) => s + r.dividend, 0);
+  const totalCashFlow = group.rows.reduce((s, r) => s + r.cash_flow, 0);
+
+  /*
+    What the shares sold had been carried at.
+
+    Per row this is `no_of_shares * av_price`, and the average a sell leaves
+    behind is the one it started with -- removing `qty * (C / S)` leaves
+    `C * (S - qty)` over `S - qty`, which is `C / S` again. So the row's own
+    `av_price` is the pre-sale average and this total is the sum of the column
+    above it, not an approximation of it.
+  */
+  const totalSaleCost = group.rows
+    .filter(r => r.row_type === 'sell')
+    .reduce((s, r) => s + r.no_of_shares * r.av_price, 0);
+
+  // Cost per share divides what was paid by everything that arrived, bought or
+  // free: scrip shares cost nothing and still dilute the rate.
+  const sharesAcquired = group.rows
+    .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
+    .reduce((s, r) => s + r.no_of_shares, 0);
+  const costPerShare = sharesAcquired > 0 ? totalPurchase / sharesAcquired : 0;
+
+  return [
+    {
+      label: 'Market Value',
+      date: asOf.toISOString().split('T')[0],
+      unitPrice: group.market_price,
+      shares: last.share_cum_bal,
+      shareCumBal: last.share_cum_bal,
+      purchaseCost: null,
+      saleValue: mvAfterFees,
+      saleCost: null,
+      avCost: last.av_cost,
+      avPrice: last.av_price,
+      dividend: null,
+      marketValue: mvAfterFees,
+      cashFlow: mvAfterFees,
+      totalSurplus: mvAfterFees,
+      /*
+        Realised surplus plus what is still held, which is the figure the modal
+        header already shows as "Cum Surplus". This row used to repeat
+        `mvAfterFees` here, so the closing row of the table contradicted the
+        summary pill above it: BIL.N0000 read 107,006,545.75 against the header's
+        -89,852,215.05.
+      */
+      cumSurplus: last.cum_surplus + mvAfterFees,
+    },
+    {
+      label: 'Cost per share',
+      date: null,
+      unitPrice: costPerShare,
+      shares: sharesAcquired,
+      shareCumBal: null,
+      purchaseCost: totalPurchase,
+      // Everything the holding has realised plus what selling the rest would
+      // fetch -- the proceeds side of the cost-per-share comparison.
+      saleValue: totalSale + mvAfterFees,
+      saleCost: totalSaleCost,
+      avCost: last.av_cost,
+      avPrice: last.av_price,
+      dividend: totalDividend,
+      marketValue: mvAfterFees,
+      cashFlow: totalCashFlow + mvAfterFees,
+      totalSurplus: mvAfterFees + (totalSale + totalDividend - totalPurchase),
+      cumSurplus: mvAfterFees,
+    },
+  ];
+}
+
+/**
  * Notes in the order they are replayed: by trade date, then by the order
  * someone stated for that date.
  *

@@ -17,6 +17,7 @@ import {
   type ShareGroup,
   groupAerPercent,
   groupCashFlows,
+  closingRows,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
 import { loadProcessedNotes } from '../services/shareAnalytics.service';
@@ -594,71 +595,54 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
               })}
             </tbody>
             <tfoot className="sticky bottom-0 border-t-2 border-gray-300 text-xs font-bold">
-              {/* Cost row + Cost per share row */}
-              {group.market_price > 0 && (() => {
-                const cumShares    = last.share_cum_bal;
-                const feeRate      = group.brokerage_fee_rate / 100;
-                const mvAfterFees  = cumShares * (group.market_price - group.market_price * feeRate);
-                const totalPC      = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
-                const totalSV      = group.rows.reduce((s, r) => s + r.sale_value, 0);
-                const totalDiv     = group.rows.reduce((s, r) => s + r.dividend, 0);
-                const realizedSurplus = totalSV + totalDiv - totalPC;
-                const totalSurplus    = mvAfterFees + realizedSurplus;
-                const today        = new Date().toLocaleDateString('en-GB');
+              {/*
+                Market Value row + Cost per share row.
 
-                // Cost per share: unit price = totalPC / totalSharesBought (SUMIF positive)
-                const totalSharesBought = group.rows
-                  .filter(r => r.row_type === 'buy' || r.row_type === 'opening' || r.row_type === 'scrip')
-                  .reduce((s, r) => s + r.no_of_shares, 0);
-                const costPerShare = totalSharesBought > 0 ? totalPC / totalSharesBought : 0;
+                Both come from `closingRows` in the service, which the CSV export
+                projects as well. They used to be computed here and rebuilt a
+                second time in `exportDetail`, and the two copies disagreed on
+                four separate figures. One definition, two readers.
+
+                A null cell is an em dash — the row has nothing to say there, and
+                a zero would claim it did.
+              */}
+              {closingRows(group, new Date()).map(c => {
+                const isMv  = c.label === 'Market Value';
+                const tone  = isMv
+                  ? { row: 'bg-slate-800 text-white', dim: 'text-slate-300', val: 'text-white', pos: 'text-emerald-300', cost: 'text-blue-300', badge: 'bg-slate-600 text-white', pill: 'text-slate-400' }
+                  : { row: 'bg-amber-50 border-t-2 border-amber-300', dim: 'text-amber-700', val: 'text-amber-900', pos: 'text-amber-900', cost: 'text-blue-700', badge: 'bg-amber-400 text-white', pill: 'text-amber-700' };
+                const cell  = (v: number | null, cls: string, d = 2) =>
+                  <td className={`px-3 py-2.5 text-right font-mono ${v == null ? tone.dim : cls}`}>{v == null ? '—' : fmt(v, d)}</td>;
+                const count = (v: number | null) =>
+                  <td className={`px-3 py-2.5 text-right font-mono ${v == null ? tone.dim : tone.val}`}>{v == null ? '—' : fmtN(v)}</td>;
+                const signed = (v: number) =>
+                  <td className="px-3 py-2.5 text-right font-mono">
+                    <span className={isMv ? (v >= 0 ? 'text-emerald-300' : 'text-red-400') : clsSurplus(v)}>{fmt(v)}</span>
+                  </td>;
 
                 return (
-                  <>
-                    {/* Cost row */}
-                    <tr className="bg-slate-800 text-white">
-                      <td className="px-3 py-2.5 text-slate-300">{today}</td>
-                      <td className="px-3 py-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-600 text-white">Market Value</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(group.market_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmtN(cumShares)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">{fmtN(cumShares)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-300">{fmt(last.av_cost)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-white">{fmt(last.av_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-slate-300">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-emerald-300">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={mvAfterFees >= 0 ? 'text-emerald-300' : 'text-red-400'}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-slate-400">—</td>
-                    </tr>
-                    {/* Cost per share row */}
-                    <tr className="bg-amber-50 border-t-2 border-amber-300">
-                      <td className="px-3 py-2.5 text-amber-700">—</td>
-                      <td className="px-3 py-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-white">Cost per share</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900 font-bold">{fmt(costPerShare)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmtN(totalSharesBought)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(totalPC)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(totalSV + mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(last.av_cost)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-900">{fmt(last.av_price)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-amber-700">—</td>
-                      <td className="px-3 py-2.5 text-right font-mono text-blue-700">{fmt(mvAfterFees)}</td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}>{fmt(group.rows.reduce((s, r) => s + r.cash_flow, 0) + mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(totalSurplus)}>{fmt(totalSurplus)}</span></td>
-                      <td className="px-3 py-2.5 text-right font-mono"><span className={clsSurplus(mvAfterFees)}>{fmt(mvAfterFees)}</span></td>
-                      <td className="px-3 py-2.5 text-amber-700">—</td>
-                    </tr>
-                  </>
+                  <tr key={c.label} className={tone.row}>
+                    <td className={`px-3 py-2.5 ${tone.dim}`}>{c.date ? fmtDate(c.date) : '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${tone.badge}`}>{c.label}</span>
+                    </td>
+                    {cell(c.unitPrice, `${tone.val} font-bold`)}
+                    {count(c.shares)}
+                    {count(c.shareCumBal)}
+                    {cell(c.purchaseCost, tone.val)}
+                    {cell(c.saleValue, tone.pos)}
+                    {cell(c.saleCost, tone.val)}
+                    {cell(c.avCost, tone.cost)}
+                    {cell(c.avPrice, tone.val)}
+                    {cell(c.dividend, tone.val)}
+                    {cell(c.marketValue, isMv ? tone.pos : tone.cost)}
+                    {signed(c.cashFlow)}
+                    {signed(c.totalSurplus)}
+                    {signed(c.cumSurplus)}
+                    <td className={`px-3 py-2.5 ${tone.pill}`}>—</td>
+                  </tr>
                 );
-              })()}
+              })}
               {/* The "Totals / Final" row was removed here — reported as not
                   required. The Market Value and Cost per share rows above stay:
                   they are the closing position, not a column summary. */}
