@@ -7,27 +7,15 @@
  * shares held, and therefore a different market value, net market value, total
  * return and AER. Four defects, one divergence.
  *
- * This loads the same sources the ledger expects, runs the same `computeRows`,
- * and then aggregates. No React: repositories and pure functions only.
+ * The holdings come from `buildShareGroups` in `shareGroups.service`, the same
+ * assembly Share Analytics and Reports read; this file only aggregates them by
+ * share. No React: repositories and pure functions only.
  */
 
 import { aerPercent, netMarketValue, type CashFlow } from '../lib/aer';
-import * as notesRepo from '../repositories/notes.repo';
-import * as txnRepo from '../repositories/transactions.repo';
-import * as openingRepo from '../repositories/openingBalances.repo';
-import * as dividendsRepo from '../repositories/dividends.repo';
-import * as scripsRepo from '../repositories/scrips.repo';
-import * as pricesRepo from '../repositories/sharePrices.repo';
-import * as feeTypesRepo from '../repositories/brokerageFeeTypes.repo';
 import * as sharesRepo from '../repositories/shares.repo';
-import * as entitiesRepo from '../repositories/entities.repo';
-import {
-  computeRows,
-  type DividendRecord,
-  type OpeningBalance,
-  type RawNote,
-  type ScripRecord,
-} from './shareLedger.service';
+import * as pricesRepo from '../repositories/sharePrices.repo';
+import { buildShareGroups, loadLedgerSources } from './shareGroups.service';
 
 const num = (v: number | string | null | undefined): number => Number(v) || 0;
 
@@ -92,114 +80,17 @@ export interface EntityAer {
  * share and discounting one combined terminal value.
  */
 export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]> {
-  const [notes, txns, openings, dividends, scrips, priceRows, feeTypes, shares, entities] =
-    await Promise.all([
-      notesRepo.listProcessed(),
-      txnRepo.listApproved(),
-      openingRepo.listAll(),
-      dividendsRepo.listAll(),
-      scripsRepo.listReceived(),
-      pricesRepo.listNewestFirst(),
-      feeTypesRepo.listActive(),
-      sharesRepo.listAll(),
-      entitiesRepo.listAll(),
-    ]);
+  // One ledger per (entity, share), built where every other screen builds it.
+  const src = await loadLedgerSources();
+  const groups = buildShareGroups(src, entityId);
 
   // Terminal values for every AER below discount to the same instant.
   const asOf = new Date();
 
-  const { price: priceByShare } = pricesRepo.latestByShare(priceRows);
-  const defaultFeeRate = feeTypes.length > 0 ? num(feeTypes[0].rate) : 0;
-
-  // A note only counts if its transaction is approved — the note carries the
-  // settled amounts, the transaction carries who it belongs to.
-  const txnById = new Map(txns.map(t => [t.id, t]));
-  const feeRateByGroup = new Map<string, number>();
-  for (const t of txns) {
-    const key = `${t.entity_id}__${t.share_id}`;
-    if (!feeRateByGroup.has(key) && t.brokerage_fee_rate != null) {
-      feeRateByGroup.set(key, num(t.brokerage_fee_rate));
-    }
-  }
-
-  const notesByGroup = new Map<string, RawNote[]>();
-  for (const n of notes) {
-    const txn = n.transaction_id ? txnById.get(n.transaction_id) : undefined;
-    if (!txn) continue;
-    if (entityId && txn.entity_id !== entityId) continue;
-
-    const net = num(n.net_amount);
-    const gross = num(n.gross_amount);
-    const key = `${txn.entity_id}__${txn.share_id}`;
-    const list = notesByGroup.get(key) ?? [];
-    list.push({
-      id: n.id,
-      note_type: n.note_type,
-      trade_date: n.trade_date,
-      no_of_shares: num(n.no_of_shares),
-      price_avg: n.price_avg != null ? num(n.price_avg) : null,
-      // Net of fees where available, matching the ledger's other callers.
-      gross_amount: net > 0 ? net : gross,
-      net_amount: net,
-      entity_id: txn.entity_id,
-      entity_name: '',
-      share_id: txn.share_id,
-      share_ticker: '',
-      share_name: '',
-      cds_account: txn.cds_account_id ?? null,
-      // Same-day order, so the Dashboard replays a contested day the way Share
-      // Analytics does. Dropping it here is how the two would drift again.
-      intraday_seq: n.intraday_seq,
-    });
-    notesByGroup.set(key, list);
-  }
-
-  const openingByGroup = new Map<string, OpeningBalance>();
-  for (const o of openings) {
-    if (entityId && o.entity_id !== entityId) continue;
-    openingByGroup.set(`${o.entity_id}__${o.share_id}`, {
-      entity_id: o.entity_id,
-      share_id: o.share_id,
-      opening_shares: num(o.opening_shares),
-      average_purchase_cost: num(o.average_purchase_cost),
-      effective_date: o.effective_date,
-    });
-  }
-
-  const dividendsByGroup = new Map<string, DividendRecord[]>();
-  for (const d of dividends) {
-    if (entityId && d.entity_id !== entityId) continue;
-    const key = `${d.entity_id}__${d.share_id}`;
-    const list = dividendsByGroup.get(key) ?? [];
-    list.push({
-      entity_id: d.entity_id,
-      share_id: d.share_id,
-      payment_date: d.payment_date,
-      amount_net: num(d.amount_net),
-    });
-    dividendsByGroup.set(key, list);
-  }
-
-  const scripsByGroup = new Map<string, ScripRecord[]>();
-  for (const s of scrips) {
-    if (entityId && s.entity_id !== entityId) continue;
-    const key = `${s.entity_id}__${s.share_id}`;
-    const list = scripsByGroup.get(key) ?? [];
-    list.push({
-      entity_id: s.entity_id,
-      share_id: s.share_id,
-      no_of_shares: num(s.no_of_shares),
-      effective_date: s.effective_date,
-      entry_date: s.entry_date,
-    });
-    scripsByGroup.set(key, list);
-  }
-
-  const groupKeys = new Set<string>([
-    ...notesByGroup.keys(),
-    ...openingByGroup.keys(),
-    ...scripsByGroup.keys(),
-  ]);
+  const { price: priceByShare } = pricesRepo.latestByShare(src.prices);
+  const defaultFeeRate = src.feeTypes.length > 0 ? num(src.feeTypes[0].rate) : 0;
+  const shares = src.shares;
+  const entities = src.entities;
 
   /** Accumulator per share, summed across entities. */
   interface Acc {
@@ -215,19 +106,12 @@ export async function loadShareMetrics(entityId?: string): Promise<ShareMetric[]
   }
   const byShare = new Map<string, Acc>();
 
-  for (const key of groupKeys) {
-    const [gEntityId, shareId] = key.split('__');
-    const marketPrice = priceByShare.get(shareId) ?? 0;
-    const feeRate = feeRateByGroup.get(key) ?? defaultFeeRate;
-
-    const rows = computeRows(
-      notesByGroup.get(key) ?? [],
-      openingByGroup.get(key) ?? null,
-      dividendsByGroup.get(key) ?? [],
-      marketPrice,
-      scripsByGroup.get(key) ?? [],
-    );
-    if (rows.length === 0) continue;
+  for (const g of groups) {
+    const gEntityId = g.entity_id;
+    const shareId = g.share_id;
+    const marketPrice = g.market_price;
+    const feeRate = g.brokerage_fee_rate;
+    const rows = g.rows;
 
     const last = rows[rows.length - 1];
     let acc = byShare.get(shareId);
