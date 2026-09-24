@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { createEntity } from '../services/entities.service';
+import { Spinner } from '../components/Loading';
 
 interface Entity {
   id: string;
@@ -831,10 +832,7 @@ export function Entities() {
                           title="Delete"
                         >
                           {deletingId === entity.id ? (
-                            <svg className="animate-spin h-4 w-4 text-red-600" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                            </svg>
+                            <Spinner />
                           ) : (
                             <Trash2 className="w-4 h-4 text-red-600" />
                           )}
@@ -1012,10 +1010,7 @@ export function Entities() {
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
                   {isSubmitting && (
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
+                    <Spinner />
                   )}
                   <span>{isSubmitting ? 'Creating...' : 'Create Entity'}</span>
                 </button>
@@ -1636,10 +1631,7 @@ export function Entities() {
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed flex items-center space-x-2"
                 >
                   {isSubmitting && (
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                    </svg>
+                    <Spinner />
                   )}
                   <span>{isSubmitting ? 'Updating...' : 'Update Entity'}</span>
                 </button>

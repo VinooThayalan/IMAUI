@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Mail, Send, CheckCircle, XCircle, Loader } from 'lucide-react';
+import { Mail, Send, CheckCircle, XCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { Spinner } from '../components/Loading';
 
 type Status = 'idle' | 'sending' | 'success' | 'error';
 
@@ -114,7 +115,7 @@ export function TestEmail() {
               >
                 {status === 'sending' ? (
                   <>
-                    <Loader className="w-4 h-4 animate-spin" />
+                    <Spinner />
                     <span>Sending…</span>
                   </>
                 ) : (

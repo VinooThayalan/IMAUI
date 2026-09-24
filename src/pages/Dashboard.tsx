@@ -12,6 +12,7 @@ import {
   buildSectorColorMap,
   buildShareColorMap,
 } from '../lib/chartColors';
+import { LoadingState } from '../components/Loading';
 
 function mkPiePct<T extends { value: number }>(arr: T[]): (T & { percentage: number })[] {
   const total = arr.reduce((s, d) => s + Math.max(0, d.value), 0);
@@ -277,9 +278,7 @@ export function Dashboard() {
             ))}
           </div>
         </div>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-        </div>
+        <LoadingState />
       </div>
     );
   }

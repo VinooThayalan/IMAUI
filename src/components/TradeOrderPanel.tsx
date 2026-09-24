@@ -11,6 +11,7 @@
  */
 
 import { ArrowDown, ArrowUp, Info, RotateCcw, Save, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { Spinner } from './Loading';
 
 export interface TradeOrderNote {
   id: string;
@@ -144,7 +145,7 @@ export function TradeOrderPanel({
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 transition-colors"
                     >
                       {busy
-                        ? <span className="w-3 h-3 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                        ? <Spinner size="xs" />
                         : <Save className="w-3.5 h-3.5" />}
                       Save order
                     </button>

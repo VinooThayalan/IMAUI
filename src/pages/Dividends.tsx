@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { DateField } from '../components/DateField';
+import { LoadingState } from '../components/Loading';
 
 interface Dividend {
   id: string;
@@ -484,10 +485,8 @@ export function Dividends() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-12 text-center">
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-                    </div>
+                  <td colSpan={14} className="px-6">
+                    <LoadingState compact />
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (

@@ -5,6 +5,7 @@ import { invalidateAuditCache } from '../lib/auditLog';
 import { AuditDiff } from '../components/AuditDiff';
 import { useAuth } from '../contexts/AuthContext';
 import { DateField } from '../components/DateField';
+import { LoadingState } from '../components/Loading';
 
 const PAGE_SIZE = 50;
 
@@ -324,9 +325,7 @@ export function AuditLog() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-          </div>
+          <LoadingState />
         ) : logs.length === 0 ? (
           <div className="text-center py-20 text-gray-400">
             <p className="text-lg font-medium">No audit records found</p>

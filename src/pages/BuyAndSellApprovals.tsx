@@ -7,6 +7,7 @@ import { entityCcAddresses } from '../lib/emailRecipients';
 import { listEmailContacts } from '../repositories/entities.repo';
 import { sendComparisonEmail, sendReviewNotification } from '../services/brokerEmail.service';
 import { CcField } from '../components/EmailRecipientsField';
+import { LoadingState, Spinner } from '../components/Loading';
 
 interface BuyAndSellNote {
   id: string;
@@ -466,9 +467,7 @@ const displayNotes = notes.filter(n => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
-      </div>
+      <LoadingState />
     );
   }
 
@@ -610,7 +609,7 @@ const displayNotes = notes.filter(n => {
                               title="View document"
                             >
                               {viewingFileId === note.id
-                                ? <span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                ? <Spinner />
                                 : <Eye className="w-3.5 h-3.5" />}
                             </button>
                           )}
@@ -632,7 +631,7 @@ const displayNotes = notes.filter(n => {
                               title="View document"
                             >
                               {viewingFileId === note.id
-                                ? <span className="w-3.5 h-3.5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin inline-block" />
+                                ? <Spinner />
                                 : <Eye className="w-3.5 h-3.5" />}
                             </button>
                           )}

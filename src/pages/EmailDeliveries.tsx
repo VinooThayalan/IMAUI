@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Filter, X, Mail, MailOpen, MailX, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { DateField } from '../components/DateField';
+import { LoadingState } from '../components/Loading';
 
 const PAGE_SIZE = 25;
 
@@ -277,9 +278,7 @@ export function EmailDeliveries() {
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          </div>
+          <LoadingState />
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-gray-400">
             <Mail className="w-12 h-12 mb-3" />

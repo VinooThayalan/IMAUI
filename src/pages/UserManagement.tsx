@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { LoadingState } from '../components/Loading';
 
 interface ManagedUser {
   id: string;
@@ -213,9 +214,7 @@ export function UserManagement() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
+      <LoadingState />
     );
   }
 
