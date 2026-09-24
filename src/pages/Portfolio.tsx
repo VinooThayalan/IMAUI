@@ -6,6 +6,7 @@ import { DateRangeField } from '../components/DateField';
 import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
 import { holdingsInWindow, isFresh } from '../services/portfolioHoldings.service';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
+import { Spinner } from '../components/Loading';
 
 /**
  * supabase-js types a to-one embed as an array; PostgREST returns a single object
@@ -625,7 +626,7 @@ export function Portfolio() {
 
       {loading && (
         <div className="flex items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white py-3">
-          <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-600" />
+          <Spinner className="border-blue-600" />
           <p className="text-sm text-gray-500">Loading portfolio…</p>
         </div>
       )}

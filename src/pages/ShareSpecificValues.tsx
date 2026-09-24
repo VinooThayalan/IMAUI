@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, TrendingUp, BookOpen, DollarSign, Plus, Pencil, Trash2, Save } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { LoadingState } from '../components/Loading';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -126,7 +127,7 @@ function Week52Tab() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+        <LoadingState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
@@ -311,7 +312,7 @@ function EarningsTab() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+        <LoadingState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
@@ -496,7 +497,7 @@ function ShareValuesTab() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+        <LoadingState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">
@@ -686,7 +687,7 @@ function DividendsPerShareTab() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>
+        <LoadingState />
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full text-sm">

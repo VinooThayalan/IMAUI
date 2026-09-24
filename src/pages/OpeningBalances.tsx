@@ -3,6 +3,7 @@ import { Plus, Search, Pencil, Trash2, Save, X, Building2, TrendingUp, Calendar 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { LoadingState } from '../components/Loading';
 
 interface Entity {
   id: string;
@@ -276,7 +277,9 @@ export function OpeningBalances() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">Loading...</td>
+                  <td colSpan={7} className="px-6">
+                    <LoadingState compact />
+                  </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>

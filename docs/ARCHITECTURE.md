@@ -239,7 +239,8 @@ ownership is explicit:
 | Concern | Layer |
 |---|---|
 | Computing the source fingerprint | `sourceFingerprint.repo.ts` |
-| Deciding hit or miss, and recomputing | `shareAnalytics.service.ts` |
+| Deciding hit or miss | `shareAnalytics.service.ts` (still in the page; not yet migrated) |
+| Recomputing every holding from the source tables | `shareGroups.service.ts` — also read by the Dashboard and Reports |
 | Reading and writing cache rows | `analyticsCache.repo.ts` |
 | Row order (`row_index`, not `trade_date`) | repository, in the `ORDER BY` |
 | What "last row of a group" means | service |

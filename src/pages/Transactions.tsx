@@ -8,6 +8,7 @@ import { accountBalance } from '../services/cashLedger.service';
 import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
+import { LoadingState, Spinner } from '../components/Loading';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -1525,9 +1526,7 @@ export function Transactions() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
-      </div>
+      <LoadingState />
     );
   }
 
@@ -3080,7 +3079,7 @@ export function Transactions() {
                   >
                     {isSavingBulk ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <Spinner />
                         <span>Saving...</span>
                       </>
                     ) : (

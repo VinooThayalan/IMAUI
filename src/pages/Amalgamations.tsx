@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { DateField } from '../components/DateField';
+import { LoadingState } from '../components/Loading';
 
 interface Amalgamation {
   id: string;
@@ -179,9 +180,7 @@ export function Amalgamations() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
+      <LoadingState />
     );
   }
 

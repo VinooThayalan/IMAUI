@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
 import type { ExportColumn } from '../lib/exportData';
+import { LoadingState } from '../components/Loading';
 
 interface BankMasterItem {
   id: string;
@@ -268,9 +269,7 @@ export function BankMaster() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center p-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          </div>
+          <LoadingState />
         ) : (
           <div className="divide-y divide-gray-200">
             {filteredBanks.length === 0 ? (

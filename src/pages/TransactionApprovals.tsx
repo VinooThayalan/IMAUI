@@ -9,6 +9,7 @@ import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
+import { LoadingState } from '../components/Loading';
 
 interface Transaction {
   id: string;
@@ -608,14 +609,12 @@ export function TransactionApprovals() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg text-gray-600">Loading transaction approvals...</div>
-      </div>
+      <LoadingState />
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>

@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { aerPercent, formatAer, netMarketValue, type CashFlow } from '../lib/aer';
 import { useAuth } from '../contexts/AuthContext';
+import { Spinner } from '../components/Loading';
 import { DateRangeField } from '../components/DateField';
+import { useShareLedger, type AnalyticsReportRow, type DetailedReport } from '../hooks/useShareLedger';
 
 interface ShareHolding {
   share_id: string;
@@ -44,33 +46,6 @@ interface PortfolioHolding {
   total_dividends: number;
   total_returns: number;
   gain_loss: number;
-}
-
-interface DetailedShareTransaction {
-  entity_name: string;
-  share_ticker: string;
-  share_name: string;
-  date: string;
-  status: string;
-  unit_price: number;
-  no_of_shares: number;
-  share_cum_balance: number;
-  purchase_cost: number;
-  sales_value: number;
-  avg_cost: number;
-  avg_price: number;
-  dividend: number;
-  market_value: number;
-  cash_flow: number;
-  total_surplus: number;
-  cum_surplus: number;
-  cds_account: string;
-  cost_per_share: number;
-  market_price: number;
-  market_price_after_brokerage: number;
-  sale_value: number;
-  purchase_value: number;
-  annual_equivalent_rate: number;
 }
 
 interface CashbookEntry {
@@ -118,21 +93,6 @@ interface ScripEntryReportRow {
   notes: string | null;
 }
 
-interface ShareAnalyticsReportRow {
-  entity_name: string;
-  ticker: string;
-  share_name: string;
-  share_cum_bal: number;
-  purchase_cost: number;
-  sale_value: number;
-  av_cost: number;
-  dividend: number;
-  cum_surplus: number;
-  market_value: number;
-  cash_flow: number;
-  total_surplus: number;
-}
-
 interface SectorWiseRow {
   sector: string;
   total_cost: number;
@@ -162,14 +122,15 @@ export function Reports() {
   const [activeReport, setActiveReport] = useState<ReportType>(null);
   const [shareData, setShareData] = useState<ShareHolding[]>([]);
   const [portfolioData, setPortfolioData] = useState<PortfolioHolding[]>([]);
-  const [detailedData, setDetailedData] = useState<DetailedShareTransaction[]>([]);
+  const [detailedData, setDetailedData] = useState<DetailedReport | null>(null);
   const [cashbookData, setCashbookData] = useState<CashbookReport | null>(null);
   const [dividendData, setDividendData] = useState<DividendReportRow[]>([]);
   const [scripData, setScripData] = useState<ScripEntryReportRow[]>([]);
-  const [analyticsData, setAnalyticsData] = useState<ShareAnalyticsReportRow[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsReportRow[]>([]);
   const [sectorWiseData, setSectorWiseData] = useState<SectorWiseRow[]>([]);
   const [contributorsData, setContributorsData] = useState<ContributorRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const shareLedger = useShareLedger();
   const [entities, setEntities] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>('all');
   const [selectedEntityName, setSelectedEntityName] = useState<string>('All Entities');
@@ -534,150 +495,9 @@ export function Reports() {
   async function generateDetailedShareReport() {
     try {
       setLoading(true);
-
-      const buildTransactionsQuery = () => {
-        let q = supabase
-        .from('transactions')
-        .select(`
-          id,
-          entity_id,
-          share_id,
-          transaction_type,
-          transaction_date,
-          no_of_shares,
-          price_per_share,
-          total_amount,
-          fees,
-          brokerage_fee_rate,
-          entities (
-            id,
-            name,
-            entity_id
-          ),
-          shares (
-            id,
-            ticker,
-            share_name
-          )
-        `)
-        .in('approval_status', ['MANUAL_APPROVED'])
-        .order('transaction_date', { ascending: true })
-        .order('id', { ascending: true });
-        if (fromDate) q = q.gte('transaction_date', fromDate);
-        if (toDate) q = q.lte('transaction_date', toDate);
-        return q;
-      };
-
-      const buildDividendsQuery = () => {
-        let q = supabase
-          .from('dividends')
-          .select('entity_id, share_id, payment_date, amount_net')
-          .order('payment_date', { ascending: true })
-          .order('id', { ascending: true });
-        if (fromDate) q = q.gte('payment_date', fromDate);
-        if (toDate) q = q.lte('payment_date', toDate);
-        return q;
-      };
-
-      // Paged. Run unbounded these were capped at db-max-rows: the price lookup
-      // is ordered newest-first, so shares past the cap resolved to a market
-      // price of zero, which now feeds the XIRR rather than only a total.
-      const [transactionsData, dividendsData, pricesData] = await Promise.all([
-        selectAll(buildTransactionsQuery),
-        selectAll(buildDividendsQuery),
-        selectAll(() => supabase
-          .from('daily_share_prices')
-          .select('share_id, share_price, effective_date')
-          .order('effective_date', { ascending: false })
-          .order('id', { ascending: true })),
-      ]);
-
-      const transactionsRes = { data: transactionsData };
-      const dividendsRes    = { data: dividendsData };
-      const pricesRes       = { data: pricesData };
-
-      const latestPrices = new Map<string, number>();
-      pricesRes.data?.forEach(p => {
-        if (!latestPrices.has(p.share_id)) {
-          latestPrices.set(p.share_id, p.share_price);
-        }
-      });
-
-      const dividendMap = new Map<string, number>();
-      dividendsRes.data?.forEach(d => {
-        const key = `${d.entity_id}-${d.share_id}`;
-        dividendMap.set(key, (dividendMap.get(key) || 0) + Number(d.amount_net));
-      });
-
-      const balanceTracker = new Map<string, number>();
-      const costTracker = new Map<string, number>();
-      let cumulativeSurplus = 0;
-
-      const detailedTransactions: DetailedShareTransaction[] = [];
-
-      transactionsRes.data?.forEach((tx: any) => {
-        if (!tx.entities || !tx.shares) return;
-
-        const key = `${tx.entity_id}-${tx.share_id}`;
-        const currentBalance = balanceTracker.get(key) || 0;
-        const currentCost = costTracker.get(key) || 0;
-
-        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
-        const shares = Number(tx.no_of_shares);
-        const price = Number(tx.price_per_share);
-        const totalAmount = Number(tx.total_amount);
-        const newBalance = isBuy ? currentBalance + shares : currentBalance - shares;
-        const newCost = isBuy ? currentCost + totalAmount : currentCost - (currentBalance > 0 ? (currentCost / currentBalance) * shares : 0);
-
-        balanceTracker.set(key, newBalance);
-        costTracker.set(key, newCost);
-
-        const avgCost = newBalance > 0 ? newCost / newBalance : 0;
-        const marketPrice = latestPrices.get(tx.share_id) || price;
-        // Use stored blended brokerage_fee_rate from the transaction (not a hardcoded rate)
-        const storedFeeRate = tx.brokerage_fee_rate != null ? Number(tx.brokerage_fee_rate) / 100 : 0;
-        const marketPriceAfterBrokerage = isBuy
-          ? marketPrice * (1 + storedFeeRate)
-          : marketPrice * (1 - storedFeeRate);
-
-        const marketValue = newBalance * marketPrice;
-        const cashFlow = isBuy ? -totalAmount : totalAmount;
-        const totalSurplus = marketValue - newCost;
-        cumulativeSurplus += (isBuy ? 0 : totalAmount - (avgCost * shares));
-
-        const dividend = dividendMap.get(key) || 0;
-        const daysSinceStart = Math.max(1, Math.floor((new Date().getTime() - new Date(tx.transaction_date).getTime()) / (1000 * 60 * 60 * 24)));
-        const annualEquivalentRate = newCost > 0 ? (totalSurplus / newCost) * (365 / daysSinceStart) * 100 : 0;
-
-        detailedTransactions.push({
-          entity_name: tx.entities.name,
-          share_ticker: tx.shares.ticker,
-          share_name: tx.shares.share_name,
-          date: tx.transaction_date,
-          status: tx.transaction_type,
-          unit_price: price,
-          no_of_shares: shares,
-          share_cum_balance: newBalance,
-          purchase_cost: isBuy ? totalAmount : 0,
-          sales_value: isBuy ? 0 : totalAmount,
-          avg_cost: avgCost,
-          avg_price: avgCost,
-          dividend: dividend,
-          market_value: marketValue,
-          cash_flow: cashFlow,
-          total_surplus: totalSurplus,
-          cum_surplus: cumulativeSurplus,
-          cds_account: tx.entities.entity_id || '',
-          cost_per_share: avgCost,
-          market_price: marketPrice,
-          market_price_after_brokerage: marketPriceAfterBrokerage,
-          sale_value: isBuy ? 0 : totalAmount,
-          purchase_value: isBuy ? totalAmount : 0,
-          annual_equivalent_rate: annualEquivalentRate
-        });
-      });
-
-      setDetailedData(detailedTransactions);
+      // The ledger Share Analytics reads, not a replay of `transactions`: that
+      // copy never counted scrip, and ran one Cum Surplus across every holding.
+      setDetailedData(await shareLedger.loadDetailedReport({ from: fromDate, to: toDate }));
       setActiveReport('detailed');
     } catch (error) {
       console.error('Error generating detailed share report:', error);
@@ -859,86 +679,10 @@ export function Reports() {
   async function generateAnalyticsReport() {
     try {
       setLoading(true);
-
-      const [txRes, divRes, priceRes, obRes] = await Promise.all([
-        supabase.from('transactions').select(`
-          entity_id, share_id, transaction_type, no_of_shares, total_amount,
-          entities ( name ), shares ( ticker, share_name )
-        `).in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: true }),
-        supabase.from('dividends').select('entity_id, share_id, amount_net'),
-        supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
-        supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost'),
-      ]);
-
-      if (txRes.error) throw txRes.error;
-
-      const latestPrices = new Map<string, number>();
-      priceRes.data?.forEach((p: any) => { if (!latestPrices.has(p.share_id)) latestPrices.set(p.share_id, p.share_price); });
-
-      const divMap = new Map<string, number>();
-      divRes.data?.forEach((d: any) => {
-        const k = `${d.entity_id}||${d.share_id}`;
-        divMap.set(k, (divMap.get(k) || 0) + Number(d.amount_net));
-      });
-
-      type Acc = { entity_name: string; ticker: string; share_name: string; share_id: string; bal: number; cost: number; purchase_cost: number; sale_value: number; };
-      const map = new Map<string, Acc>();
-
-      obRes.data?.forEach((ob: any) => {
-        const k = `${ob.entity_id}||${ob.share_id}`;
-        if (!map.has(k)) map.set(k, { entity_name: '', ticker: '', share_name: '', share_id: ob.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
-        const r = map.get(k)!;
-        // average_purchase_cost is per share, so the opening cost is the
-        // product — the same rule Portfolio.tsx and ShareAnalytics.tsx use.
-        const openingShares = Number(ob.opening_shares) || 0;
-        const openingCost = openingShares * (Number(ob.average_purchase_cost) || 0);
-        r.bal += openingShares;
-        r.cost += openingCost;
-        r.purchase_cost += openingCost;
-      });
-
-      txRes.data?.forEach((tx: any) => {
-        if (!tx.entities || !tx.shares) return;
-        const k = `${tx.entity_id}||${tx.share_id}`;
-        if (!map.has(k)) map.set(k, { entity_name: tx.entities.name, ticker: tx.shares.ticker, share_name: tx.shares.share_name, share_id: tx.share_id, bal: 0, cost: 0, purchase_cost: 0, sale_value: 0 });
-        const r = map.get(k)!;
-        if (!r.entity_name) { r.entity_name = tx.entities.name; r.ticker = tx.shares.ticker; r.share_name = tx.shares.share_name; }
-        const shares = Number(tx.no_of_shares);
-        const amt = Number(tx.total_amount);
-        const isBuy = tx.transaction_type === 'BUY' || tx.transaction_type === 'Buy';
-        if (isBuy) { r.bal += shares; r.cost += amt; r.purchase_cost += amt; }
-        else {
-          const prevBal = r.bal;
-          r.bal -= shares;
-          r.cost -= prevBal > 0 ? (r.cost / prevBal) * shares : 0;
-          r.sale_value += amt;
-        }
-      });
-
-      const rows: ShareAnalyticsReportRow[] = [];
-      map.forEach((r, k) => {
-        const dividend = divMap.get(k) || 0;
-        const marketPrice = latestPrices.get(r.share_id) || 0;
-        const market_value = r.bal * marketPrice;
-        const cum_surplus = r.sale_value + dividend - r.purchase_cost;
-        const cash_flow = r.sale_value - r.purchase_cost;
-        rows.push({
-          entity_name: r.entity_name,
-          ticker: r.ticker,
-          share_name: r.share_name,
-          share_cum_bal: r.bal,
-          purchase_cost: r.purchase_cost,
-          sale_value: r.sale_value,
-          av_cost: r.bal > 0 ? r.cost / r.bal : 0,
-          dividend,
-          cum_surplus,
-          market_value,
-          cash_flow,
-          total_surplus: cum_surplus + market_value,
-        });
-      });
-
-      setAnalyticsData(rows.filter(r => r.entity_name));
+      // Same holdings and same closing Cum Surplus as Share Analytics. This used
+      // to replay `transactions` itself, without scrip and before fees, and every
+      // holding came out different -- HNB.X0000 by 1,572,366.58.
+      setAnalyticsData(await shareLedger.loadAnalyticsReport());
       setActiveReport('analytics');
     } catch (err) {
       console.error(err);
@@ -1169,8 +913,8 @@ export function Reports() {
       rows = scripData.map(s => [s.entity_name, s.ticker, s.share_name, s.entry_date, s.effective_date || '', s.no_of_shares, s.script_dividend_ratio || '', s.status, s.notes || '']);
     } else if (reportType === 'analytics') {
       filename = 'share_analytics_report.csv';
-      headers = ['Entity', 'Ticker', 'Share Name', 'Share Balance', 'Purchase Cost', 'Sale Value', 'Avg Cost', 'Dividend', 'Cum Surplus', 'Market Value', 'Cash Flow', 'Total Surplus'];
-      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_cost.toFixed(4), a.dividend.toFixed(2), (a.cum_surplus + a.market_value).toFixed(2), a.market_value.toFixed(2), a.cash_flow.toFixed(2), a.total_surplus.toFixed(2)]);
+      headers = ['Entity', 'Ticker', 'Share Name', 'Share Balance', 'Purchase Cost', 'Sale Value', 'Avg Cost', 'Dividend', 'Cash Flow (Realised)', 'MV after Fees', 'Cum Surplus'];
+      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_price.toFixed(4), a.dividend.toFixed(2), a.cash_flow.toFixed(2), a.mv_after_fees == null ? '' : a.mv_after_fees.toFixed(2), a.cum_surplus.toFixed(2)]);
     } else if (reportType === 'share') {
       filename = 'share_holdings_report.csv';
       headers = ['Symbol', 'Company', 'Shares', 'Avg Cost', 'Total Cost', 'Current Price', 'Current Value', 'Gain/Loss', '%'];
@@ -1344,6 +1088,7 @@ export function Reports() {
   }
 
   if (activeReport === 'detailed') {
+    const detailed = detailedData ?? { rows: [], eventCount: 0, totalCumSurplus: 0 };
     return (
       <div className="p-8">
         <style>
@@ -1395,88 +1140,64 @@ export function Reports() {
             {fromDate && <p className="text-sm text-gray-500 mt-1">Date Range: {new Date(fromDate).toLocaleDateString()} - {new Date(toDate).toLocaleDateString()}</p>}
           </div>
 
+          {/*
+            One holding at a time: its events in replay order, then its closing
+            Market Value row. Cum Surplus is that holding's own -- realised on an
+            event row, realised plus MV after fees on the closing row, the figure
+            its Share Analytics breakdown shows. A dash is a cell with nothing to
+            say, not a zero.
+          */}
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b-2 border-gray-900">
               <tr>
-                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Entity</th>
-                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Share</th>
-                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Date</th>
-                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">Status</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Unit Price</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Shares</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cum Bal</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Purchase Cost</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Sales Value</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Avg Cost</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Dividend</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Market Value</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cash Flow</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Total Surplus</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Cum Surplus</th>
-                <th className="px-2 py-2 text-left text-xs font-bold text-gray-900">CDS</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Market Price</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">Price + Brok.</th>
-                <th className="px-2 py-2 text-right text-xs font-bold text-gray-900">AER %</th>
+                {['Entity', 'Share', 'Date', 'Status', 'Unit Price', 'Shares', 'Cum Bal', 'Purchase Cost', 'Sale Value', 'Av Price', 'Dividend', 'MV after Fees', 'Cash Flow', 'Cum Surplus', 'CDS', 'Market Price', 'MV after Fees / Share', 'AER %'].map((h, i) => (
+                  <th key={h} className={`px-2 py-2 ${i < 4 || h === 'CDS' ? 'text-left' : 'text-right'} text-xs font-bold text-gray-900`}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {detailedData.map((row, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                  <td className="px-2 py-2 text-xs text-gray-900">{row.entity_name}</td>
-                  <td className="px-2 py-2 text-xs font-medium text-gray-900">{row.share_ticker}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900">{new Date(row.date).toLocaleDateString()}</td>
-                  <td className="px-2 py-2">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${
-                      row.status === 'BUY' || row.status === 'Buy' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                    }`}>
-                      {row.status}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.unit_price.toFixed(2)}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.no_of_shares.toLocaleString()}</td>
-                  <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">{row.share_cum_balance.toLocaleString()}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
-                    {row.purchase_cost > 0 ? row.purchase_cost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
-                  </td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
-                    {row.sales_value > 0 ? row.sales_value.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
-                  </td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.avg_cost.toFixed(2)}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">
-                    {row.dividend > 0 ? row.dividend.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '-'}
-                  </td>
-                  <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">
-                    {row.market_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
-                    row.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {row.cash_flow.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
-                    row.total_surplus >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {row.total_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
-                    row.cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {row.cum_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-2 py-2 text-xs text-gray-900">{row.cds_account}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.market_price.toFixed(2)}</td>
-                  <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.market_price_after_brokerage.toFixed(2)}</td>
-                  <td className={`px-2 py-2 text-xs font-semibold text-right ${
-                    row.annual_equivalent_rate >= 0 ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {row.annual_equivalent_rate.toFixed(2)}%
-                  </td>
-                </tr>
-              ))}
+              {detailed.rows.map((row, idx) => {
+                const money = (v: number | null, cls = 'text-gray-900') =>
+                  <td className={`px-2 py-2 text-xs text-right ${v == null ? 'text-gray-400' : cls}`}>{v == null ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>;
+                const signed = (v: number | null) => money(v, `font-semibold ${v != null && v >= 0 ? 'text-green-600' : 'text-red-600'}`);
+                const badge =
+                  row.closing ? 'bg-slate-700 text-white'
+                  : row.status === 'Buy' || row.status === 'BUY' ? 'bg-green-100 text-green-800'
+                  : row.status === 'Sell' || row.status === 'SELL' ? 'bg-red-100 text-red-800'
+                  : row.status === 'Dividend' ? 'bg-yellow-100 text-yellow-800'
+                  : row.status === 'Scrip' ? 'bg-purple-100 text-purple-800'
+                  : 'bg-blue-100 text-blue-800';
+                return (
+                  <tr key={idx} className={row.closing ? 'bg-slate-50 font-semibold border-b-2 border-slate-300' : 'hover:bg-gray-50'}>
+                    <td className="px-2 py-2 text-xs text-gray-900">{row.entity_name}</td>
+                    <td className="px-2 py-2 text-xs font-medium text-gray-900">{row.share_ticker}</td>
+                    <td className="px-2 py-2 text-xs text-gray-900">{row.date ? new Date(row.date + 'T00:00:00').toLocaleDateString() : '—'}</td>
+                    <td className="px-2 py-2">
+                      <span className={`inline-flex px-2 py-0.5 rounded text-xs font-semibold ${badge}`}>{row.status}</span>
+                    </td>
+                    {money(row.unit_price)}
+                    <td className="px-2 py-2 text-xs text-gray-900 text-right">{row.no_of_shares == null ? '—' : row.no_of_shares.toLocaleString()}</td>
+                    <td className="px-2 py-2 text-xs font-semibold text-gray-900 text-right">{row.share_cum_bal.toLocaleString()}</td>
+                    {money(row.purchase_cost)}
+                    {money(row.sale_value)}
+                    {money(row.av_price)}
+                    {money(row.dividend)}
+                    {money(row.market_value)}
+                    {signed(row.cash_flow)}
+                    {signed(row.cum_surplus)}
+                    <td className="px-2 py-2 text-xs text-gray-900">{row.cds_account || '—'}</td>
+                    {money(row.market_price)}
+                    {money(row.mv_after_fees_per_share)}
+                    <td className={`px-2 py-2 text-xs font-semibold text-right ${row.aer == null ? 'text-gray-400' : row.aer >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatAer(row.aer)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
-          {detailedData.length === 0 && (
+          {detailed.rows.length === 0 && (
             <div className="text-center py-12">
               <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-500">No transactions found</p>
@@ -1484,13 +1205,11 @@ export function Reports() {
           )}
 
           <div className="mt-8 pt-8 border-t border-gray-300 text-sm text-gray-600">
-            <p>Total Transactions: {detailedData.length}</p>
+            <p>Total Transactions: {detailed.eventCount}</p>
             <p className="mt-2">
-              Final Cumulative Surplus:
-              <span className={`ml-2 font-semibold text-lg ${
-                detailedData.length > 0 && detailedData[detailedData.length - 1].cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'
-              }`}>
-                Rs. {detailedData.length > 0 ? detailedData[detailedData.length - 1].cum_surplus.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '0.00'}
+              Total Cum Surplus, all holdings listed (realised + MV after fees):
+              <span className={`ml-2 font-semibold text-lg ${detailed.totalCumSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                Rs. {detailed.totalCumSurplus.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </p>
           </div>
@@ -1767,8 +1486,11 @@ export function Reports() {
     const totPurchase = analyticsData.reduce((s, r) => s + r.purchase_cost, 0);
     const totSale = analyticsData.reduce((s, r) => s + r.sale_value, 0);
     const totDiv = analyticsData.reduce((s, r) => s + r.dividend, 0);
-    const totMV = analyticsData.reduce((s, r) => s + r.market_value, 0);
-    const totSurplus = analyticsData.reduce((s, r) => s + r.total_surplus, 0);
+    // Null MV (an unpriced holding) adds nothing: the total is the sum of the
+    // holdings that have one, and those rows keep their dashes.
+    const totMV = analyticsData.reduce((s, r) => s + (r.mv_after_fees ?? 0), 0);
+    const totCash = analyticsData.reduce((s, r) => s + r.cash_flow, 0);
+    const totCum = analyticsData.reduce((s, r) => s + r.cum_surplus, 0);
     const fmt2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return (
       <div className="p-8">
@@ -1796,7 +1518,7 @@ export function Reports() {
               { label: 'Total Purchase Cost', value: `Rs. ${fmt2(totPurchase)}`, color: 'text-gray-900' },
               { label: 'Total Sale Value', value: `Rs. ${fmt2(totSale)}`, color: 'text-gray-900' },
               { label: 'Total Dividends', value: `Rs. ${fmt2(totDiv)}`, color: 'text-yellow-700' },
-              { label: 'Total Market Value', value: `Rs. ${fmt2(totMV)}`, color: 'text-blue-700' },
+              { label: 'Total MV after Fees', value: `Rs. ${fmt2(totMV)}`, color: 'text-blue-700' },
             ].map(card => (
               <div key={card.label} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                 <p className="text-xs text-gray-500 mb-1">{card.label}</p>
@@ -1804,21 +1526,18 @@ export function Reports() {
               </div>
             ))}
           </div>
+          {/*
+            Read across: Cash Flow is what the holding has realised (sales plus
+            dividends less purchases); add what the shares still held would fetch
+            after fees and you have Cum Surplus -- the figure Share Analytics shows
+            for the same holding.
+          */}
           <table className="w-full mb-6 text-sm">
             <thead className="bg-gray-50 border-b-2 border-gray-700">
               <tr>
-                <th className="px-3 py-2 text-left font-bold text-gray-900">Entity</th>
-                <th className="px-3 py-2 text-left font-bold text-gray-900">Ticker</th>
-                <th className="px-3 py-2 text-left font-bold text-gray-900">Share</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Balance</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Purchase Cost</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Sale Value</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Avg Cost</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Dividend</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Cum Surplus</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Mkt Value</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Cash Flow</th>
-                <th className="px-3 py-2 text-right font-bold text-gray-900">Total Surplus</th>
+                {['Entity', 'Ticker', 'Share', 'Balance', 'Purchase Cost', 'Sale Value', 'Av Price', 'Dividend', 'Cash Flow (Realised)', 'MV after Fees', 'Cum Surplus'].map((h, i) => (
+                  <th key={h} className={`px-3 py-2 ${i < 3 ? 'text-left' : 'text-right'} font-bold text-gray-900`}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -1830,12 +1549,11 @@ export function Reports() {
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{a.share_cum_bal.toLocaleString()}</td>
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.purchase_cost)}</td>
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.sale_value)}</td>
-                  <td className="px-3 py-2 text-xs text-right text-gray-700">{a.av_cost.toFixed(4)}</td>
+                  <td className="px-3 py-2 text-xs text-right text-gray-700">{a.av_price.toFixed(4)}</td>
                   <td className="px-3 py-2 text-xs text-right text-yellow-700">{fmt2(a.dividend)}</td>
-                  <td className={`px-3 py-2 text-xs text-right font-medium ${(a.cum_surplus + a.market_value) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cum_surplus + a.market_value)}</td>
-                  <td className="px-3 py-2 text-xs text-right text-blue-700">{fmt2(a.market_value)}</td>
                   <td className={`px-3 py-2 text-xs text-right ${a.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cash_flow)}</td>
-                  <td className={`px-3 py-2 text-xs text-right font-semibold ${a.total_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.total_surplus)}</td>
+                  <td className={`px-3 py-2 text-xs text-right ${a.mv_after_fees == null ? 'text-gray-400' : 'text-blue-700'}`}>{a.mv_after_fees == null ? '—' : fmt2(a.mv_after_fees)}</td>
+                  <td className={`px-3 py-2 text-xs text-right font-semibold ${a.cum_surplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cum_surplus)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1846,10 +1564,9 @@ export function Reports() {
                 <td className="px-3 py-3 text-sm font-bold text-gray-900 text-right">{fmt2(totSale)}</td>
                 <td />
                 <td className="px-3 py-3 text-sm font-bold text-yellow-700 text-right">{fmt2(totDiv)}</td>
-                <td className={`px-3 py-3 text-sm font-bold text-right ${analyticsData.reduce((s, r) => s + r.cum_surplus + r.market_value, 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(analyticsData.reduce((s, r) => s + r.cum_surplus + r.market_value, 0))}</td>
+                <td className={`px-3 py-3 text-sm font-bold text-right ${totCash >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(totCash)}</td>
                 <td className="px-3 py-3 text-sm font-bold text-blue-700 text-right">{fmt2(totMV)}</td>
-                <td />
-                <td className={`px-3 py-3 text-sm font-bold text-right ${totSurplus >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(totSurplus)}</td>
+                <td className={`px-3 py-3 text-sm font-bold text-right ${totCum >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(totCum)}</td>
               </tr>
             </tfoot>
           </table>
@@ -2292,9 +2009,9 @@ export function Reports() {
               <button
                 onClick={generateShareReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2323,9 +2040,9 @@ export function Reports() {
               <button
                 onClick={generatePortfolioReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2378,9 +2095,9 @@ export function Reports() {
               <button
                 onClick={generateCashbookReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2407,9 +2124,9 @@ export function Reports() {
               <button
                 onClick={generateAnalyticsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2453,9 +2170,9 @@ export function Reports() {
               <button
                 onClick={generateDividendsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2499,9 +2216,9 @@ export function Reports() {
               <button
                 onClick={generateScripReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2528,9 +2245,9 @@ export function Reports() {
               <button
                 onClick={generateSectorWiseReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2557,9 +2274,9 @@ export function Reports() {
               <button
                 onClick={generateContributorsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>

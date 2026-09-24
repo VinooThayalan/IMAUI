@@ -12,6 +12,7 @@ import {
 } from '../services/cashLedger.service';
 import { exportData, type ExportColumn } from '../lib/exportData';
 import { DateRangeField } from '../components/DateField';
+import { LoadingState, Spinner } from '../components/Loading';
 
 interface Entity {
   id: string;
@@ -514,9 +515,7 @@ export function BankTransactionHistory() {
 
       {/* Main table */}
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-        </div>
+        <LoadingState />
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
           <Landmark className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -663,9 +662,7 @@ export function BankTransactionHistory() {
                               )}
 
                               {ledgerLoading ? (
-                                <div className="flex items-center justify-center py-8">
-                                  <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-blue-600" />
-                                </div>
+                                <LoadingState compact />
                               ) : ledger.length === 0 ? (
                                 <div className="py-6 text-center text-gray-400 text-sm">No transactions recorded for this account.</div>
                               ) : periodLedger.length === 0 ? (
@@ -739,7 +736,7 @@ export function BankTransactionHistory() {
                                                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
                                                 >
                                                   {isLoadingThis
-                                                    ? <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                                                    ? <Spinner size="xs" />
                                                     : <FileText className="w-3 h-3" />}
                                                   View
                                                 </button>

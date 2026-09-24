@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { PieChart } from './PieChart';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
+import { LoadingState } from './Loading';
 
 interface SectorData {
   sector: string;
@@ -123,10 +124,8 @@ export function SectorAnalytics() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-12">
-        <div className="flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
+      <div className="bg-white rounded-xl border border-gray-200">
+        <LoadingState />
       </div>
     );
   }

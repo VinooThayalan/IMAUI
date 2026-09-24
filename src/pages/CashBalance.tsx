@@ -22,6 +22,7 @@ import {
 } from '../services/cashLedger.service';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/auditLog';
+import { LoadingState } from '../components/Loading';
 
 interface Entity {
   id: string;
@@ -378,9 +379,7 @@ export function CashBalance() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center h-screen">
-        <div className="text-lg text-gray-600">Loading...</div>
-      </div>
+      <LoadingState />
     );
   }
 
