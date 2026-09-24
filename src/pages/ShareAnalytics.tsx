@@ -6,14 +6,10 @@ import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import { TradeOrderPanel } from '../components/TradeOrderPanel';
 import { useTradeOrder } from '../hooks/useTradeOrder';
+import { useShareLedger } from '../hooks/useShareLedger';
 import { formatAer, netMarketValue, portfolioAer } from '../lib/aer';
 import {
-  computeRows,
   type ComputedRow,
-  type DividendRecord,
-  type OpeningBalance,
-  type RawNote,
-  type ScripRecord,
   type ShareGroup,
   groupAerPercent,
   groupCashFlows,
@@ -21,7 +17,6 @@ import {
   holdingSummary,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
-import { loadProcessedNotes } from '../services/shareAnalytics.service';
 import {
   detailExport,
   detailFilename,
@@ -681,6 +676,7 @@ export function ShareAnalytics() {
   const [groups, setGroups]                       = useState<ShareGroup[]>([]);
   const [activeGroup, setActiveGroup]             = useState<ShareGroup | null>(null);
   const [cacheError, setCacheError]               = useState<string | null>(null);
+  const { loadGroups } = useShareLedger();
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
@@ -813,175 +809,14 @@ export function ShareAnalytics() {
       }
 
       // ── Cache miss — recompute from source tables ─────────────────────────
-      // Every one of these is paged. Run unbounded they were capped at
-      // db-max-rows: the price query in particular is ordered newest-first, so
-      // any share whose latest price fell past the cap resolved to a market
-      // price of zero and lost its terminal value.
-      const [entitiesData, sharesData, txnsData, openingData, dividendsData, pricesData, scripsData, feeTypesData] = await Promise.all([
-        selectAll(() => supabase.from('entities').select('id, name').order('id', { ascending: true })),
-        selectAll(() => supabase.from('shares').select('id, ticker, share_name').order('id', { ascending: true })),
-        selectAll(() => supabase.from('transactions').select('id, entity_id, share_id, cds_account_id, brokerage_fee_rate, transaction_date, transaction_type, no_of_shares, price_per_share, total_amount').in('approval_status', ['MANUAL_APPROVED']).order('transaction_date', { ascending: false }).order('id', { ascending: true })),
-        selectAll(() => supabase.from('entity_share_opening_balances').select('entity_id, share_id, opening_shares, average_purchase_cost, effective_date').order('id', { ascending: true })),
-        selectAll(() => supabase.from('dividends').select('entity_id, share_id, payment_date, amount_net').order('id', { ascending: true })),
-        selectAll(() => supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }).order('id', { ascending: true })),
-        selectAll(() => supabase.from('scrip_entries').select('entity_id, share_id, no_of_shares, effective_date, entry_date').eq('status', 'RECEIVED').order('id', { ascending: true })),
-        selectAll(() => supabase.from('brokerage_fee_types').select('rate, min_price').eq('is_active', true).order('min_price', { ascending: true, nullsFirst: true }).order('id', { ascending: true })),
-      ]);
-
-      const entitiesRes   = { data: entitiesData };
-      const sharesRes     = { data: sharesData };
-      const txnsRes       = { data: txnsData };
-      const openingRes    = { data: openingData };
-      const dividendsRes  = { data: dividendsData };
-      const pricesRes     = { data: pricesData };
-      const scripsRes     = { data: scripsData };
-
-      // Default fee rate = lowest tier's rate (used when a group has no transaction-level rate stored)
-      const defaultFeeRate = feeTypesData.length > 0
-        ? Number(feeTypesData[0].rate)
-        : 0;
-
-      const entityMap = new Map<string, string>((entitiesRes.data || []).map((e: any) => [e.id, e.name]));
-      const shareMap  = new Map<string, { ticker: string; name: string }>((sharesRes.data || []).map((s: any) => [s.id, { ticker: s.ticker || '—', name: s.share_name || '—' }]));
-
-      // Build txn map; collect all distinct CDS accounts per entity+share; latest brokerage fee rate
-      const txnMap        = new Map<string, { entity_id: string; share_id: string; cds_account_id: string | null; total_amount: number }>();
-      const cdsSetMap     = new Map<string, Set<string>>(); // key: entity_id__share_id -> set of CDS accounts
-      const feeRateMap    = new Map<string, number>();      // key: entity_id__share_id -> latest fee rate (blended, stored on txn)
-      for (const t of (txnsRes.data || [])) {
-        txnMap.set(t.id, { entity_id: t.entity_id, share_id: t.share_id, cds_account_id: t.cds_account_id ?? null, total_amount: Number(t.total_amount) || 0 });
-        const k = `${t.entity_id}__${t.share_id}`;
-        if (t.cds_account_id) {
-          if (!cdsSetMap.has(k)) cdsSetMap.set(k, new Set());
-          cdsSetMap.get(k)!.add(t.cds_account_id);
-        }
-        if (!feeRateMap.has(k) && t.brokerage_fee_rate != null) {
-          feeRateMap.set(k, Number(t.brokerage_fee_rate));
-        }
-      }
-
-      const openingMap = new Map<string, OpeningBalance>();
-      for (const ob of (openingRes.data || [])) {
-        openingMap.set(`${ob.entity_id}__${ob.share_id}`, {
-          entity_id: ob.entity_id, share_id: ob.share_id,
-          opening_shares: Number(ob.opening_shares),
-          average_purchase_cost: Number(ob.average_purchase_cost),
-          effective_date: ob.effective_date,
-        });
-      }
-
-      const dividendMap = new Map<string, DividendRecord[]>();
-      for (const d of (dividendsRes.data || [])) {
-        const k = `${d.entity_id}__${d.share_id}`;
-        if (!dividendMap.has(k)) dividendMap.set(k, []);
-        dividendMap.get(k)!.push({ entity_id: d.entity_id, share_id: d.share_id, payment_date: d.payment_date, amount_net: Number(d.amount_net) || 0 });
-      }
-
-      const scripMap = new Map<string, ScripRecord[]>();
-      for (const s of (scripsRes.data || [])) {
-        const k = `${s.entity_id}__${s.share_id}`;
-        if (!scripMap.has(k)) scripMap.set(k, []);
-        scripMap.get(k)!.push({ entity_id: s.entity_id, share_id: s.share_id, no_of_shares: Number(s.no_of_shares) || 0, effective_date: s.effective_date ?? null, entry_date: s.entry_date });
-      }
-
-      const priceMap     = new Map<string, number>();
-      const priceDateMap = new Map<string, string>();
-      for (const p of (pricesRes.data || [])) {
-        if (!priceMap.has(p.share_id)) {
-          priceMap.set(p.share_id, Number(p.share_price) || 0);
-          priceDateMap.set(p.share_id, p.effective_date);
-        }
-      }
-
-      // Through the service rather than inline, because the note read now carries
-      // `intraday_seq` and its ORDER BY has to agree with `sortNotes`. Two copies
-      // of that ordering is exactly the divergence the repository exists to
-      // prevent — the Dashboard reads the same one.
-      const notesData = await loadProcessedNotes();
-
-      const raw: RawNote[] = (notesData || [])
-        .filter((n: any) => txnMap.has(n.transaction_id))
-        .map((n: any) => {
-          const txn   = txnMap.get(n.transaction_id)!;
-          const share = shareMap.get(txn.share_id) ?? { ticker: '—', name: '—' };
-          // Use the note's own net_amount (net of fees) for cost/proceeds tracking;
-          // fall back to gross_amount if net_amount is not available.
-          const noteNet = Number(n.net_amount) || 0;
-          const noteGross = Number(n.gross_amount) || 0;
-          const amount = noteNet > 0 ? noteNet : noteGross;
-          return {
-            id: n.id, note_type: n.note_type, trade_date: n.trade_date,
-            no_of_shares: Number(n.no_of_shares) || 0,
-            price_avg: n.price_avg != null ? Number(n.price_avg) : null,
-            gross_amount: amount,
-            net_amount: noteNet,
-            entity_id: txn.entity_id, entity_name: entityMap.get(txn.entity_id) ?? '—',
-            share_id: txn.share_id, share_ticker: share.ticker, share_name: share.name,
-            cds_account: txn.cds_account_id ?? null,
-            intraday_seq: n.intraday_seq,
-          };
-        });
-
-      const allRaw = raw;
-
-      const groupKeys = new Set<string>();
-      for (const n of allRaw) groupKeys.add(`${n.entity_id}__${n.share_id}`);
-      for (const [k] of openingMap) {
-        groupKeys.add(k);
-      }
-      for (const [k] of scripMap) groupKeys.add(k);
-
-      const notesByGroup = new Map<string, RawNote[]>();
-      for (const n of allRaw) {
-        const k = `${n.entity_id}__${n.share_id}`;
-        if (!notesByGroup.has(k)) notesByGroup.set(k, []);
-        notesByGroup.get(k)!.push(n);
-      }
-
-      const result: ShareGroup[] = [];
-      for (const key of groupKeys) {
-        const notes   = notesByGroup.get(key) ?? [];
-        const opening = openingMap.get(key) ?? null;
-        const divs    = dividendMap.get(key) ?? [];
-        /*
-          No emptiness test here. There used to be
-          `if (notes.length === 0 && !opening) continue;`, which discarded every
-          group that groupKeys had just added from scripMap — a share held only
-          through scrip entries, never bought and with no opening balance, was
-          added and then dropped before it could be computed.
-
-          Mr. DJ Ambani's NDB.N0000 is exactly that: two RECEIVED scrip entries
-          totalling 55,230 shares, no transaction, no opening balance. It was
-          absent from Share Analytics while the Dashboard counted it, because
-          `shareMetrics.service` asks the question the right way round.
-
-          `computeRows` already answers "is there anything here?" by returning no
-          rows, and `computed.length === 0` below acts on that. One definition of
-          empty, in the service, rather than a second guess in front of it.
-        */
-
-        const [entityId, shareId] = key.split('__');
-        const share            = shareMap.get(shareId) ?? { ticker: '—', name: '—' };
-        const entityName       = entityMap.get(entityId) ?? '—';
-        const marketPrice      = priceMap.get(shareId) ?? 0;
-        const marketPriceDate  = priceDateMap.get(shareId) ?? null;
-        const cdsAccounts      = cdsSetMap.has(key) ? Array.from(cdsSetMap.get(key)!) : [];
-        const brokerageFeeRate = feeRateMap.get(key) ?? defaultFeeRate;
-
-        const scrips   = scripMap.get(key) ?? [];
-        const computed = computeRows(notes, opening, divs, marketPrice, scrips);
-        for (const row of computed) {
-          if (!row.entity_name) row.entity_name = entityName;
-          if (!row.share_ticker) row.share_ticker = share.ticker;
-          if (!row.share_name) row.share_name = share.name;
-        }
-        if (computed.length === 0) continue;
-
-        result.push({ share_id: shareId, share_ticker: share.ticker, share_name: share.name, entity_id: entityId, entity_name: entityName, market_price: marketPrice, market_price_date: marketPriceDate, cds_accounts: cdsAccounts, brokerage_fee_rate: brokerageFeeRate, rows: computed });
-      }
-
-      result.sort((a, b) => a.entity_name.localeCompare(b.entity_name) || a.share_ticker.localeCompare(b.share_ticker));
-      setGroups(result);
+      // Built by `shareGroups.service`, the assembly the Dashboard and Reports
+      // read too. It lived here as a third copy.
+      //
+      // Every entity is computed, because the cache is written for all of them;
+      // only the selected one is shown. The miss path used to show every entity
+      // regardless of the filter, until the next visit hit the cache.
+      const result = await loadGroups();
+      setGroups(selectedEntityId ? result.filter(g => g.entity_id === selectedEntityId) : result);
 
       // Persist computed result to cache (own try/catch so write failure still shows the report)
       try {
@@ -1086,7 +921,7 @@ export function ShareAnalytics() {
     } finally {
       setLoading(false);
     }
-  }, [selectedEntityId]);
+  }, [selectedEntityId, loadGroups]);
 
   /*
     The end date truncates history; the start date does not.
