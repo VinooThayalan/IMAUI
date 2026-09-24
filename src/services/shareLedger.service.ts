@@ -170,10 +170,64 @@ export interface ClosingRow {
   cumSurplus: number;
 }
 
+/**
+ * Realised surplus plus what the shares still held would fetch after fees.
+ *
+ * The one definition behind every "Cum Surplus" that closes a holding: the
+ * modal header, both closing rows, and the export's summary block. The header
+ * used to compute this inline and the Cost per share row repeated the market
+ * value instead, so HNB.X0000 read 519,220,527.72 in one place and
+ * 3,019,178,989.73 in the next row down.
+ *
+ * Unpriced, there is nothing held to add, and the realised figure is the answer.
+ * `null` only when the holding has no rows at all.
+ */
+export function closingCumSurplus(group: ShareGroup): number | null {
+  const last = group.rows[group.rows.length - 1];
+  if (!last) return null;
+  const perShareAfterFees = marketPricePerShareAfterFees(group);
+  return perShareAfterFees == null
+    ? last.cum_surplus
+    : last.cum_surplus + perShareAfterFees * last.share_cum_bal;
+}
+
+/**
+ * The figures across the top of a holding's breakdown.
+ *
+ * Built here so the modal header and the export's summary block read the same
+ * object. `null` is a figure nobody stated -- no market price means no after-fee
+ * price and no AER -- and renders as a dash or an empty cell, never as zero.
+ */
+export interface HoldingSummary {
+  sharesHeld: number;
+  avPrice: number;
+  marketPrice: number | null;
+  marketPriceDate: string | null;
+  mvAfterFeesPerShare: number | null;
+  cumSurplus: number;
+  aerPercent: number | null;
+}
+
+export function holdingSummary(group: ShareGroup, asOf: Date): HoldingSummary | null {
+  const last = group.rows[group.rows.length - 1];
+  const cumSurplus = closingCumSurplus(group);
+  if (!last || cumSurplus == null) return null;
+  return {
+    sharesHeld: last.share_cum_bal,
+    avPrice: last.av_price,
+    marketPrice: group.market_price > 0 ? group.market_price : null,
+    marketPriceDate: group.market_price > 0 ? group.market_price_date : null,
+    mvAfterFeesPerShare: marketPricePerShareAfterFees(group),
+    cumSurplus,
+    aerPercent: groupAerPercent(group, asOf),
+  };
+}
+
 export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
   const last = group.rows[group.rows.length - 1];
   const perShareAfterFees = marketPricePerShareAfterFees(group);
-  if (!last || perShareAfterFees == null) return [];
+  const cumSurplus = closingCumSurplus(group);
+  if (!last || perShareAfterFees == null || cumSurplus == null) return [];
 
   const mvAfterFees = perShareAfterFees * last.share_cum_bal;
   const totalPurchase = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
@@ -224,7 +278,7 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
         summary pill above it: BIL.N0000 read 107,006,545.75 against the header's
         -89,852,215.05.
       */
-      cumSurplus: last.cum_surplus + mvAfterFees,
+      cumSurplus,
     },
     {
       label: 'Cost per share',
@@ -243,7 +297,9 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
       marketValue: mvAfterFees,
       cashFlow: totalCashFlow + mvAfterFees,
       totalSurplus: mvAfterFees + (totalSale + totalDividend - totalPurchase),
-      cumSurplus: mvAfterFees,
+      // bug-47: repeated `mvAfterFees` after bug-46 fixed the row above, so
+      // HNB.X0000 read 3,019,178,989.73 (its market value) here.
+      cumSurplus,
     },
   ];
 }

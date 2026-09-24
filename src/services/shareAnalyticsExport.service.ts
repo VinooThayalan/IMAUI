@@ -19,6 +19,7 @@
 import {
   closingRows,
   groupAerPercent,
+  holdingSummary,
   marketPricePerShareAfterFees,
   type ComputedRow,
   type ShareGroup,
@@ -27,6 +28,8 @@ import {
 export type Cell = string | number;
 
 export interface CsvTable {
+  /** Written above the header row, when a file opens with a summary. */
+  preamble?: Cell[][];
   headers: string[];
   rows: Cell[][];
 }
@@ -199,7 +202,34 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
     }));
   }
 
-  return { headers: [...DETAIL_COLUMNS], rows };
+  return { preamble: summaryBlock(group, asOf), headers: [...DETAIL_COLUMNS], rows };
+}
+
+/*
+  The figures across the top of the breakdown, as a labelled block above the
+  table (bug-48). Read from `holdingSummary`, the same object the modal header
+  draws, so the file's Cum Surplus cannot come out different from the screen's.
+  An unpriced holding leaves its market cells empty rather than writing zero.
+*/
+function summaryBlock(group: ShareGroup, asOf: Date): Cell[][] {
+  const s = holdingSummary(group, asOf);
+  if (!s) return [];
+  return [
+    ['Share', 'Entity Name', 'Shares Held', 'Av Price', 'Market Price', 'Market Price Date',
+     'MV After Fees Per Share', 'Cum Surplus', 'AER (XIRR) %'],
+    [
+      group.share_ticker,
+      group.entity_name,
+      count(s.sharesHeld),
+      money(s.avPrice),
+      orBlank(s.marketPrice, money),
+      s.marketPriceDate ?? '',
+      orBlank(s.mvAfterFeesPerShare, money),
+      money(s.cumSurplus),
+      orBlank(s.aerPercent, v => v.toFixed(2)),
+    ],
+    [],
+  ];
 }
 
 /** `TICKER_Entity_analytics_2026-09-21.csv` */
