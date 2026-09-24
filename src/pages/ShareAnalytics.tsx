@@ -18,6 +18,7 @@ import {
   groupAerPercent,
   groupCashFlows,
   closingRows,
+  holdingSummary,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
 import { loadProcessedNotes } from '../services/shareAnalytics.service';
@@ -27,7 +28,7 @@ import {
   summaryExport,
 } from '../services/shareAnalyticsExport.service';
 
-function exportCsv(filename: string, headers: string[], rows: (string | number)[][]) {
+function exportCsv(filename: string, headers: string[], rows: (string | number)[][], preamble: (string | number)[][] = []) {
   const escape = (v: string | number) => {
     const s = String(v ?? '');
     return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
@@ -35,7 +36,7 @@ function exportCsv(filename: string, headers: string[], rows: (string | number)[
   // Leading BOM, matching lib/exportData.ts. Without it Excel reads the file as
   // the system codepage, and any non-ASCII character in an entity or share name
   // opens as mojibake.
-  const csv = '﻿' + [headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
+  const csv = '﻿' + [...preamble, headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -150,13 +151,14 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
   const order    = useTradeOrder(group.rows, group.entity_id, onOrderSaved);
   const undecided = undecidedDays(order.groups);
 
-  // XIRR for this group — terminal value uses market value after brokerage fees
-  const groupAer = groupAerPercent(group, new Date());
+  // Header figures — the same object the export's summary block reads.
+  const summary  = holdingSummary(group, new Date());
+  const groupAer = summary?.aerPercent ?? null;
 
   function exportDetail() {
     const asOf = new Date();
-    const { headers, rows } = detailExport(group, asOf);
-    exportCsv(detailFilename(group, asOf), headers, rows);
+    const { preamble, headers, rows } = detailExport(group, asOf);
+    exportCsv(detailFilename(group, asOf), headers, rows, preamble);
   }
 
   async function resolveFileUrl(fileUrl: string) {
@@ -320,30 +322,26 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
               <div className="text-xs text-gray-400">Av Price</div>
               <div className="font-bold text-gray-900">Rs. {fmt(last.av_price)}</div>
             </div>
-            {group.market_price > 0 && (
+            {summary?.marketPrice != null && (
               <>
                 <div className="text-center">
                   <div className="text-xs text-gray-400">
                     Market Price
-                    {group.market_price_date && <span className="ml-1 text-gray-300">({fmtDate(group.market_price_date)})</span>}
+                    {summary.marketPriceDate && <span className="ml-1 text-gray-300">({fmtDate(summary.marketPriceDate)})</span>}
                   </div>
-                  <div className="font-bold text-gray-900">Rs. {fmt(group.market_price)}</div>
+                  <div className="font-bold text-gray-900">Rs. {fmt(summary.marketPrice)}</div>
                 </div>
                 <div className="text-center">
                   <div className="text-xs text-gray-400">MV After Fees Per Share</div>
-                  <div className="font-bold text-indigo-700">Rs. {fmt(group.market_price - group.market_price * (group.brokerage_fee_rate / 100))}</div>
+                  <div className="font-bold text-indigo-700">{summary.mvAfterFeesPerShare == null ? '—' : `Rs. ${fmt(summary.mvAfterFeesPerShare)}`}</div>
                 </div>
               </>
             )}
             <div className="text-center">
               <div className="text-xs text-gray-400">Cum Surplus</div>
-              {group.market_price > 0 ? (() => {
-                const mvAfterFees = last.share_cum_bal * (group.market_price - group.market_price * (group.brokerage_fee_rate / 100));
-                const cumSurplus = last.cum_surplus + mvAfterFees;
-                return <div className={clsSurplus(cumSurplus)}>Rs. {fmt(cumSurplus)}</div>;
-              })() : (
-                <div className={clsSurplus(last.cum_surplus)}>Rs. {fmt(last.cum_surplus)}</div>
-              )}
+              {summary
+                ? <div className={clsSurplus(summary.cumSurplus)}>Rs. {fmt(summary.cumSurplus)}</div>
+                : <div className="text-gray-400">—</div>}
             </div>
             <div className="text-center">
               <div className="text-xs text-gray-400">AER (XIRR)</div>
