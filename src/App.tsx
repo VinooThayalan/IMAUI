@@ -7,6 +7,7 @@ import { lazyWithRetry } from './lib/lazyWithRetry';
 import { Login } from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { Shield } from 'lucide-react';
+import { LoadingState } from './components/Loading';
 
 const Dashboard = lazyWithRetry(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const Entities = lazyWithRetry(() => import('./pages/Entities').then(m => ({ default: m.Entities })));
@@ -48,9 +49,7 @@ const EmailDeliveries = lazyWithRetry(() => import('./pages/EmailDeliveries').th
 
 function PageFallback() {
   return (
-    <div className="flex items-center justify-center h-full p-8">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-    </div>
+    <LoadingState />
   );
 }
 
@@ -216,9 +215,7 @@ function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
+      <LoadingState screen />
     );
   }
 

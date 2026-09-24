@@ -6,6 +6,7 @@ import { useWriteError } from '../hooks/useWriteError';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
 import type { ExportColumn } from '../lib/exportData';
+import { LoadingState } from '../components/Loading';
 
 interface BankMasterItem {
   id: string;
@@ -314,9 +315,7 @@ export function Banks() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center p-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          </div>
+          <LoadingState />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { aerPercent, formatAer, netMarketValue, type CashFlow } from '../lib/aer';
 import { useAuth } from '../contexts/AuthContext';
+import { Spinner } from '../components/Loading';
 import { DateRangeField } from '../components/DateField';
 import { useShareLedger, type AnalyticsReportRow, type DetailedReport } from '../hooks/useShareLedger';
 
@@ -2008,9 +2009,9 @@ export function Reports() {
               <button
                 onClick={generateShareReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2039,9 +2040,9 @@ export function Reports() {
               <button
                 onClick={generatePortfolioReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2094,9 +2095,9 @@ export function Reports() {
               <button
                 onClick={generateCashbookReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2123,9 +2124,9 @@ export function Reports() {
               <button
                 onClick={generateAnalyticsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2169,9 +2170,9 @@ export function Reports() {
               <button
                 onClick={generateDividendsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2215,9 +2216,9 @@ export function Reports() {
               <button
                 onClick={generateScripReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2244,9 +2245,9 @@ export function Reports() {
               <button
                 onClick={generateSectorWiseReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>
@@ -2273,9 +2274,9 @@ export function Reports() {
               <button
                 onClick={generateContributorsReport}
                 disabled={loading}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
-                {loading ? 'Loading...' : 'Generate'}
+                {loading ? <><Spinner /> Loading…</> : 'Generate'}
               </button>
             </div>
           </div>

@@ -22,6 +22,7 @@ import {
   detailFilename,
   summaryExport,
 } from '../services/shareAnalyticsExport.service';
+import { LoadingState, Spinner } from '../components/Loading';
 
 function exportCsv(filename: string, headers: string[], rows: (string | number)[][], preamble: (string | number)[][] = []) {
   const escape = (v: string | number) => {
@@ -444,7 +445,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
                             }`}
                           >
                             {isLoading
-                              ? <span className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                              ? <Spinner size="xs" />
                               : <FileText className="w-3 h-3" />}
                             {isExpanded
                               ? <ChevronUp className="w-3 h-3" />
@@ -461,9 +462,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
                       <tr key={`detail-${row.id}`} className="bg-blue-50/40 border-b border-blue-100">
                         <td colSpan={17} className="px-6 py-4">
                           {!detail ? (
-                            <div className="flex items-center justify-center py-4">
-                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600" />
-                            </div>
+                            <LoadingState compact />
                           ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                               {/* Identity */}
@@ -1153,9 +1152,7 @@ export function ShareAnalytics() {
 
       {/* Main table */}
       {loading ? (
-        <div className="flex items-center justify-center h-48">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
-        </div>
+        <LoadingState />
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
           <BarChart2 className="w-12 h-12 text-gray-200 mx-auto mb-3" />

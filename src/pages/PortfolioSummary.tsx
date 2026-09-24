@@ -6,6 +6,7 @@ import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
 import { summaryInWindow } from '../services/portfolioSummary.service';
 import { DateRangeField } from '../components/DateField';
+import { Spinner } from '../components/Loading';
 
 function fmtCompact(v: number) {
   const abs = Math.abs(v);
@@ -377,7 +378,7 @@ export function PortfolioSummary() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading && (
           <div className="flex items-center justify-center gap-3 border-b border-gray-200 bg-gray-50 py-3">
-            <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-600"></div>
+            <Spinner className="border-blue-600" />
             <p className="text-sm text-gray-500">Loading portfolio summary…</p>
           </div>
         )}

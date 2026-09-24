@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ExportButton } from '../components/ExportButton';
 import type { ExportColumn } from '../lib/exportData';
+import { LoadingState } from '../components/Loading';
 
 interface Share {
   id: string;
@@ -245,7 +246,7 @@ export function Shares() {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-gray-500">Loading...</div>
+          <LoadingState />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
