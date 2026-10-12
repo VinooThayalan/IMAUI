@@ -75,6 +75,7 @@ export interface ComputedRow extends RawNote {
   market_value: number;
   cash_flow: number;
   total_surplus: number; // (market_value + cum_sale_value + cum_dividend) - cum_purchase_cost
+                         // Before fees. Cached, never shown: a cell reads holdingRow().totalSurplus.
 }
 
 export interface ShareGroup {
@@ -135,6 +136,43 @@ export function marketPricePerShareAfterFees(group: ShareGroup): number | null {
 }
 
 /**
+ * A row's average price, for a cell.
+ *
+ * `av_price` answers 0 once nothing is held, because the ledger has to carry
+ * something forward. An average over no shares is not zero, it is undefined, so
+ * the cell is a dash -- ALUM.N0000's 22/07/2021 sale of all 6,990 shares read
+ * 0.00 here. Delegates to `av_price`; never a second computation.
+ */
+export function avPriceOrNull(row: ComputedRow): number | null {
+  return row.share_cum_bal > 0 ? row.av_price : null;
+}
+
+/**
+ * What each sell removed from the holding's cost: the fall in `av_cost` across
+ * the row. Other rows have no sale cost and are absent from the map.
+ *
+ * This was `no_of_shares * av_price` read off the sell row itself, on the claim
+ * that a sell leaves the average where it found it. It does -- unless it empties
+ * the position, when the average left behind is 0. ALUM.N0000's 22/07/2021 sale
+ * of all 6,990 shares showed a cost of 0.00 against the 96,128.72 they had cost.
+ * Read back from the cache it was also wrong in the cents, because `av_price` is
+ * stored to four places: 100,000 ALUM shares came out at 1,649,300.00 against
+ * 1,649,295.00. `av_cost` is an amount of money, so its difference is exact.
+ *
+ * The screen's Sale Cost column, the export's, and the Cost per share total all
+ * read this.
+ */
+export function saleCosts(group: ShareGroup): Map<ComputedRow, number> {
+  const costs = new Map<ComputedRow, number>();
+  group.rows.forEach((r, i) => {
+    if (r.row_type !== 'sell' || !(r.no_of_shares > 0)) return;
+    const before = i > 0 ? group.rows[i - 1].av_cost : 0;
+    costs.set(r, before - r.av_cost);
+  });
+  return costs;
+}
+
+/**
  * The two rows that close a holding's breakdown.
  *
  * The screen drew these in its `tfoot` and the CSV export built them again from
@@ -162,7 +200,7 @@ export interface ClosingRow {
   saleValue: number;
   saleCost: number | null;
   avCost: number;
-  avPrice: number;
+  avPrice: number | null;
   dividend: number | null;
   marketValue: number;
   cashFlow: number;
@@ -185,10 +223,109 @@ export interface ClosingRow {
 export function closingCumSurplus(group: ShareGroup): number | null {
   const last = group.rows[group.rows.length - 1];
   if (!last) return null;
+  const mvAfterFees = holdingMvAfterFees(group);
+  return mvAfterFees == null ? last.cum_surplus : last.cum_surplus + mvAfterFees;
+}
+
+/**
+ * What the shares still held would fetch today, after fees.
+ *
+ * Null when no market price is recorded -- nobody has said what they are worth.
+ * The list row used to inline `market_value * (1 - rate / 100)` while its Grand
+ * Total called `netMarketValue`: two spellings of the figure this is.
+ */
+export function holdingMvAfterFees(group: ShareGroup): number | null {
+  const last = group.rows[group.rows.length - 1];
   const perShareAfterFees = marketPricePerShareAfterFees(group);
-  return perShareAfterFees == null
-    ? last.cum_surplus
-    : last.cum_surplus + perShareAfterFees * last.share_cum_bal;
+  if (!last || perShareAfterFees == null) return null;
+  return perShareAfterFees * last.share_cum_bal;
+}
+
+/**
+ * One holding's line in the Share Analytics list, and in the summary export.
+ *
+ * The screen and the export each assembled this themselves, and both read Total
+ * Surplus from the ledger's `total_surplus` -- realised surplus plus the market
+ * value *before* fees -- while the breakdown behind the same row closes on
+ * `closingCumSurplus`, after fees. bug-50: AHUN.N0000 read 1,729,296.11 on the
+ * list and 301,705.47 inside it, the difference being exactly its fees. Built
+ * once here; the row, the Grand Total and the export all project it.
+ *
+ * Two grains, kept apart on purpose. The activity columns sum `activity`, the
+ * rows the page's From date lets through. The position columns -- Total Surplus
+ * among them -- are the closing state since acquisition: a From date scopes what
+ * happened in a period, not what a position is worth.
+ *
+ * `null` is a figure nobody stated: no market price, no market value and no
+ * Total Surplus, and the cell is a dash.
+ *
+ * The group must hold at least one row. Every group the ledger builds does.
+ */
+export interface HoldingRow {
+  shareCumBal: number;
+  purchaseCost: number;
+  saleValue: number;
+  dividend: number;
+  cashFlow: number;
+  txnCount: number;
+  avCost: number;
+  avPrice: number | null;
+  cumSurplus: number;
+  marketValue: number | null;
+  mvAfterFees: number | null;
+  totalSurplus: number | null;
+}
+
+export function holdingRow(group: ShareGroup, activity: ComputedRow[]): HoldingRow {
+  const last = group.rows[group.rows.length - 1];
+  const sum = (pick: (r: ComputedRow) => number) => activity.reduce((s, r) => s + pick(r), 0);
+  const mvAfterFees = holdingMvAfterFees(group);
+  return {
+    shareCumBal: last.share_cum_bal,
+    purchaseCost: sum(r => r.purchase_cost),
+    saleValue: sum(r => r.sale_value),
+    dividend: sum(r => r.dividend),
+    cashFlow: sum(r => r.cash_flow),
+    txnCount: activity.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length,
+    avCost: last.av_cost,
+    avPrice: avPriceOrNull(last),
+    cumSurplus: last.cum_surplus,
+    marketValue: mvAfterFees == null ? null : last.market_value,
+    mvAfterFees,
+    totalSurplus: mvAfterFees == null ? null : closingCumSurplus(group),
+  };
+}
+
+/**
+ * The Grand Total under the list: every column the sum of the rows above it.
+ *
+ * It used to compute Total Surplus a second way -- after-fee market value plus
+ * the *period's* purchases, sales and dividends. Unwindowed that agreed with the
+ * rows' after-fee sum; with a From date it left out what the held shares cost
+ * and kept what they are worth, and read 10.47bn against 1.33bn of rows.
+ *
+ * A dash adds nothing: the total across holdings is the sum of those that have
+ * a figure, and theirs keep their dashes. Av Price has no total -- a sum of
+ * averages is not an average.
+ */
+export type HoldingTotals = { [K in Exclude<keyof HoldingRow, 'avPrice'>]: number };
+
+export function holdingTotals(rows: HoldingRow[]): HoldingTotals {
+  const total = (pick: (r: HoldingRow) => number | null) =>
+    rows.reduce((s, r) => s + (pick(r) ?? 0), 0);
+  return {
+    shareCumBal: total(r => r.shareCumBal),
+    purchaseCost: total(r => r.purchaseCost),
+    saleValue: total(r => r.saleValue),
+    dividend: total(r => r.dividend),
+    cashFlow: total(r => r.cashFlow),
+    txnCount: total(r => r.txnCount),
+    avCost: total(r => r.avCost),
+    cumSurplus: total(r => r.cumSurplus),
+    marketValue: total(r => r.marketValue),
+    mvAfterFees: total(r => r.mvAfterFees),
+    totalSurplus: total(r => r.totalSurplus),
+  };
 }
 
 /**
@@ -200,7 +337,7 @@ export function closingCumSurplus(group: ShareGroup): number | null {
  */
 export interface HoldingSummary {
   sharesHeld: number;
-  avPrice: number;
+  avPrice: number | null;
   marketPrice: number | null;
   marketPriceDate: string | null;
   mvAfterFeesPerShare: number | null;
@@ -214,7 +351,7 @@ export function holdingSummary(group: ShareGroup, asOf: Date): HoldingSummary | 
   if (!last || cumSurplus == null) return null;
   return {
     sharesHeld: last.share_cum_bal,
-    avPrice: last.av_price,
+    avPrice: avPriceOrNull(last),
     marketPrice: group.market_price > 0 ? group.market_price : null,
     marketPriceDate: group.market_price > 0 ? group.market_price_date : null,
     mvAfterFeesPerShare: marketPricePerShareAfterFees(group),
@@ -225,28 +362,19 @@ export function holdingSummary(group: ShareGroup, asOf: Date): HoldingSummary | 
 
 export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
   const last = group.rows[group.rows.length - 1];
-  const perShareAfterFees = marketPricePerShareAfterFees(group);
+  const mvAfterFees = holdingMvAfterFees(group);
   const cumSurplus = closingCumSurplus(group);
-  if (!last || perShareAfterFees == null || cumSurplus == null) return [];
+  if (!last || mvAfterFees == null || cumSurplus == null) return [];
 
-  const mvAfterFees = perShareAfterFees * last.share_cum_bal;
   const totalPurchase = group.rows.reduce((s, r) => s + r.purchase_cost, 0);
   const totalSale     = group.rows.reduce((s, r) => s + r.sale_value, 0);
   const totalDividend = group.rows.reduce((s, r) => s + r.dividend, 0);
   const totalCashFlow = group.rows.reduce((s, r) => s + r.cash_flow, 0);
 
-  /*
-    What the shares sold had been carried at.
-
-    Per row this is `no_of_shares * av_price`, and the average a sell leaves
-    behind is the one it started with -- removing `qty * (C / S)` leaves
-    `C * (S - qty)` over `S - qty`, which is `C / S` again. So the row's own
-    `av_price` is the pre-sale average and this total is the sum of the column
-    above it, not an approximation of it.
-  */
-  const totalSaleCost = group.rows
-    .filter(r => r.row_type === 'sell')
-    .reduce((s, r) => s + r.no_of_shares * r.av_price, 0);
+  // What the shares sold had been carried at: the sum of the Sale Cost column
+  // above it, from the same `saleCosts`, so the total cannot disagree with it.
+  let totalSaleCost = 0;
+  for (const cost of saleCosts(group).values()) totalSaleCost += cost;
 
   // Cost per share divides what was paid by everything that arrived, bought or
   // free: scrip shares cost nothing and still dilute the rate.
@@ -266,7 +394,7 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
       saleValue: mvAfterFees,
       saleCost: null,
       avCost: last.av_cost,
-      avPrice: last.av_price,
+      avPrice: avPriceOrNull(last),
       dividend: null,
       marketValue: mvAfterFees,
       cashFlow: mvAfterFees,
@@ -292,11 +420,13 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
       saleValue: totalSale + mvAfterFees,
       saleCost: totalSaleCost,
       avCost: last.av_cost,
-      avPrice: last.av_price,
+      avPrice: avPriceOrNull(last),
       dividend: totalDividend,
       marketValue: mvAfterFees,
       cashFlow: totalCashFlow + mvAfterFees,
-      totalSurplus: mvAfterFees + (totalSale + totalDividend - totalPurchase),
+      // The list row's Total Surplus too (bug-50). This summed the rows a second
+      // way, which agreed, and a second way is how bug-50 disagreed.
+      totalSurplus: cumSurplus,
       // bug-47: repeated `mvAfterFees` after bug-46 fixed the row above, so
       // HNB.X0000 read 3,019,178,989.73 (its market value) here.
       cumSurplus,

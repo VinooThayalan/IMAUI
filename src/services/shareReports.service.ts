@@ -16,9 +16,11 @@
  */
 
 import {
+  avPriceOrNull,
   closingCumSurplus,
   closingRows,
   groupAerPercent,
+  holdingMvAfterFees,
   marketPricePerShareAfterFees,
   type ShareGroup,
 } from './shareLedger.service';
@@ -33,7 +35,7 @@ export interface AnalyticsReportRow {
   purchase_cost: number;
   sale_value: number;
   /** Average cost per share of what is still held. */
-  av_price: number;
+  av_price: number | null;
   dividend: number;
   /** Sale value + dividend - purchase cost: what the holding has realised. */
   cash_flow: number;
@@ -52,7 +54,6 @@ export function analyticsReport(groups: ShareGroup[]): AnalyticsReportRow[] {
     const last = g.rows[g.rows.length - 1];
     const cumSurplus = closingCumSurplus(g);
     if (!last || cumSurplus == null) continue;
-    const perShare = marketPricePerShareAfterFees(g);
     rows.push({
       entity_name: g.entity_name,
       ticker: g.share_ticker,
@@ -60,10 +61,10 @@ export function analyticsReport(groups: ShareGroup[]): AnalyticsReportRow[] {
       share_cum_bal: last.share_cum_bal,
       purchase_cost: last.cum_purchase_cost,
       sale_value: last.cum_sale_value,
-      av_price: last.av_price,
+      av_price: avPriceOrNull(last),
       dividend: last.cum_dividend,
       cash_flow: last.cum_surplus,
-      mv_after_fees: perShare == null ? null : perShare * last.share_cum_bal,
+      mv_after_fees: holdingMvAfterFees(g),
       cum_surplus: cumSurplus,
     });
   }
@@ -84,7 +85,7 @@ export interface DetailedReportRow {
   share_cum_bal: number;
   purchase_cost: number | null;
   sale_value: number | null;
-  av_price: number;
+  av_price: number | null;
   dividend: number | null;
   /** Only on the closing row: a market value per event would restate today's price against a past balance. */
   market_value: number | null;
@@ -150,7 +151,7 @@ export function detailedReport(
         share_cum_bal: r.share_cum_bal,
         purchase_cost: r.purchase_cost > 0 ? r.purchase_cost : null,
         sale_value: r.sale_value > 0 ? r.sale_value : null,
-        av_price: r.av_price,
+        av_price: avPriceOrNull(r),
         dividend: r.dividend > 0 ? r.dividend : null,
         market_value: null,
         cash_flow: r.cash_flow !== 0 ? r.cash_flow : null,

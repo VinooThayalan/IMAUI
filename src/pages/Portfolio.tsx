@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
 import { DateRangeField } from '../components/DateField';
 import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
+import * as portfolioCacheRepo from '../repositories/portfolioCache.repo';
 import { holdingsInWindow, isFresh } from '../services/portfolioHoldings.service';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 import { Spinner } from '../components/Loading';
@@ -280,10 +281,8 @@ export function Portfolio() {
         performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
         [...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: false, source_hash: sourceHash }));
 
-        await supabase.from('portfolio_cache').delete().eq('scope', scope).eq('source_hash', sourceHash);
-        for (let i = 0; i < cacheRows.length; i += 500) {
-          await supabase.from('portfolio_cache').insert(cacheRows.slice(i, i + 500));
-        }
+        const cacheErr = await portfolioCacheRepo.replaceBatch(scope, sourceHash, cacheRows);
+        if (cacheErr) console.error('[portfolio cache] write failed:', cacheErr);
         return;
       }
 
@@ -532,10 +531,8 @@ export function Portfolio() {
       performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
       [...performers].sort((a, b) => a.gainLoss - b.gainLoss).filter(p => p.gainLoss < 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: false, source_hash: sourceHash }));
 
-      await supabase.from('portfolio_cache').delete().eq('scope', scope).eq('source_hash', sourceHash);
-      for (let i = 0; i < cacheRows.length; i += 500) {
-        await supabase.from('portfolio_cache').insert(cacheRows.slice(i, i + 500));
-      }
+      const cacheErr = await portfolioCacheRepo.replaceBatch(scope, sourceHash, cacheRows);
+      if (cacheErr) console.error('[portfolio cache] write failed:', cacheErr);
     } catch (error) {
       console.error('Error fetching portfolio data:', error);
     } finally {

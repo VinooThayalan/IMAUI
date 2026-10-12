@@ -4,17 +4,18 @@ import { supabase } from '../lib/supabase';
 import { selectAll } from '../lib/selectAll';
 import { DateRangeField } from '../components/DateField';
 import * as sourceFingerprintRepo from '../repositories/sourceFingerprint.repo';
+import * as analyticsCacheRepo from '../repositories/analyticsCache.repo';
 import { TradeOrderPanel } from '../components/TradeOrderPanel';
 import { useTradeOrder } from '../hooks/useTradeOrder';
 import { useShareLedger } from '../hooks/useShareLedger';
-import { formatAer, netMarketValue, portfolioAer } from '../lib/aer';
+import { useHoldingRows } from '../hooks/useHoldingRows';
+import { useHoldingBreakdown } from '../hooks/useHoldingBreakdown';
+import { formatAer, portfolioAer } from '../lib/aer';
 import {
   type ComputedRow,
   type ShareGroup,
   groupAerPercent,
   groupCashFlows,
-  closingRows,
-  holdingSummary,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
 import {
@@ -147,8 +148,9 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
   const order    = useTradeOrder(group.rows, group.entity_id, onOrderSaved);
   const undecided = undecidedDays(order.groups);
 
-  // Header figures — the same object the export's summary block reads.
-  const summary  = holdingSummary(group, new Date());
+  // Header figures, closing rows and per-row readings — the same functions the
+  // export reads.
+  const { summary, closing, saleCost, avPrice } = useHoldingBreakdown(group, new Date());
   const groupAer = summary?.aerPercent ?? null;
 
   function exportDetail() {
@@ -316,7 +318,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
             </div>
             <div className="text-center">
               <div className="text-xs text-gray-400">Av Price</div>
-              <div className="font-bold text-gray-900">Rs. {fmt(last.av_price)}</div>
+              <div className="font-bold text-gray-900">{summary?.avPrice != null ? `Rs. ${fmt(summary.avPrice)}` : '—'}</div>
             </div>
             {summary?.marketPrice != null && (
               <>
@@ -397,6 +399,9 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
                 const detail     = noteDetails.get(row.id);
                 const isLoading  = noteLoading === row.id;
 
+                const rowSaleCost = saleCost(row);
+                const rowAvPrice  = avPrice(row);
+
                 const feeRow = (label: string, val: number | null) => val ? (
                   <div key={label} className="flex justify-between py-1 border-b border-gray-100 last:border-0">
                     <span className="text-xs text-gray-500">{label}</span>
@@ -415,10 +420,10 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
                       <td className="px-3 py-2 text-right font-mono">{row.purchase_cost > 0 ? fmt(row.purchase_cost) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono">{row.sale_value > 0 ? fmt(row.sale_value) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono text-orange-700">
-                        {row.row_type === 'sell' && row.no_of_shares > 0 ? fmt(row.no_of_shares * row.av_price) : <span className="text-gray-300">—</span>}
+                        {rowSaleCost != null ? fmt(rowSaleCost) : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-3 py-2 text-right font-mono font-semibold text-blue-700">{fmt(row.av_cost)}</td>
-                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{fmt(row.av_price)}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-gray-900">{rowAvPrice != null ? fmt(rowAvPrice) : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right font-mono text-gray-300">—</td>
                       <td className="px-3 py-2 text-right font-mono">
@@ -598,7 +603,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
                 A null cell is an em dash — the row has nothing to say there, and
                 a zero would claim it did.
               */}
-              {closingRows(group, new Date()).map(c => {
+              {closing.map(c => {
                 const isMv  = c.label === 'Market Value';
                 const tone  = isMv
                   ? { row: 'bg-slate-800 text-white', dim: 'text-slate-300', val: 'text-white', pos: 'text-emerald-300', cost: 'text-blue-300', badge: 'bg-slate-600 text-white', pill: 'text-slate-400' }
@@ -879,18 +884,10 @@ export function ShareAnalytics() {
           for (const [entityId, rows] of byEntity) {
             const label = String(rows[0]?.entity_name ?? entityId);
             try {
-              const { error: delErr } = await supabase
-                .from('share_analytics_cache')
-                .delete()
-                .eq('entity_id', entityId);
-              if (delErr) throw new Error(`delete: ${describeDbError(delErr)}`);
-
-              for (let i = 0; i < rows.length; i += 500) {
-                const { error: insErr } = await supabase
-                  .from('share_analytics_cache')
-                  .insert(rows.slice(i, i + 500));
-                if (insErr) throw new Error(`insert: ${describeDbError(insErr)}`);
-              }
+              // The write, and the duplicate-skipping that keeps an overlapping
+              // rebuild from storing every row twice, live in the repository.
+              const failed = await analyticsCacheRepo.replaceEntity(entityId, rows);
+              if (failed) throw new Error(`${failed.stage}: ${describeDbError(failed.error)}`);
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               console.error(`[analytics cache] ${label}:`, err);
@@ -955,28 +952,10 @@ export function ShareAnalytics() {
     return g.share_ticker.toLowerCase().includes(q) || g.share_name.toLowerCase().includes(q) || g.entity_name.toLowerCase().includes(q);
   });
 
-  // Aggregate totals across filtered groups. Position columns come from the
-  // last row inside the window; activity columns sum only the period's rows.
-  const totals = filtered.reduce((acc, g) => {
-    const last = g.rows[g.rows.length - 1];
-    const act  = activityRows(g);
-    const mvAfterFees = netMarketValue(last.share_cum_bal, g.market_price, g.brokerage_fee_rate);
-    const pc  = act.reduce((s, r) => s + r.purchase_cost, 0);
-    const sv  = act.reduce((s, r) => s + r.sale_value, 0);
-    const div = act.reduce((s, r) => s + r.dividend, 0);
-    return {
-      share_cum_bal:      acc.share_cum_bal   + last.share_cum_bal,
-      purchase_cost:      acc.purchase_cost   + pc,
-      sale_value:         acc.sale_value      + sv,
-      av_cost:            acc.av_cost         + last.av_cost,
-      dividend:           acc.dividend        + div,
-      cum_surplus:        acc.cum_surplus     + last.cum_surplus,
-      market_value:       acc.market_value    + last.market_value,
-      mv_after_fees:      acc.mv_after_fees   + mvAfterFees,
-      cash_flow:          acc.cash_flow       + act.reduce((s, r) => s + r.cash_flow, 0),
-      total_surplus:      acc.total_surplus   + (mvAfterFees + sv + div - pc),
-    };
-  }, { share_cum_bal: 0, purchase_cost: 0, sale_value: 0, av_cost: 0, dividend: 0, cum_surplus: 0, market_value: 0, mv_after_fees: 0, cash_flow: 0, total_surplus: 0 });
+  // Each holding's line, and the Grand Total as the sum of those lines. Position
+  // columns come from the last row inside the window; activity columns sum only
+  // the period's rows.
+  const { listed, totals } = useHoldingRows(filtered, activityRows);
 
   // Portfolio-level XIRR — terminal date is always today to match Portfolio Summary.
   // Terminal value is net of brokerage, the same basis the per-share AER uses;
@@ -1085,7 +1064,7 @@ export function ShareAnalytics() {
               <>Balance, average cost and market value are <strong>as at {fmtDate(toDate)}</strong>; anything traded later is excluded. </>
             )}
             {fromDate && (
-              <>Purchase cost, sale value, dividend and cash flow cover <strong>{fmtDate(fromDate)} onward</strong> only — the position itself still includes everything bought before then, or it would not add up. </>
+              <>Purchase cost, sale value, dividend and cash flow cover <strong>{fmtDate(fromDate)} onward</strong> only — the position itself, Cum Surplus and Total Surplus included, still counts everything bought before then, or it would not add up. </>
             )}
             Market price is the latest on file, not the price on the as-at date.
           </div>
@@ -1107,18 +1086,18 @@ export function ShareAnalytics() {
             {entityName} — Portfolio Summary
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <SummaryCard label="Total Purchase Cost"  value={`Rs. ${fmt(totals.purchase_cost)}`} />
-            <SummaryCard label="Total Sale Value"     value={`Rs. ${fmt(totals.sale_value)}`} />
+            <SummaryCard label="Total Purchase Cost"  value={`Rs. ${fmt(totals.purchaseCost)}`} />
+            <SummaryCard label="Total Sale Value"     value={`Rs. ${fmt(totals.saleValue)}`} />
             <SummaryCard label="Total Dividend"       value={`Rs. ${fmt(totals.dividend)}`}      color="text-yellow-700" />
-            <SummaryCard label="Total Market Value"   value={`Rs. ${fmt(totals.market_value)}`}  color="text-blue-700" />
-            <SummaryCard label="MV after Brokerage"   value={`Rs. ${fmt(totals.mv_after_fees)}`} color="text-indigo-700" />
+            <SummaryCard label="Total Market Value"   value={`Rs. ${fmt(totals.marketValue)}`}  color="text-blue-700" />
+            <SummaryCard label="MV after Brokerage"   value={`Rs. ${fmt(totals.mvAfterFees)}`} color="text-indigo-700" />
             <SummaryCard
               label="Cum Surplus (Realized)"
-              value={`Rs. ${fmt(totals.cum_surplus)}`}
-              color={totals.cum_surplus >= 0 ? 'text-green-700' : 'text-red-600'}
+              value={`Rs. ${fmt(totals.cumSurplus)}`}
+              color={totals.cumSurplus >= 0 ? 'text-green-700' : 'text-red-600'}
             />
-            <SummaryCard label="Total Av Cost (Held)" value={`Rs. ${fmt(totals.av_cost)}`}      color="text-blue-700" />
-            <SummaryCard label="Total Cash Flow"      value={`Rs. ${fmt(totals.cash_flow)}`}    color={totals.cash_flow >= 0 ? 'text-green-700' : 'text-red-600'} />
+            <SummaryCard label="Total Av Cost (Held)" value={`Rs. ${fmt(totals.avCost)}`}      color="text-blue-700" />
+            <SummaryCard label="Total Cash Flow"      value={`Rs. ${fmt(totals.cashFlow)}`}    color={totals.cashFlow >= 0 ? 'text-green-700' : 'text-red-600'} />
             <SummaryCard
               label="AER (XIRR)"
               value={formatAer(portfolioAerPct)}
@@ -1173,15 +1152,7 @@ export function ShareAnalytics() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((group, idx) => {
-                  const last     = group.rows[group.rows.length - 1];
-                  const act      = activityRows(group);
-                  const totalPC  = act.reduce((s, r) => s + r.purchase_cost, 0);
-                  const totalSV  = act.reduce((s, r) => s + r.sale_value, 0);
-                  const totalDiv = act.reduce((s, r) => s + r.dividend, 0);
-                  const totalCF  = act.reduce((s, r) => s + r.cash_flow, 0);
-                  const txnCount = act.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length;
-
+                {listed.map(({ group, row }, idx) => {
                   return (
                     <tr
                       key={`${group.entity_id}__${group.share_id}`}
@@ -1198,38 +1169,38 @@ export function ShareAnalytics() {
                           ? group.cds_accounts.map((cds, i) => <div key={i}>{cds}</div>)
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">{fmtN(last.share_cum_bal)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(totalPC)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-800">{totalSV > 0 ? fmt(totalSV) : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-right font-mono font-semibold text-blue-700">{fmt(last.av_cost)}</td>
-                      <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(last.av_price)}</td>
-                      <td className="px-4 py-3 text-right font-mono">{totalDiv > 0 ? <span className="text-yellow-700 font-semibold">{fmt(totalDiv)}</span> : <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(last.cum_surplus)}>{fmt(last.cum_surplus)}</span></td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-gray-900">{fmtN(row.shareCumBal)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-800">{fmt(row.purchaseCost)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-800">{row.saleValue > 0 ? fmt(row.saleValue) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right font-mono font-semibold text-blue-700">{fmt(row.avCost)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-800">{row.avPrice != null ? fmt(row.avPrice) : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right font-mono">{row.dividend > 0 ? <span className="text-yellow-700 font-semibold">{fmt(row.dividend)}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(row.cumSurplus)}>{fmt(row.cumSurplus)}</span></td>
                       <td className="px-4 py-3 text-right font-mono text-blue-600 font-semibold">
-                        {group.market_price > 0
+                        {row.marketValue != null
                           ? <div>
-                              <div>{fmt(last.market_value)}</div>
+                              <div>{fmt(row.marketValue)}</div>
                               {group.market_price_date && <div className="text-xs text-gray-400 font-normal">({fmtDate(group.market_price_date)})</div>}
                             </div>
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-indigo-600 font-semibold">
-                        {group.market_price > 0
-                          ? fmt(last.market_value * (1 - group.brokerage_fee_rate / 100))
+                        {row.mvAfterFees != null
+                          ? fmt(row.mvAfterFees)
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
-                        <span className={totalCF > 0 ? 'text-green-700 font-semibold' : totalCF < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
-                          {fmt(totalCF)}
+                        <span className={row.cashFlow > 0 ? 'text-green-700 font-semibold' : row.cashFlow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
+                          {fmt(row.cashFlow)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
-                        {group.market_price > 0
-                          ? <span className={clsSurplus(last.total_surplus)}>{fmt(last.total_surplus)}</span>
+                        {row.totalSurplus != null
+                          ? <span className={clsSurplus(row.totalSurplus)}>{fmt(row.totalSurplus)}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className="inline-block bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-0.5 rounded-full">{txnCount}</span>
+                        <span className="inline-block bg-gray-100 text-gray-600 text-xs font-semibold px-2 py-0.5 rounded-full">{row.txnCount}</span>
                       </td>
                     </tr>
                   );
@@ -1240,17 +1211,17 @@ export function ShareAnalytics() {
               <tfoot className="bg-gray-100 border-t-2 border-gray-300 text-xs font-bold">
                 <tr>
                   <td colSpan={3} className="px-4 py-3 text-gray-500 uppercase">Grand Total ({filtered.length} shares)</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmtN(totals.share_cum_bal)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.purchase_cost)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.sale_value)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-blue-700">{fmt(totals.av_cost)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmtN(totals.shareCumBal)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.purchaseCost)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-gray-900">{fmt(totals.saleValue)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-blue-700">{fmt(totals.avCost)}</td>
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-right font-mono text-yellow-700">{fmt(totals.dividend)}</td>
-                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cum_surplus)}>{fmt(totals.cum_surplus)}</span></td>
-                  <td className="px-4 py-3 text-right font-mono text-blue-600">{fmt(totals.market_value)}</td>
-                  <td className="px-4 py-3 text-right font-mono text-indigo-600">{fmt(totals.mv_after_fees)}</td>
-                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cash_flow)}>{fmt(totals.cash_flow)}</span></td>
-                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.total_surplus)}>{fmt(totals.total_surplus)}</span></td>
+                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cumSurplus)}>{fmt(totals.cumSurplus)}</span></td>
+                  <td className="px-4 py-3 text-right font-mono text-blue-600">{fmt(totals.marketValue)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-indigo-600">{fmt(totals.mvAfterFees)}</td>
+                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cashFlow)}>{fmt(totals.cashFlow)}</span></td>
+                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.totalSurplus)}>{fmt(totals.totalSurplus)}</span></td>
                   <td />
                 </tr>
               </tfoot>

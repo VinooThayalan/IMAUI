@@ -17,10 +17,13 @@
  */
 
 import {
+  avPriceOrNull,
   closingRows,
   groupAerPercent,
+  holdingRow,
   holdingSummary,
   marketPricePerShareAfterFees,
+  saleCosts,
   type ComputedRow,
   type ShareGroup,
 } from './shareLedger.service';
@@ -141,6 +144,7 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
     'AER (XIRR) %': orBlank(aer, v => v.toFixed(2)),
   };
 
+  const costs = saleCosts(group);
   const rows: Cell[][] = group.rows.map((r: ComputedRow) =>
     projectDetail({
       ...identity,
@@ -152,12 +156,10 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
       'Purchase Cost': r.purchase_cost > 0 ? money(r.purchase_cost) : '',
       'Sale Value': r.sale_value > 0 ? money(r.sale_value) : '',
       // What the shares sold had been carried at, which is the figure the
-      // realised surplus is measured against.
-      'Sale Cost': r.row_type === 'sell' && r.no_of_shares > 0
-        ? money(r.no_of_shares * r.av_price)
-        : '',
+      // realised surplus is measured against. `saleCosts`, as the screen reads.
+      'Sale Cost': orBlank(costs.get(r), money),
       'Av Cost': money(r.av_cost),
-      'Av Price': money(r.av_price),
+      'Av Price': orBlank(avPriceOrNull(r), money),
       'Dividend': r.dividend > 0 ? money(r.dividend) : '',
       /*
         Blank, deliberately.
@@ -193,7 +195,7 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
       'Sale Value': money(c.saleValue),
       'Sale Cost': orBlank(c.saleCost, money),
       'Av Cost': money(c.avCost),
-      'Av Price': money(c.avPrice),
+      'Av Price': orBlank(c.avPrice, money),
       'Dividend': orBlank(c.dividend, money),
       'Market Value': money(c.marketValue),
       'Cash Flow +/-': money(c.cashFlow),
@@ -221,7 +223,7 @@ function summaryBlock(group: ShareGroup, asOf: Date): Cell[][] {
       group.share_ticker,
       group.entity_name,
       count(s.sharesHeld),
-      money(s.avPrice),
+      orBlank(s.avPrice, money),
       orBlank(s.marketPrice, money),
       s.marketPriceDate ?? '',
       orBlank(s.mvAfterFeesPerShare, money),
@@ -284,28 +286,28 @@ export function summaryExport(
   asOf: Date,
 ): CsvTable {
   const rows = groups.map(g => {
-    const last = g.rows[g.rows.length - 1];
-    const act = activityRows(g);
     const afterFees = marketPricePerShareAfterFees(g);
     const priced = g.market_price > 0;
-    const sum = (pick: (r: ComputedRow) => number) => act.reduce((s, r) => s + pick(r), 0);
+    // The same row the screen draws, so the file cannot disagree with it. This
+    // wrote the ledger's before-fee `total_surplus`, as the screen did (bug-50).
+    const h = g.rows.length > 0 ? holdingRow(g, activityRows(g)) : null;
 
     return projectSummary({
       'Share': g.share_ticker,
       'Share Name': g.share_name,
       'Entity Name': g.entity_name,
       'CDS Accounts': g.cds_accounts.join('; '),
-      'Share Cum Bal': last ? count(last.share_cum_bal) : '',
-      'Purchase Cost': money(sum(r => r.purchase_cost)),
-      'Sale Value': money(sum(r => r.sale_value)),
-      'Av Cost': last ? money(last.av_cost) : '',
-      'Av Price': last ? money(last.av_price) : '',
-      'Dividend': money(sum(r => r.dividend)),
-      'Cum Surplus': last ? money(last.cum_surplus) : '',
-      'Market Value': priced && last ? money(last.market_value) : '',
-      'MV after Fees': last && afterFees != null ? money(afterFees * last.share_cum_bal) : '',
-      'Cash Flow': money(sum(r => r.cash_flow)),
-      'Total Surplus': priced && last ? money(last.total_surplus) : '',
+      'Share Cum Bal': h ? count(h.shareCumBal) : '',
+      'Purchase Cost': h ? money(h.purchaseCost) : '',
+      'Sale Value': h ? money(h.saleValue) : '',
+      'Av Cost': h ? money(h.avCost) : '',
+      'Av Price': orBlank(h?.avPrice, money),
+      'Dividend': h ? money(h.dividend) : '',
+      'Cum Surplus': h ? money(h.cumSurplus) : '',
+      'Market Value': orBlank(h?.marketValue, money),
+      'MV after Fees': orBlank(h?.mvAfterFees, money),
+      'Cash Flow': h ? money(h.cashFlow) : '',
+      'Total Surplus': orBlank(h?.totalSurplus, money),
       'Mkt Price per Share': priced ? price(g.market_price) : '',
       'Mkt Price Date': g.market_price_date ?? '',
       'Mkt Price after Fees per Share': orBlank(afterFees, price),
