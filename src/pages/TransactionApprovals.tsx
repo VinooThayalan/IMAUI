@@ -10,6 +10,8 @@ import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../li
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState } from '../components/Loading';
+import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
+import { useTransactionEmail } from '../hooks/useTransactionEmail';
 
 interface Transaction {
   id: string;
@@ -146,6 +148,11 @@ export function TransactionApprovals() {
   const [emailAddress, setEmailAddress] = useState('');
   const [ccAddresses, setCcAddresses] = useState<string[]>([]);
   const [emailNote, setEmailNote] = useState('');
+
+  // The confirmation email: one builder for the preview and every send, shared
+  // with Transactions (bug-52). This page used to build its own, which dropped
+  // six fee lines and named no broker.
+  const buildTransactionEmail = useTransactionEmail({ entities, shares, banks, brokers, entityBrokers });
   const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
@@ -444,7 +451,7 @@ export function TransactionApprovals() {
               to: broker.contact_person_email,
               triggered_by: user?.email || null,
               source: 'transaction-approvals',
-              transaction: buildEmailData(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
+              transaction: buildTransactionEmail(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
         }
@@ -494,7 +501,7 @@ export function TransactionApprovals() {
               to: broker.contact_person_email,
               triggered_by: user?.email || null,
               source: 'transaction-approvals',
-              transaction: buildEmailData(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
+              transaction: buildTransactionEmail(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
             }),
           });
         }
@@ -509,37 +516,6 @@ export function TransactionApprovals() {
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function buildEmailData(transaction: Transaction, note?: string) {
-    const entity = entities.find(e => e.id === transaction.entity_id);
-    const share = shares.find(s => s.id === transaction.share_id);
-    const broker = transaction.broker_id ? brokers.find(b => b.id === transaction.broker_id) : null;
-    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
-    const entityBroker = entityBrokers.find(
-      eb => eb.entity_id === transaction.entity_id && eb.broker_id === transaction.broker_id
-    );
-    return {
-      entity: entity?.name || 'N/A',
-      transaction_type: transaction.transaction_type,
-      share: share?.share_name || 'N/A',
-      ticker: share?.ticker || 'N/A',
-      transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
-      cds_acc_type: entityBroker?.relationship_type || 'N/A',
-      cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
-      order_type: transaction.order_type || 'N/A',
-      no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
-      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-      total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      broker_name: broker?.broker_name || 'N/A',
-      brokerage_fee_type: 'N/A',
-      brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
-      brokerage_fee: Number(transaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      bank_name: bank?.name || 'N/A',
-      bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
-      ...(note ? { note } : {}),
-    };
   }
 
   async function sendEmail() {
@@ -564,7 +540,7 @@ export function TransactionApprovals() {
           cc: ccForSend(emailAddress, ccAddresses),
           triggered_by: user?.email || null,
           source: 'transaction-approvals',
-          transaction: buildEmailData(selectedTransaction, emailNote.trim() || undefined),
+          transaction: buildTransactionEmail(selectedTransaction, emailNote.trim() || undefined),
         }),
       });
       if (!response.ok) throw new Error('Failed to send email');
@@ -1297,8 +1273,7 @@ export function TransactionApprovals() {
             ? [{ id: `contact-${entity.id}`, email: entity.contact_email_company_individual, label: entity.name, kind: 'contact' as const }]
             : []),
         ];
-        const data = buildEmailData(selectedTransaction);
-        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+        const data = buildTransactionEmail(selectedTransaction);
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col" style={{ maxHeight: '92vh' }}>
@@ -1316,40 +1291,9 @@ export function TransactionApprovals() {
 
               {/* Transaction data — compact grid */}
               <div className="px-5 pt-4 pb-3 flex-shrink-0">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${typeColor}`}>{data.transaction_type}</span>
-                  <span className="font-semibold text-gray-900 text-sm">{data.ticker} — {data.share}</span>
-                  <span className="text-gray-400 text-xs ml-auto">{data.entity}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-x-6 border border-gray-200 rounded-lg overflow-hidden">
-                  {[
-                    ['Transaction Date', data.transaction_date],
-                    ['Order Type', data.order_type],
-                    ['No. of Shares', data.no_of_shares],
-                    ['Gross Price / Share', `LKR ${data.gross_price_per_share}`],
-                    ['Net Price / Share', `LKR ${data.net_price_per_share}`],
-                    ['Total Amount', `LKR ${data.total_amount}`],
-                    ['CDS Acc Type', data.cds_acc_type],
-                    ['CDS Acc No.', data.cds_acc_no],
-                    ['Broker', data.broker_name],
-                    ['Brokerage Fee Rate', data.brokerage_fee_rate],
-                    ['Brokerage Fee', `LKR ${data.brokerage_fee}`],
-                    ['Bank Name', data.bank_name],
-                    ['Bank Acc No.', data.bank_acc_no],
-                    ['', ''],
-                  ].map(([label, value], i) => {
-                    const isKey = ['Total Amount', 'CDS Acc Type', 'CDS Acc No.', 'Gross Price / Share', 'Bank Name', 'Bank Acc No.'].includes(label as string);
-                    return (
-                      <div key={i} className={`flex items-center justify-between px-3 py-1.5 border-b border-gray-100 ${isKey ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
-                        <span className={`text-xs font-medium ${isKey ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span>
-                        <span className={`text-xs font-semibold ${isKey ? 'text-blue-900' : 'text-gray-800'} tabular-nums`}>{value}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {emailNote && (
-                  <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 whitespace-pre-line">{emailNote}</div>
-                )}
+                {/* The same preview Transactions shows, of the same email. This
+                    copy had lost six fee rows and the brokerage fee type. */}
+                <TransactionEmailPreview data={data} note={emailNote} />
               </div>
 
               {/* Divider */}

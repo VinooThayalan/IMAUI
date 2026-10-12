@@ -215,6 +215,31 @@ async function sendEmail(to: string, cc: string[] | undefined, subject: string, 
   }
 }
 
+/**
+ * "Test — " for a subject line, or nothing when the caller had no entity to name.
+ *
+ * bug-52: no subject named the entity, so a broker acting for several clients
+ * could not tell whose trade an email was about without opening it. Callers send
+ * "N/A" or a dash when the entity is unknown; neither belongs in a subject.
+ */
+function entityPrefix(name: string | null | undefined): string {
+  const n = (name ?? "").trim();
+  return n && n !== "N/A" && n !== "—" && n !== "-" ? `${n} — ` : "";
+}
+
+function transactionSubject(t: TransactionData): string {
+  return `Transaction Details — ${entityPrefix(t.entity)}${t.transaction_type} ${t.ticker}`;
+}
+
+function comparisonSubject(c: BrokerComparisonData): string {
+  return `Contract Note Comparison: ${entityPrefix(c.entity_name)}${c.contract_no} — ${c.note_type} ${c.ticker}`;
+}
+
+function approvalSubject(n: ApprovalNotificationData): string {
+  const actionLabel = n.action === "APPROVED" ? "Approved" : "Rejected";
+  return `Contract Note ${actionLabel}: ${entityPrefix(n.entity_name)}${n.contract_no} — ${n.note_type} ${n.ticker}`;
+}
+
 function buildApprovalHtml(rawData: ApprovalNotificationData): string {
   const data = escapeDeep(rawData);
   const isApproved = data.action === "APPROVED";
@@ -444,6 +469,12 @@ function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
         </div>
       </div>
 
+      <!-- Entity, labelled (bug-52): it was only the last word of the grey header line. -->
+      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;"><tr>
+        <td style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;width:1%;white-space:nowrap;">Entity</td>
+        <td style="padding:10px 16px 10px 0;font-size:14px;font-weight:700;color:#111827;">${data.entity_name}</td>
+      </tr></table>
+
       <!-- Comparison Table -->
       <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Transaction vs Note Comparison</p>
       <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
@@ -566,7 +597,9 @@ function buildTransactionHtml(rawTransaction: TransactionData): string {
           <span style="font-weight:700;color:#111827;font-size:14px;">${transaction.ticker} — ${transaction.share}</span>
         </td>
         <td style="text-align:right;vertical-align:middle;">
-          <span style="color:#9ca3af;font-size:12px;">${transaction.entity}</span>
+          <!-- Labelled, in body weight (bug-52): it was a small grey name. -->
+          <span style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-right:6px;">Entity</span>
+          <span style="font-size:14px;font-weight:700;color:#111827;">${transaction.entity}</span>
         </td>
       </tr></table>
 
@@ -617,7 +650,7 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const subject = `Contract Note Comparison: ${comparison.contract_no} \u2014 ${comparison.note_type} ${comparison.ticker}`;
+      const subject = comparisonSubject(comparison);
       const html = buildBrokerComparisonHtml(comparison);
       const sent = await sendEmail(to, cc, subject, html);
 
@@ -656,8 +689,7 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const actionLabel = notification.action === "APPROVED" ? "Approved" : "Rejected";
-      const subject = `Contract Note ${actionLabel}: ${notification.contract_no} — ${notification.note_type} ${notification.ticker}`;
+      const subject = approvalSubject(notification);
       const html = buildApprovalHtml(notification);
 
       const sent = await sendEmail(to, cc, subject, html);
@@ -692,7 +724,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const subject = `Transaction Details — ${transaction.transaction_type} ${transaction.ticker}`;
+    const subject = transactionSubject(transaction);
     const html = buildTransactionHtml(transaction);
     const sent = await sendEmail(to, cc, subject, html);
 
