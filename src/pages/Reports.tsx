@@ -914,7 +914,7 @@ export function Reports() {
     } else if (reportType === 'analytics') {
       filename = 'share_analytics_report.csv';
       headers = ['Entity', 'Ticker', 'Share Name', 'Share Balance', 'Purchase Cost', 'Sale Value', 'Avg Cost', 'Dividend', 'Cash Flow (Realised)', 'MV after Fees', 'Cum Surplus'];
-      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_price.toFixed(4), a.dividend.toFixed(2), a.cash_flow.toFixed(2), a.mv_after_fees == null ? '' : a.mv_after_fees.toFixed(2), a.cum_surplus.toFixed(2)]);
+      rows = analyticsData.map(a => [a.entity_name, a.ticker, a.share_name, a.share_cum_bal, a.purchase_cost.toFixed(2), a.sale_value.toFixed(2), a.av_price == null ? '' : a.av_price.toFixed(4), a.dividend.toFixed(2), a.cash_flow.toFixed(2), a.mv_after_fees == null ? '' : a.mv_after_fees.toFixed(2), a.cum_surplus.toFixed(2)]);
     } else if (reportType === 'share') {
       filename = 'share_holdings_report.csv';
       headers = ['Symbol', 'Company', 'Shares', 'Avg Cost', 'Total Cost', 'Current Price', 'Current Value', 'Gain/Loss', '%'];
@@ -1549,7 +1549,7 @@ export function Reports() {
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{a.share_cum_bal.toLocaleString()}</td>
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.purchase_cost)}</td>
                   <td className="px-3 py-2 text-xs text-right text-gray-900">{fmt2(a.sale_value)}</td>
-                  <td className="px-3 py-2 text-xs text-right text-gray-700">{a.av_price.toFixed(4)}</td>
+                  <td className={`px-3 py-2 text-xs text-right ${a.av_price == null ? 'text-gray-400' : 'text-gray-700'}`}>{a.av_price == null ? '—' : a.av_price.toFixed(4)}</td>
                   <td className="px-3 py-2 text-xs text-right text-yellow-700">{fmt2(a.dividend)}</td>
                   <td className={`px-3 py-2 text-xs text-right ${a.cash_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt2(a.cash_flow)}</td>
                   <td className={`px-3 py-2 text-xs text-right ${a.mv_after_fees == null ? 'text-gray-400' : 'text-blue-700'}`}>{a.mv_after_fees == null ? '—' : fmt2(a.mv_after_fees)}</td>

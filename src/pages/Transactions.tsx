@@ -9,6 +9,10 @@ import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../li
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
+import { useHolding } from '../hooks/useHolding';
+import { useTransactionVolume } from '../hooks/useTransactionVolume';
+import { useTransactionEmail } from '../hooks/useTransactionEmail';
+import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -115,12 +119,6 @@ interface BrokerageFeeType {
   fee_breakdown_items: FeeBreakdownItem[];
 }
 
-interface ShareBalance {
-  share_id: string;
-  total_shares: number;
-  avg_cost: number;
-}
-
 interface EntityBroker {
   id: string;
   entity_id: string;
@@ -186,7 +184,6 @@ export function Transactions() {
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
-  const [shareBalances, setShareBalances] = useState<Map<string, ShareBalance>>(new Map());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -225,11 +222,14 @@ export function Transactions() {
     loadData();
   }, []);
 
-  useEffect(() => {
-    if (formData.entity_id && formData.share_id) {
-      calculateShareBalance(formData.entity_id, formData.share_id);
-    }
-  }, [formData.entity_id, formData.share_id]);
+  // What the chosen entity holds of the chosen share, from the ledger Share
+  // Analytics reads. This page used to add up `transactions` itself, cancelled
+  // and expired ones included (bug-51).
+  const holding = useHolding(formData.entity_id, formData.share_id);
+
+  // The confirmation email: one builder for the preview and the send, shared
+  // with Transaction Approvals (bug-52).
+  const buildTransactionEmail = useTransactionEmail({ entities, shares, banks, brokers, entityBrokers });
 
   useEffect(() => {
     if (!formData.share_id) { setLatestSharePrice(null); return; }
@@ -380,65 +380,6 @@ export function Transactions() {
     }
   }
 
-  async function calculateShareBalance(entityId: string, shareId: string) {
-    try {
-      const [txnRes, openingRes] = await Promise.all([
-        supabase
-          .from('transactions')
-          .select('transaction_type, no_of_shares, price_per_share, net_price_per_share')
-          .eq('entity_id', entityId)
-          .eq('share_id', shareId),
-        supabase
-          .from('entity_share_opening_balances')
-          .select('opening_shares, average_purchase_cost')
-          .eq('entity_id', entityId)
-          .eq('share_id', shareId)
-          .maybeSingle(),
-      ]);
-
-      if (txnRes.error) throw txnRes.error;
-
-      let totalShares = 0;
-      let totalCost = 0;
-
-      if (openingRes.data) {
-        const openShares = Number(openingRes.data.opening_shares) || 0;
-        const openCost = Number(openingRes.data.average_purchase_cost) || 0;
-        totalShares += openShares;
-        totalCost += openShares * openCost;
-      }
-
-      (txnRes.data || []).forEach(txn => {
-        const shares = Number(txn.no_of_shares) || 0;
-        // Use net_price_per_share (includes fees) for true cost basis; fall back to gross if missing
-        const price = Number(txn.net_price_per_share) || Number(txn.price_per_share) || 0;
-
-        if (txn.transaction_type === 'BUY') {
-          totalShares += shares;
-          totalCost += shares * price;
-        } else if (txn.transaction_type === 'SELL') {
-          const avgBefore = totalShares > 0 ? totalCost / totalShares : 0;
-          totalShares -= shares;
-          totalCost -= shares * avgBefore;
-          if (totalShares <= 0) {
-            totalShares = Math.max(0, totalShares);
-            totalCost = 0;
-          }
-        }
-      });
-
-      const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
-
-      setShareBalances(prev => new Map(prev).set(`${entityId}-${shareId}`, {
-        share_id: shareId,
-        total_shares: totalShares,
-        avg_cost: avgCost
-      }));
-    } catch (error) {
-      console.error('Error calculating share balance:', error);
-    }
-  }
-
   function computeFeeComponents(belowItems: FeeBreakdownItem[], aboveItems: FeeBreakdownItem[], grossAmount: number, threshold: number | null): FeeComponentAmount {
     const result: FeeComponentAmount = { brokerage_fee: 0, cse_fee: 0, cds_fee: 0, clearing_fee: 0, sec_cess: 0, share_transaction_levy: 0 };
 
@@ -544,34 +485,15 @@ export function Transactions() {
     return formData.transaction_type === 'BUY' ? grossAmount + fees : grossAmount - fees;
   }
 
+  // Both previews are worked out in transactions.service against the ledger
+  // position; this only supplies what the form has typed.
   function calculateAverageCostWithPurchase() {
-    const key = `${formData.entity_id}-${formData.share_id}`;
-    const balance = shareBalances.get(key);
-
-    if (!balance) return 0;
-
-    const newShares = parseFloat(formData.no_of_shares) || 0;
-
-    if (formData.transaction_type === 'BUY') {
-      const totalShares = balance.total_shares + newShares;
-      const newNetPrice = calculateNetPricePerShare();
-      const totalCost = (balance.total_shares * balance.avg_cost) + (newShares * newNetPrice);
-      return totalShares > 0 ? totalCost / totalShares : 0;
-    } else {
-      return balance.avg_cost;
-    }
+    return holding.avgCostAfterBuy(parseFloat(formData.no_of_shares) || 0, calculateNetPricePerShare());
   }
 
   function calculateSellPnL() {
-    const key = `${formData.entity_id}-${formData.share_id}`;
-    const balance = shareBalances.get(key);
-    if (!balance || balance.avg_cost === 0) return null;
-    // Net proceeds per share (sale price minus fees) vs avg cost basis
-    const netSalePrice = calculateNetPricePerShare();
-    const numShares = parseFloat(formData.no_of_shares) || 0;
-    const pnlPerShare = netSalePrice - balance.avg_cost;
-    const totalPnl = pnlPerShare * numShares;
-    return { avgCost: balance.avg_cost, pnlPerShare, totalPnl };
+    // Net proceeds per share (sale price minus fees) vs the average cost held.
+    return holding.sellPnl(parseFloat(formData.no_of_shares) || 0, calculateNetPricePerShare());
   }
 
   function getEntityName(entityId: string) {
@@ -674,9 +596,13 @@ export function Transactions() {
     }
 
     if (formData.transaction_type === 'SELL') {
-      const balKey = `${formData.entity_id}-${formData.share_id}`;
-      const bal = shareBalances.get(balKey);
-      const available = bal?.total_shares ?? 0;
+      // Not yet loaded is not "holds none" -- refusing a valid sale on a guess
+      // of zero is the gap-filling CLAUDE.md rules out.
+      if (!holding.position) {
+        alert('Holdings are still loading. Try again in a moment.');
+        return;
+      }
+      const available = holding.position.heldShares;
       const requested = parseFloat(formData.no_of_shares) || 0;
       if (requested > available) {
         alert(`Insufficient shares: you hold ${available.toLocaleString()} share${available !== 1 ? 's' : ''} but are trying to sell ${requested.toLocaleString()}.`);
@@ -804,7 +730,7 @@ export function Transactions() {
       if (transaction.broker_id) {
         const broker = brokers.find(b => b.id === transaction.broker_id);
         if (broker?.contact_person_email) {
-          const txnData = getTransactionEmailData(transaction);
+          const txnData = buildTransactionEmail(transaction);
           await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
             method: 'POST',
             headers: {
@@ -1201,54 +1127,8 @@ export function Transactions() {
     try {
       setSendingEmail(true);
 
-      const entityName = getEntityName(selectedTransaction.entity_id);
-      const share = shares.find(s => s.id === selectedTransaction.share_id);
-      const bank = selectedTransaction.bank_id ? banks.find(b => b.id === selectedTransaction.bank_id) : null;
-      const brokerageFeeType = selectedTransaction.brokerage_fee_type_id
-        ? brokerageFeeTypes.find(ft => ft.id === selectedTransaction.brokerage_fee_type_id)
-        : null;
-
-      /*
-        The same resolver the modal uses, rather than the copy of the old lookup
-        that used to live here. That copy ended in `fallbackEntityBroker` -- the
-        first broker assigned to the entity -- so when nothing resolved it named
-        a guessed brokerage inside an email about a client's trade. The resolver
-        deliberately does not guess.
-      */
-      const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
-        resolveTransactionBroker(selectedTransaction);
-
-      const brokerName = resolvedBroker?.broker_name
-        || (entityBroker as { broker_text?: string } | null)?.broker_text
-        || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
-
-      const transactionData = {
-        entity: entityName,
-        transaction_type: selectedTransaction.transaction_type,
-        share: share?.share_name || 'N/A',
-        ticker: share?.ticker || 'N/A',
-        transaction_date: new Date(selectedTransaction.transaction_date).toLocaleDateString(),
-        cds_acc_type: entityBroker?.relationship_type || 'N/A',
-        cds_acc_no: selectedTransaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
-        order_type: selectedTransaction.order_type,
-        no_of_shares: Number(selectedTransaction.no_of_shares).toLocaleString(),
-        gross_price_per_share: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-        net_price_per_share: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-        total_amount: Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        broker_name: brokerName,
-        brokerage_fee_type: brokerageFeeType?.name || 'N/A',
-        brokerage_fee_rate: selectedTransaction.brokerage_fee_rate ? `${selectedTransaction.brokerage_fee_rate}%` : 'N/A',
-        brokerage_fee: Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        brokerage_fee_component: Number(selectedTransaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        cse_fee: Number(selectedTransaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        cds_fee: Number(selectedTransaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        clearing_fee: Number(selectedTransaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        sec_cess: Number(selectedTransaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        share_transaction_levy: Number(selectedTransaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-        bank_name: bank?.name || 'N/A',
-        bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A',
-        ...(emailNote.trim() ? { note: emailNote.trim() } : {}),
-      };
+      // The same builder the preview above it uses, so what is sent is what was shown.
+      const transactionData = buildTransactionEmail(selectedTransaction, emailNote.trim() || undefined);
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
         method: 'POST',
@@ -1310,57 +1190,6 @@ export function Transactions() {
    */
   function resolveTransactionBroker(transaction: Transaction) {
     return resolveTransactionRecipient(transaction, entityBrokers, brokers);
-  }
-
-  function getTransactionEmailData(transaction: Transaction) {
-    const entityName = getEntityName(transaction.entity_id);
-    const share = shares.find(s => s.id === transaction.share_id);
-    const bank = transaction.bank_id ? banks.find(b => b.id === transaction.bank_id) : null;
-    const brokerageFeeType = transaction.brokerage_fee_type_id
-      ? brokerageFeeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
-      : null;
-
-    const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
-      resolveTransactionBroker(transaction);
-    /*
-      Only the broker this transaction actually resolves to.
-
-      This used to fall back to joining every assigned broker, which rendered as
-      "First Capital Equities (Pvt) Ltd, Softlogic Brokers (Pvt) Ltd" in the
-      Broker row and read as though the transaction had two of them. It has one,
-      or none recorded -- a list of who it might have been is not a broker name,
-      and this value is also sent in the email body.
-    */
-    const brokerName = resolvedBroker?.broker_name
-      || (entityBroker as { broker_text?: string } | null)?.broker_text
-      || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
-
-    return {
-      entity: entityName,
-      transaction_type: transaction.transaction_type,
-      share: share?.share_name || 'N/A',
-      ticker: share?.ticker || 'N/A',
-      transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
-      cds_acc_type: entityBroker?.relationship_type || 'N/A',
-      cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
-      order_type: transaction.order_type,
-      no_of_shares: Number(transaction.no_of_shares).toLocaleString(),
-      gross_price_per_share: Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-      net_price_per_share: Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
-      total_amount: Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      broker_name: brokerName,
-      brokerage_fee_type: brokerageFeeType?.name || 'N/A',
-      brokerage_fee_rate: transaction.brokerage_fee_rate ? `${transaction.brokerage_fee_rate}%` : 'N/A',
-      brokerage_fee: Number(transaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      brokerage_fee_component: Number(transaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      cse_fee: Number(transaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      cds_fee: Number(transaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      clearing_fee: Number(transaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      sec_cess: Number(transaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      share_transaction_levy: Number(transaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }),
-      bank_name: bank?.name || 'N/A',
-      bank_acc_no: entityBroker?.bank_account_number || bank?.account_number || 'N/A'
-    };
   }
 
   function toggleTransactionSelection(transactionId: string) {
@@ -1499,8 +1328,9 @@ export function Transactions() {
     return matchesSearch && matchesDateFrom && matchesDateTo && matchesStatus;
   });
 
-  const key = `${formData.entity_id}-${formData.share_id}`;
-  const currentBalance = shareBalances.get(key);
+  const listVolume = useTransactionVolume(filteredTransactions);
+  const currentBalance = holding.position;
+  const avgCostAfterPurchase = formData.transaction_type === 'BUY' ? calculateAverageCostWithPurchase() : null;
   const entityBalance = formData.entity_id ? getEntityBalance(formData.entity_id) : 0;
   const requiredAmount = calculateTotalAmountNet();
   const entityBankAccounts = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
@@ -1607,8 +1437,13 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Total Volume</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
-                LKR {filteredTransactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                LKR {listVolume.volume.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
+              {listVolume.excluded > 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Excludes {listVolume.excluded} cancelled, expired or rejected
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -2145,12 +1980,12 @@ export function Transactions() {
                       placeholder="e.g., 1,000" required
                     />
                     {currentBalance && (
-                      <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.total_shares.toLocaleString()}</span></p>
+                      <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.heldShares.toLocaleString()}</span></p>
                     )}
                     {formData.transaction_type === 'SELL' && currentBalance && formData.no_of_shares &&
-                      parseFloat(formData.no_of_shares) > currentBalance.total_shares && (
+                      parseFloat(formData.no_of_shares) > currentBalance.heldShares && (
                       <p className="text-xs text-red-600 mt-0.5 font-semibold">
-                        Exceeds available shares ({currentBalance.total_shares.toLocaleString()})
+                        Exceeds available shares ({currentBalance.heldShares.toLocaleString()})
                       </p>
                     )}
                   </div>
@@ -2164,7 +1999,7 @@ export function Transactions() {
                       placeholder="e.g., 150.50" required
                     />
                     {currentBalance && formData.transaction_type === 'BUY' && (
-                      <p className="text-xs text-gray-500 mt-0.5">Avg cost: <span className="font-semibold">LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></p>
+                      <p className="text-xs text-gray-500 mt-0.5">Avg cost: <span className="font-semibold">{currentBalance.avgCost == null ? '—' : `LKR ${currentBalance.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</span></p>
                     )}
                   </div>
                   <div>
@@ -2178,14 +2013,14 @@ export function Transactions() {
                       <>
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Avg Cost After Purchase</label>
                         <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                          LKR {calculateAverageCostWithPurchase().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {avgCostAfterPurchase == null ? '—' : `LKR ${avgCostAfterPurchase.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                         </div>
                       </>
                     ) : formData.transaction_type === 'SELL' && currentBalance ? (
                       <>
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Current Avg Cost</label>
                         <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                          LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {currentBalance.avgCost == null ? '—' : `LKR ${currentBalance.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                         </div>
                       </>
                     ) : entityBalance > 0 && requiredAmount > 0 && formData.transaction_type === 'BUY' ? (
@@ -2738,7 +2573,7 @@ export function Transactions() {
       )}
 
       {showEmailModal && selectedTransaction && (() => {
-        const data = getTransactionEmailData(selectedTransaction);
+        const data = buildTransactionEmail(selectedTransaction);
         // Same resolver the displayed name uses, so the address always belongs to
         // the broker shown above it.
         // recipientOptions, not candidates: once the transaction's broker is
@@ -2759,7 +2594,6 @@ export function Transactions() {
             ? [{ id: `contact-${emailEntity.id}`, email: emailEntity.contact_email_company_individual, label: emailEntity.name, kind: 'contact' as const }]
             : []),
         ];
-        const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl flex flex-col" style={{ maxHeight: '92vh' }}>
@@ -2777,52 +2611,8 @@ export function Transactions() {
 
               {/* Transaction data — compact grid, no scroll needed */}
               <div className="px-5 pt-4 pb-3 flex-shrink-0">
-                {/* Type badge + share headline */}
-                <div className="flex items-center gap-2 mb-3">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${typeColor}`}>{data.transaction_type}</span>
-                  <span className="font-semibold text-gray-900 text-sm">{data.ticker} — {data.share}</span>
-                  <span className="text-gray-400 text-xs ml-auto">{data.entity}</span>
-                </div>
-
-                {/* Two-column grid */}
-                <div className="grid grid-cols-2 gap-x-6 gap-y-0 border border-gray-200 rounded-lg overflow-hidden">
-                  {[
-                    ['Transaction Date', data.transaction_date],
-                    ['Order Type', data.order_type],
-                    ['No. of Shares', data.no_of_shares],
-                    ['Gross Price / Share', `LKR ${data.gross_price_per_share}`],
-                    ['Net Price / Share', `LKR ${data.net_price_per_share}`],
-                    ['Total Amount', `LKR ${data.total_amount}`],
-                    ['CDS Acc Type', data.cds_acc_type],
-                    ['CDS Acc No.', data.cds_acc_no],
-                    ['Broker', data.broker_name],
-                    ['Brokerage Fee Type', data.brokerage_fee_type],
-                    ['Brokerage Fee Rate', data.brokerage_fee_rate],
-                    ['Brokerage Fee', `LKR ${data.brokerage_fee_component}`],
-                    ['CSE Fees', `LKR ${data.cse_fee}`],
-                    ['CDS Fees', `LKR ${data.cds_fee}`],
-                    ['Clearing Fees', `LKR ${data.clearing_fee}`],
-                    ['SEC CESS', `LKR ${data.sec_cess}`],
-                    ['Share Trans. Levy', `LKR ${data.share_transaction_levy}`],
-                    ['Total Fees', `LKR ${data.brokerage_fee}`],
-                    ['Bank Name', data.bank_name],
-                    ['Bank Acc No.', data.bank_acc_no],
-                  ].map(([label, value], i) => {
-                    const isKey = ['Total Amount', 'CDS Acc Type', 'CDS Acc No.', 'Gross Price / Share', 'Bank Name', 'Bank Acc No.', 'Total Fees'].includes(label as string);
-                    return (
-                      <div key={i} className={`flex items-center justify-between px-3 py-1.5 border-b border-gray-100 ${isKey ? 'bg-blue-50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                        <span className={`text-xs font-medium ${isKey ? 'text-blue-700' : 'text-gray-500'}`}>{label}</span>
-                        <span className={`text-xs font-semibold ${isKey ? 'text-blue-900' : 'text-gray-800'} tabular-nums`}>{value}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                {emailNote && (
-                  <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-                    <p className="text-xs font-semibold text-amber-700 mb-0.5">Note</p>
-                    <p className="text-xs text-amber-800 whitespace-pre-line">{emailNote}</p>
-                  </div>
-                )}
+                {/* The same preview Transaction Approvals shows, of the same email. */}
+                <TransactionEmailPreview data={data} note={emailNote} />
               </div>
 
               {/* Divider */}

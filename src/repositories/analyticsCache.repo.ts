@@ -1,5 +1,5 @@
 /**
- * Read access to `share_analytics_cache`.
+ * Access to `share_analytics_cache`.
  *
  * One computed row per event per (entity, share), each carrying the cumulative
  * state *after* that event. Written by the Share Analytics compute; read by
@@ -79,4 +79,48 @@ export async function findByHash(sourceHash: string): Promise<AnalyticsCacheRow[
   // The client is untyped and the column list is composed, so supabase-js cannot
   // infer the row shape. Naming it is this layer's job; callers get real types.
   return rows as unknown as AnalyticsCacheRow[];
+}
+
+/** Which half of a write failed, and what PostgREST said. */
+export interface CacheWriteFailure {
+  stage: 'delete' | 'insert';
+  error: unknown;
+}
+
+/** One cached row per position: the unique index of 20261012060001. */
+const POSITION_KEY = 'source_hash,entity_id,share_id,row_index';
+
+/**
+ * Replace one entity's cached rows.
+ *
+ * Delete, then insert -- and the insert skips any position already stored.
+ * Without that, two rebuilds that overlap (two tabs, two users, or StrictMode
+ * running the page's load effect twice under `npm run dev`) both delete before
+ * either inserts, and every row is stored twice. On 2026-10-12 Metrocorp's 525
+ * rows were held as 1,050, and Share Analytics, which sums what it is handed,
+ * showed ALUM.N0000 with every event listed twice.
+ *
+ * Needs migration 20261012060001 applied first: without the unique index
+ * PostgREST refuses an `on_conflict` it cannot match, and nothing is cached.
+ *
+ * Resolves to the failure rather than throwing, so the caller can report which
+ * entity it could not cache and carry on with the rest.
+ */
+export async function replaceEntity(
+  entityId: string,
+  rows: Record<string, unknown>[],
+): Promise<CacheWriteFailure | null> {
+  const { error: delErr } = await supabase
+    .from('share_analytics_cache')
+    .delete()
+    .eq('entity_id', entityId);
+  if (delErr) return { stage: 'delete', error: delErr };
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error: insErr } = await supabase
+      .from('share_analytics_cache')
+      .upsert(rows.slice(i, i + 500), { onConflict: POSITION_KEY, ignoreDuplicates: true });
+    if (insErr) return { stage: 'insert', error: insErr };
+  }
+  return null;
 }

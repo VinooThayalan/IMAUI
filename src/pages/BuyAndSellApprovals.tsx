@@ -943,6 +943,17 @@ const displayNotes = notes.filter(n => {
                   disabled={isSendingEmail}
                 />
 
+                {/*
+                  Whose trade this is, labelled (bug-52). It was only the last word
+                  of the grey line under the title, here and in the email, and a
+                  broker acting for several clients could not tell whose note it
+                  was. The email carries the same line in the same place.
+                */}
+                <div className="flex items-baseline gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Entity</span>
+                  <span className="text-sm font-bold text-gray-900">{entity?.name || '—'}</span>
+                </div>
+
                 {/* Comparison table */}
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Transaction vs Note Comparison</p>
