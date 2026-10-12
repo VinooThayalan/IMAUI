@@ -9,6 +9,8 @@ import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../li
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
+import { useHolding } from '../hooks/useHolding';
+import { useTransactionVolume } from '../hooks/useTransactionVolume';
 
 const ALL_STATUSES = [
   { value: 'DRAFT', label: 'Draft' },
@@ -115,12 +117,6 @@ interface BrokerageFeeType {
   fee_breakdown_items: FeeBreakdownItem[];
 }
 
-interface ShareBalance {
-  share_id: string;
-  total_shares: number;
-  avg_cost: number;
-}
-
 interface EntityBroker {
   id: string;
   entity_id: string;
@@ -186,7 +182,6 @@ export function Transactions() {
   const [brokers, setBrokers] = useState<Broker[]>([]);
   const [brokerageFeeTypes, setBrokerageFeeTypes] = useState<BrokerageFeeType[]>([]);
   const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
-  const [shareBalances, setShareBalances] = useState<Map<string, ShareBalance>>(new Map());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -225,11 +220,10 @@ export function Transactions() {
     loadData();
   }, []);
 
-  useEffect(() => {
-    if (formData.entity_id && formData.share_id) {
-      calculateShareBalance(formData.entity_id, formData.share_id);
-    }
-  }, [formData.entity_id, formData.share_id]);
+  // What the chosen entity holds of the chosen share, from the ledger Share
+  // Analytics reads. This page used to add up `transactions` itself, cancelled
+  // and expired ones included (bug-51).
+  const holding = useHolding(formData.entity_id, formData.share_id);
 
   useEffect(() => {
     if (!formData.share_id) { setLatestSharePrice(null); return; }
@@ -380,65 +374,6 @@ export function Transactions() {
     }
   }
 
-  async function calculateShareBalance(entityId: string, shareId: string) {
-    try {
-      const [txnRes, openingRes] = await Promise.all([
-        supabase
-          .from('transactions')
-          .select('transaction_type, no_of_shares, price_per_share, net_price_per_share')
-          .eq('entity_id', entityId)
-          .eq('share_id', shareId),
-        supabase
-          .from('entity_share_opening_balances')
-          .select('opening_shares, average_purchase_cost')
-          .eq('entity_id', entityId)
-          .eq('share_id', shareId)
-          .maybeSingle(),
-      ]);
-
-      if (txnRes.error) throw txnRes.error;
-
-      let totalShares = 0;
-      let totalCost = 0;
-
-      if (openingRes.data) {
-        const openShares = Number(openingRes.data.opening_shares) || 0;
-        const openCost = Number(openingRes.data.average_purchase_cost) || 0;
-        totalShares += openShares;
-        totalCost += openShares * openCost;
-      }
-
-      (txnRes.data || []).forEach(txn => {
-        const shares = Number(txn.no_of_shares) || 0;
-        // Use net_price_per_share (includes fees) for true cost basis; fall back to gross if missing
-        const price = Number(txn.net_price_per_share) || Number(txn.price_per_share) || 0;
-
-        if (txn.transaction_type === 'BUY') {
-          totalShares += shares;
-          totalCost += shares * price;
-        } else if (txn.transaction_type === 'SELL') {
-          const avgBefore = totalShares > 0 ? totalCost / totalShares : 0;
-          totalShares -= shares;
-          totalCost -= shares * avgBefore;
-          if (totalShares <= 0) {
-            totalShares = Math.max(0, totalShares);
-            totalCost = 0;
-          }
-        }
-      });
-
-      const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
-
-      setShareBalances(prev => new Map(prev).set(`${entityId}-${shareId}`, {
-        share_id: shareId,
-        total_shares: totalShares,
-        avg_cost: avgCost
-      }));
-    } catch (error) {
-      console.error('Error calculating share balance:', error);
-    }
-  }
-
   function computeFeeComponents(belowItems: FeeBreakdownItem[], aboveItems: FeeBreakdownItem[], grossAmount: number, threshold: number | null): FeeComponentAmount {
     const result: FeeComponentAmount = { brokerage_fee: 0, cse_fee: 0, cds_fee: 0, clearing_fee: 0, sec_cess: 0, share_transaction_levy: 0 };
 
@@ -544,34 +479,15 @@ export function Transactions() {
     return formData.transaction_type === 'BUY' ? grossAmount + fees : grossAmount - fees;
   }
 
+  // Both previews are worked out in transactions.service against the ledger
+  // position; this only supplies what the form has typed.
   function calculateAverageCostWithPurchase() {
-    const key = `${formData.entity_id}-${formData.share_id}`;
-    const balance = shareBalances.get(key);
-
-    if (!balance) return 0;
-
-    const newShares = parseFloat(formData.no_of_shares) || 0;
-
-    if (formData.transaction_type === 'BUY') {
-      const totalShares = balance.total_shares + newShares;
-      const newNetPrice = calculateNetPricePerShare();
-      const totalCost = (balance.total_shares * balance.avg_cost) + (newShares * newNetPrice);
-      return totalShares > 0 ? totalCost / totalShares : 0;
-    } else {
-      return balance.avg_cost;
-    }
+    return holding.avgCostAfterBuy(parseFloat(formData.no_of_shares) || 0, calculateNetPricePerShare());
   }
 
   function calculateSellPnL() {
-    const key = `${formData.entity_id}-${formData.share_id}`;
-    const balance = shareBalances.get(key);
-    if (!balance || balance.avg_cost === 0) return null;
-    // Net proceeds per share (sale price minus fees) vs avg cost basis
-    const netSalePrice = calculateNetPricePerShare();
-    const numShares = parseFloat(formData.no_of_shares) || 0;
-    const pnlPerShare = netSalePrice - balance.avg_cost;
-    const totalPnl = pnlPerShare * numShares;
-    return { avgCost: balance.avg_cost, pnlPerShare, totalPnl };
+    // Net proceeds per share (sale price minus fees) vs the average cost held.
+    return holding.sellPnl(parseFloat(formData.no_of_shares) || 0, calculateNetPricePerShare());
   }
 
   function getEntityName(entityId: string) {
@@ -674,9 +590,13 @@ export function Transactions() {
     }
 
     if (formData.transaction_type === 'SELL') {
-      const balKey = `${formData.entity_id}-${formData.share_id}`;
-      const bal = shareBalances.get(balKey);
-      const available = bal?.total_shares ?? 0;
+      // Not yet loaded is not "holds none" -- refusing a valid sale on a guess
+      // of zero is the gap-filling CLAUDE.md rules out.
+      if (!holding.position) {
+        alert('Holdings are still loading. Try again in a moment.');
+        return;
+      }
+      const available = holding.position.heldShares;
       const requested = parseFloat(formData.no_of_shares) || 0;
       if (requested > available) {
         alert(`Insufficient shares: you hold ${available.toLocaleString()} share${available !== 1 ? 's' : ''} but are trying to sell ${requested.toLocaleString()}.`);
@@ -1499,8 +1419,9 @@ export function Transactions() {
     return matchesSearch && matchesDateFrom && matchesDateTo && matchesStatus;
   });
 
-  const key = `${formData.entity_id}-${formData.share_id}`;
-  const currentBalance = shareBalances.get(key);
+  const listVolume = useTransactionVolume(filteredTransactions);
+  const currentBalance = holding.position;
+  const avgCostAfterPurchase = formData.transaction_type === 'BUY' ? calculateAverageCostWithPurchase() : null;
   const entityBalance = formData.entity_id ? getEntityBalance(formData.entity_id) : 0;
   const requiredAmount = calculateTotalAmountNet();
   const entityBankAccounts = formData.entity_id ? banks.filter(b => b.entity_id === formData.entity_id) : [];
@@ -1607,8 +1528,13 @@ export function Transactions() {
             <div>
               <p className="text-sm font-medium text-gray-500">Total Volume</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
-                LKR {filteredTransactions.reduce((sum, t) => sum + (Number(t.total_amount) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                LKR {listVolume.volume.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
+              {listVolume.excluded > 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Excludes {listVolume.excluded} cancelled, expired or rejected
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -2145,12 +2071,12 @@ export function Transactions() {
                       placeholder="e.g., 1,000" required
                     />
                     {currentBalance && (
-                      <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.total_shares.toLocaleString()}</span></p>
+                      <p className="text-xs text-blue-600 mt-0.5">Held: <span className="font-semibold">{currentBalance.heldShares.toLocaleString()}</span></p>
                     )}
                     {formData.transaction_type === 'SELL' && currentBalance && formData.no_of_shares &&
-                      parseFloat(formData.no_of_shares) > currentBalance.total_shares && (
+                      parseFloat(formData.no_of_shares) > currentBalance.heldShares && (
                       <p className="text-xs text-red-600 mt-0.5 font-semibold">
-                        Exceeds available shares ({currentBalance.total_shares.toLocaleString()})
+                        Exceeds available shares ({currentBalance.heldShares.toLocaleString()})
                       </p>
                     )}
                   </div>
@@ -2164,7 +2090,7 @@ export function Transactions() {
                       placeholder="e.g., 150.50" required
                     />
                     {currentBalance && formData.transaction_type === 'BUY' && (
-                      <p className="text-xs text-gray-500 mt-0.5">Avg cost: <span className="font-semibold">LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></p>
+                      <p className="text-xs text-gray-500 mt-0.5">Avg cost: <span className="font-semibold">{currentBalance.avgCost == null ? '—' : `LKR ${currentBalance.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</span></p>
                     )}
                   </div>
                   <div>
@@ -2178,14 +2104,14 @@ export function Transactions() {
                       <>
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Avg Cost After Purchase</label>
                         <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                          LKR {calculateAverageCostWithPurchase().toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {avgCostAfterPurchase == null ? '—' : `LKR ${avgCostAfterPurchase.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                         </div>
                       </>
                     ) : formData.transaction_type === 'SELL' && currentBalance ? (
                       <>
                         <label className="block text-xs font-semibold text-gray-600 mb-1">Current Avg Cost</label>
                         <div className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 text-gray-900 font-semibold">
-                          LKR {currentBalance.avg_cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {currentBalance.avgCost == null ? '—' : `LKR ${currentBalance.avgCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                         </div>
                       </>
                     ) : entityBalance > 0 && requiredAmount > 0 && formData.transaction_type === 'BUY' ? (
