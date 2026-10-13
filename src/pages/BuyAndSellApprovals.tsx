@@ -7,6 +7,7 @@ import { entityCcAddresses } from '../lib/emailRecipients';
 import { listEmailContacts } from '../repositories/entities.repo';
 import { sendComparisonEmail, sendReviewNotification } from '../services/brokerEmail.service';
 import { CcField } from '../components/EmailRecipientsField';
+import { EmailHeadline } from '../components/EmailHeadline';
 import { LoadingState, Spinner } from '../components/Loading';
 
 interface BuyAndSellNote {
@@ -893,7 +894,8 @@ const displayNotes = notes.filter(n => {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-gray-900">Email Broker</h2>
-                    <p className="text-xs text-gray-500">{note.contract_no || note.note_number} · {share?.ticker || '—'} · {entity?.name || '—'}</p>
+                    {/* Ticker and entity are in the headline row below. */}
+                    <p className="text-xs text-gray-500">{note.contract_no || note.note_number}</p>
                   </div>
                 </div>
                 <button onClick={closeEmailModal} className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
@@ -902,6 +904,14 @@ const displayNotes = notes.filter(n => {
               </div>
 
               <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+                {/*
+                  Whose trade this is, labelled (bug-52), first -- the same row,
+                  in the same place, as Send Transaction Details. It was a box
+                  further down, under the CC field, so the entity moved depending
+                  on which dialog was open. The email carries the same row.
+                */}
+                <EmailHeadline type={note.note_type} ticker={share?.ticker || '—'} share={share?.share_name || '—'} entity={entity?.name || '—'} />
+
                 {/* Broker info */}
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-2">Recipient</p>
@@ -942,17 +952,6 @@ const displayNotes = notes.filter(n => {
                   source={entity?.name ?? null}
                   disabled={isSendingEmail}
                 />
-
-                {/*
-                  Whose trade this is, labelled (bug-52). It was only the last word
-                  of the grey line under the title, here and in the email, and a
-                  broker acting for several clients could not tell whose note it
-                  was. The email carries the same line in the same place.
-                */}
-                <div className="flex items-baseline gap-3 px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Entity</span>
-                  <span className="text-sm font-bold text-gray-900">{entity?.name || '—'}</span>
-                </div>
 
                 {/* Comparison table */}
                 <div>
