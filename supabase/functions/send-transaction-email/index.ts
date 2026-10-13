@@ -240,6 +240,33 @@ function approvalSubject(n: ApprovalNotificationData): string {
   return `Contract Note ${actionLabel}: ${entityPrefix(n.entity_name)}${n.contract_no} — ${n.note_type} ${n.ticker}`;
 }
 
+/**
+ * The first row of an email body: type badge, "TICKER — Share", and the
+ * entity, labelled, on the right (bug-52).
+ *
+ * Shared by the transaction email and the broker comparison email so the entity
+ * sits in the same place in both. The comparison email had it in a box below the
+ * recipient. The dialogs draw the same row (EmailHeadline in src/components).
+ * Values must already be escaped.
+ */
+function headlineHtml(type: string, ticker: string, share: string, entity: string): string {
+  const label = type.toUpperCase();
+  const isBuy = label === "BUY";
+  const color = isBuy ? "#16a34a" : "#dc2626";
+  const bg = isBuy ? "#dcfce7" : "#fee2e2";
+  const border = isBuy ? "#86efac" : "#fca5a5";
+  return `<table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><tr>
+        <td style="vertical-align:middle;">
+          <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${color};background:${bg};border:1px solid ${border};margin-right:10px;">${label}</span>
+          <span style="font-weight:700;color:#111827;font-size:14px;">${ticker} — ${share}</span>
+        </td>
+        <td style="text-align:right;vertical-align:middle;">
+          <span style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-right:6px;">Entity</span>
+          <span style="font-size:14px;font-weight:700;color:#111827;">${entity}</span>
+        </td>
+      </tr></table>`;
+}
+
 function buildApprovalHtml(rawData: ApprovalNotificationData): string {
   const data = escapeDeep(rawData);
   const isApproved = data.action === "APPROVED";
@@ -392,12 +419,6 @@ function buildApprovalHtml(rawData: ApprovalNotificationData): string {
 
 function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
   const data = escapeDeep(rawData);
-  const isBuy = data.note_type === "Buy";
-  const typeColor = isBuy ? "#16a34a" : "#dc2626";
-  const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
-  const typeBorder = isBuy ? "#86efac" : "#fca5a5";
-  const typeLabel = isBuy ? "BUY" : "SELL";
-
   const rowHtml = data.rows.map((r) => {
     const bg = r.mismatch ? "#fff7ed" : "#ffffff";
     const labelColor = r.mismatch ? "#c2410c" : "#374151";
@@ -450,12 +471,14 @@ function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
       </div>
       <div style="flex:1;">
         <h1 style="margin:0;color:white;font-size:18px;font-weight:700;">Email Broker</h1>
-        <p style="margin:2px 0 0 0;color:#94a3b8;font-size:12px;">${data.contract_no} \u00b7 ${data.ticker} \u00b7 ${data.entity_name}</p>
+        <p style="margin:2px 0 0 0;color:#94a3b8;font-size:12px;">${data.contract_no}</p>
       </div>
-      <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${typeColor};background:${typeBg};border:1px solid ${typeBorder};">${typeLabel}</span>
     </div>
 
     <div style="padding:20px 24px;">
+
+      <!-- Type badge + share headline + entity, as in the transaction email -->
+      ${headlineHtml(data.note_type, data.ticker, data.share_name, data.entity_name)}
 
       <!-- Recipient -->
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:14px 16px;margin-bottom:18px;">
@@ -468,12 +491,6 @@ function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
           <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:white;border:1px solid #93c5fd;border-radius:8px;font-size:13px;font-weight:500;color:#1d4ed8;">${data.broker_email}</span>
         </div>
       </div>
-
-      <!-- Entity, labelled (bug-52): it was only the last word of the grey header line. -->
-      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;"><tr>
-        <td style="padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;width:1%;white-space:nowrap;">Entity</td>
-        <td style="padding:10px 16px 10px 0;font-size:14px;font-weight:700;color:#111827;">${data.entity_name}</td>
-      </tr></table>
 
       <!-- Comparison Table -->
       <p style="margin:0 0 8px 0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;">Transaction vs Note Comparison</p>
@@ -506,11 +523,7 @@ function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
 
 function buildTransactionHtml(rawTransaction: TransactionData): string {
   const transaction = escapeDeep(rawTransaction);
-  const isBuy = transaction.transaction_type === "BUY";
-  const typeColor = isBuy ? "#16a34a" : "#dc2626";
-  const typeBg = isBuy ? "#dcfce7" : "#fee2e2";
-  const typeBorder = isBuy ? "#86efac" : "#fca5a5";
-  const typeLabel = isBuy ? "BUY" : "SELL";
+  const typeLabel = transaction.transaction_type === "BUY" ? "BUY" : "SELL";
 
   const keyFields = new Set([
     "Gross Price / Share",
@@ -590,18 +603,8 @@ function buildTransactionHtml(rawTransaction: TransactionData): string {
 
     <div style="padding: 20px 24px;">
 
-      <!-- Type badge + share headline -->
-      <table style="width:100%;border-collapse:collapse;margin-bottom:14px;"><tr>
-        <td style="vertical-align:middle;">
-          <span style="display:inline-block;padding:3px 12px;border-radius:9999px;font-weight:700;font-size:12px;color:${typeColor};background:${typeBg};border:1px solid ${typeBorder};margin-right:10px;">${typeLabel}</span>
-          <span style="font-weight:700;color:#111827;font-size:14px;">${transaction.ticker} — ${transaction.share}</span>
-        </td>
-        <td style="text-align:right;vertical-align:middle;">
-          <!-- Labelled, in body weight (bug-52): it was a small grey name. -->
-          <span style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;margin-right:6px;">Entity</span>
-          <span style="font-size:14px;font-weight:700;color:#111827;">${transaction.entity}</span>
-        </td>
-      </tr></table>
+      <!-- Type badge + share headline + entity -->
+      ${headlineHtml(transaction.transaction_type, transaction.ticker, transaction.share, transaction.entity)}
 
       <!-- Two-column grid -->
       <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">

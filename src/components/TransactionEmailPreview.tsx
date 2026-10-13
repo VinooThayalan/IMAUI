@@ -1,4 +1,5 @@
 import type { TransactionEmailData } from '../lib/transactionEmail';
+import { EmailHeadline } from './EmailHeadline';
 
 /**
  * The transaction data at the top of the "Send Transaction Details" dialog --
@@ -11,7 +12,8 @@ import type { TransactionEmailData } from '../lib/transactionEmail';
  *
  * The entity is labelled and set in the body weight (bug-52). It was a small
  * grey name in the corner, here and in the email, and a broker reading an
- * email about one of several clients could not tell whose trade it was.
+ * email about one of several clients could not tell whose trade it was. The
+ * headline row is shared with Email Broker, so it sits in the same place there.
  */
 
 /** Highlighted rows, as the email highlights them. */
@@ -20,8 +22,6 @@ const KEY_FIELDS = new Set([
 ]);
 
 export function TransactionEmailPreview({ data, note }: { data: TransactionEmailData; note?: string }) {
-  const typeColor = data.transaction_type === 'BUY' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-
   const fields: [string, string][] = [
     ['Transaction Date', data.transaction_date],
     ['Order Type', data.order_type],
@@ -48,13 +48,8 @@ export function TransactionEmailPreview({ data, note }: { data: TransactionEmail
   return (
     <>
       {/* Type badge + share headline + entity */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${typeColor}`}>{data.transaction_type}</span>
-        <span className="font-semibold text-gray-900 text-sm">{data.ticker} — {data.share}</span>
-        <span className="ml-auto flex items-baseline gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Entity</span>
-          <span className="text-sm font-bold text-gray-900">{data.entity}</span>
-        </span>
+      <div className="mb-3">
+        <EmailHeadline type={data.transaction_type} ticker={data.ticker} share={data.share} entity={data.entity} />
       </div>
 
       {/* Two-column grid */}
