@@ -1,15 +1,7 @@
-/**
- * The first line of every email dialog: what was traded, and for whom.
- *
- * Type badge, then "TICKER — Share name", then the entity, labelled, on the
- * same line. Send Transaction Details had it here and Email Broker put the
- * entity in a box halfway down, below the CC field, so the same fact sat in a
- * different place depending on which dialog was open. One component now; the
- * emails `send-transaction-email` renders carry the same row.
- */
+/** First row of every email dialog: type badge, "TICKER — Share", labelled entity. */
 
 interface EmailHeadlineProps {
-  /** BUY / SELL, in either case -- transactions say "BUY", notes say "Buy". */
+  /** BUY / SELL in either case. */
   type: string;
   ticker: string;
   share: string;

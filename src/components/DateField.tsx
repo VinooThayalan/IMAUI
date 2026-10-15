@@ -25,14 +25,21 @@
  *     included — with a spinner on every refetch, which is what made stepping to
  *     the previous month look like a page refresh. A component cannot prevent its
  *     own parent doing that; see the note on `disabled` below.
+ *
+ *  5. **Browser-locale date order.** The field is typed and shown as dd/mm/yyyy
+ *     whatever the browser's language; the native calendar opens from the button.
+ *     Callers still give and get `YYYY-MM-DD`.
  */
 
-import { useId } from 'react';
-import { toDateInputValue } from '../lib/dateInput';
+import { useId, useRef, useState, type KeyboardEvent } from 'react';
+import { Calendar } from 'lucide-react';
+import { formatDisplayDate, parseDisplayDate, toDateInputValue } from '../lib/dateInput';
 
 const INPUT_CLASS =
-  'px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 ' +
+  'px-3 py-2 pr-9 border border-gray-300 rounded-lg text-sm text-gray-900 tabular-nums ' +
   'focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400';
+
+const INVALID_CLASS = ' border-red-400 focus:ring-red-400';
 
 export interface DateFieldProps {
   value: string | null | undefined;
@@ -81,19 +88,89 @@ export function DateField({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const current = toDateInputValue(value);
+  const minValue = toDateInputValue(min);
+  const maxValue = toDateInputValue(max);
+  const pickerRef = useRef<HTMLInputElement>(null);
+
+  // Text while typing; null shows the held value. Only a complete, in-range date
+  // is sent up, and blur restores the held value.
+  const [draft, setDraft] = useState<string | null>(null);
+  const parsed = draft == null ? current : parseDisplayDate(draft);
+  const inRange = (v: string) => (!minValue || v >= minValue) && (!maxValue || v <= maxValue);
+  const invalid = draft != null && draft.trim() !== '' && (parsed == null || !inRange(parsed));
+
+  function typed(text: string) {
+    setDraft(text);
+    const v = parseDisplayDate(text);
+    if (v === '' || (v != null && inRange(v))) {
+      if (v !== current) onChange(v);
+    }
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') setDraft(null);
+    if (e.key === 'Enter' && invalid) e.preventDefault();
+  }
+
+  function openCalendar() {
+    const picker = pickerRef.current;
+    if (!picker) return;
+    try {
+      picker.showPicker();
+    } catch {
+      picker.focus(); // no showPicker() support
+    }
+  }
+
+  const rangeHint = minValue && maxValue
+    ? `between ${formatDisplayDate(minValue)} and ${formatDisplayDate(maxValue)}`
+    : minValue ? `on or after ${formatDisplayDate(minValue)}`
+    : maxValue ? `on or before ${formatDisplayDate(maxValue)}`
+    : '';
 
   const input = (
-    <input
-      id={inputId}
-      type="date"
-      value={current}
-      onChange={e => onChange(e.target.value)}
-      min={toDateInputValue(min) || undefined}
-      max={toDateInputValue(max) || undefined}
-      required={required}
-      disabled={disabled}
-      className={className ?? `${fullWidth ? 'w-full ' : ''}${INPUT_CLASS}`}
-    />
+    <span className={`relative ${fullWidth ? 'block w-full' : 'inline-block'}`}>
+      <input
+        id={inputId}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="dd/mm/yyyy"
+        value={draft ?? formatDisplayDate(current)}
+        onChange={e => typed(e.target.value)}
+        onFocus={() => setDraft(formatDisplayDate(current))}
+        onBlur={() => setDraft(null)}
+        onKeyDown={onKeyDown}
+        required={required}
+        disabled={disabled}
+        aria-invalid={invalid || undefined}
+        title={invalid ? `Enter a date as dd/mm/yyyy${rangeHint ? `, ${rangeHint}` : ''}` : undefined}
+        className={(className ?? `${fullWidth ? 'w-full' : 'w-36'} ${INPUT_CLASS}`) + (invalid ? INVALID_CLASS : '')}
+      />
+      {/* Native calendar: transparent rather than hidden so showPicker() can anchor to it. */}
+      <input
+        ref={pickerRef}
+        type="date"
+        tabIndex={-1}
+        aria-hidden="true"
+        value={current}
+        min={minValue || undefined}
+        max={maxValue || undefined}
+        disabled={disabled}
+        onChange={e => { setDraft(null); onChange(e.target.value); }}
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+      />
+      <button
+        type="button"
+        onClick={openCalendar}
+        disabled={disabled}
+        aria-label={`Choose ${label ? label.toLowerCase() : 'date'} from a calendar`}
+        title="Choose from a calendar"
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+      >
+        <Calendar className="h-4 w-4" />
+      </button>
+    </span>
   );
 
   if (!label) {

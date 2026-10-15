@@ -894,7 +894,6 @@ const displayNotes = notes.filter(n => {
                   </div>
                   <div>
                     <h2 className="text-lg font-bold text-gray-900">Email Broker</h2>
-                    {/* Ticker and entity are in the headline row below. */}
                     <p className="text-xs text-gray-500">{note.contract_no || note.note_number}</p>
                   </div>
                 </div>
@@ -904,12 +903,6 @@ const displayNotes = notes.filter(n => {
               </div>
 
               <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
-                {/*
-                  Whose trade this is, labelled (bug-52), first -- the same row,
-                  in the same place, as Send Transaction Details. It was a box
-                  further down, under the CC field, so the entity moved depending
-                  on which dialog was open. The email carries the same row.
-                */}
                 <EmailHeadline type={note.note_type} ticker={share?.ticker || '—'} share={share?.share_name || '—'} entity={entity?.name || '—'} />
 
                 {/* Broker info */}

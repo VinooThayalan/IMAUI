@@ -5,8 +5,7 @@
  * export projects too, so the screen and the file cannot disagree (bug-50). This
  * only hands it to the page.
  *
- * The date window is still the page's (not yet migrated), so the rows a period's
- * activity columns sum arrive as a function.
+ * `activityRows` comes from `useShareWindow`.
  */
 
 import {
