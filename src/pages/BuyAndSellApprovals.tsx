@@ -9,6 +9,7 @@ import { sendComparisonEmail, sendReviewNotification } from '../services/brokerE
 import { CcField } from '../components/EmailRecipientsField';
 import { EmailHeadline } from '../components/EmailHeadline';
 import { LoadingState, Spinner } from '../components/Loading';
+import { useNoteReview, type EntityAccount } from '../hooks/useNoteReview';
 
 interface BuyAndSellNote {
   id: string;
@@ -58,6 +59,8 @@ interface Transaction {
   clearing_fee?: number | null;
   sec_cess?: number | null;
   share_transaction_levy?: number | null;
+  cds_account_id?: string | null;
+  broker_id?: string | null;
 }
 
 /*
@@ -89,13 +92,6 @@ interface Broker {
   contact_person_designation?: string;
 }
 
-interface EntityBroker {
-  id: string;
-  entity_id: string;
-  broker_id: string;
-  broker_account_number?: string;
-  custodian_account_number?: string;
-}
 
 /**
  * The review notification emails — approval and rejection both — switched off at
@@ -122,7 +118,7 @@ export function BuyAndSellApprovals() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
   const [brokers, setBrokers] = useState<Broker[]>([]);
-  const [entityBrokers, setEntityBrokers] = useState<EntityBroker[]>([]);
+  const [entityBrokers, setEntityBrokers] = useState<EntityAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'PENDING_APPROVAL' | 'PROCESSED' | 'REJECTED' | 'all'>('PENDING_APPROVAL');
@@ -138,6 +134,10 @@ export function BuyAndSellApprovals() {
   const [emailCc, setEmailCc] = useState<string[]>([]);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
 
+  const noteReview = useNoteReview();
+
+  // Load once on mount; useNoteReview's functions never change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
@@ -145,7 +145,7 @@ export function BuyAndSellApprovals() {
       setLoading(true);
       const [notesRes, txnRes, entitiesRes, sharesRes, brokersRes, ebRes] = await Promise.all([
         supabase.from('buy_sell_notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('transactions').select('id, entity_id, share_id, transaction_type, no_of_shares, price_per_share, total_amount, transaction_date, fees, brokerage_fee, cse_fee, cds_fee, clearing_fee, sec_cess, share_transaction_levy'),
+        noteReview.loadTransactions(),
         // Through the repository, and paged: an unbounded select is capped
         // server-side at db-max-rows, and a truncated entity list means a note
         // whose entity fell past the cap loses its CC prefill and its name.
@@ -158,15 +158,15 @@ export function BuyAndSellApprovals() {
         // even though the broker record held a perfectly good address. The other
         // two senders (TransactionApprovals, Transactions) never filtered here.
         supabase.from('brokers').select('id, broker_name, contact_person_name, contact_person_email, contact_person_phone, contact_person_designation'),
-        supabase.from('entity_brokers').select('id, entity_id, broker_id, broker_account_number, custodian_account_number'),
+        noteReview.loadAccounts(),
       ]);
       if (notesRes.error) throw notesRes.error;
       setNotes(notesRes.data || []);
-      setTransactions(txnRes.data || []);
+      setTransactions(txnRes as unknown as Transaction[]);
       setEntities(entitiesRes);
       setShares(sharesRes.data || []);
       setBrokers(brokersRes.data || []);
-      setEntityBrokers(ebRes.data || []);
+      setEntityBrokers(ebRes);
     } catch (err) {
       console.error('Error loading approvals data:', err);
     } finally {
@@ -179,10 +179,8 @@ export function BuyAndSellApprovals() {
     const entity = txn ? (entities.find(e => e.id === txn.entity_id) ?? null) : null;
     const share = txn ? (shares.find(s => s.id === txn.share_id) ?? null) : null;
     const broker = note.broker_id ? (brokers.find(b => b.id === note.broker_id) ?? null) : null;
-    const eb = entity && note.broker_id
-      ? (entityBrokers.find(e => e.entity_id === entity.id && e.broker_id === note.broker_id) ?? null)
-      : null;
-    return { entity, share, broker, eb };
+    const parties = noteReview.parties(note, txn ?? null, entity?.name ?? null, brokers, entityBrokers);
+    return { entity, share, broker, parties };
   }
 
   const [viewingFileId, setViewingFileId] = useState<string | null>(null);
@@ -535,7 +533,7 @@ const displayNotes = notes.filter(n => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {displayNotes.map(note => {
-                const { entity, share, broker, eb } = getDetails(note);
+                const { entity, share, broker, parties } = getDetails(note);
                 const status = note.status || 'PROCESSED';
                 const scfg = statusCfg[status] || statusCfg['PROCESSED'];
                 const isExpanded = expandedId === note.id;
@@ -655,6 +653,12 @@ const displayNotes = notes.filter(n => {
                             {broker?.contact_person_name && <p className="text-xs text-gray-500 mt-0.5">{broker.contact_person_name}{broker.contact_person_designation ? ` · ${broker.contact_person_designation}` : ''}</p>}
                             {broker?.contact_person_email && <p className="text-xs text-blue-600 mt-0.5">{broker.contact_person_email}</p>}
                             {broker?.contact_person_phone && <p className="text-xs text-gray-500 mt-0.5">{broker.contact_person_phone}</p>}
+                            {parties.transactionBroker && (
+                              <p className="mt-2 flex items-start gap-1 rounded bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">
+                                <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                                The transaction is with {parties.transactionBroker}. Check this note's broker.
+                              </p>
+                            )}
                           </div>
                           <div className="bg-white rounded-lg border border-gray-200 px-4 py-3">
                             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Transaction</p>
@@ -664,8 +668,15 @@ const displayNotes = notes.filter(n => {
                           </div>
                           <div className="bg-white rounded-lg border border-emerald-200 px-4 py-3">
                             <p className="text-xs font-semibold text-emerald-500 uppercase tracking-wide mb-1">Client Account</p>
-                            <p className="text-sm font-bold text-gray-900 font-mono">{eb?.broker_account_number || '-'}</p>
-                            {eb?.custodian_account_number && <p className="text-xs text-gray-500 mt-0.5">CDS: <span className="font-mono">{eb.custodian_account_number}</span></p>}
+                            <p className="text-sm font-bold text-gray-900 font-mono">{parties.clientAccount ?? '—'}</p>
+                            {parties.clientAccount && parties.clientName && (
+                              <p className="text-sm font-semibold text-gray-700 mt-0.5">{parties.clientName}</p>
+                            )}
+                            {parties.clientBank && <p className="text-xs text-gray-500">{parties.clientBank}</p>}
+                            {parties.clientAccount && !parties.accountOnRecord && (
+                              <p className="text-xs text-amber-700 mt-0.5">No account with this number on the entity's record.</p>
+                            )}
+                            {parties.brokerAccount && <p className="text-xs text-gray-500 mt-0.5">Broker account: <span className="font-mono">{parties.brokerAccount}</span></p>}
                             <div className="mt-2 pt-2 border-t border-gray-100">
                               <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
                               <p className="text-sm font-bold text-gray-900">

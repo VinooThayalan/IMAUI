@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabase";
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
 import { DateField, DateRangeField } from '../components/DateField';
+import { matchBrokerByName } from '../lib/brokerMatch';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
@@ -2193,17 +2194,8 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
-      // Try to match broker from PDF header text if the transaction doesn't carry one
-      const resolvedBrokerId = bestCandidate?.broker_id || (() => {
-        const pdfBroker = (extracted.broker_name ?? '').toLowerCase();
-        if (!pdfBroker) return null;
-        const matched = brokers.find((b) => {
-          const bn = b.broker_name.toLowerCase();
-          return pdfBroker.includes(bn) || bn.includes(pdfBroker) ||
-            pdfBroker.split(/\s+/).some((w) => w.length > 3 && bn.includes(w));
-        });
-        return matched?.id ?? null;
-      })();
+      // The matched transaction's broker, else the one the PDF names unambiguously.
+      const resolvedBrokerId = bestCandidate?.broker_id || matchBrokerByName(extracted.broker_name, brokers)?.id || null;
 
       setFormData((prev) => ({
         ...prev,
