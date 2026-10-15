@@ -22,6 +22,7 @@ import {
 } from '../services/cashLedger.service';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/auditLog';
+import { tradeLedgerDate } from '../lib/tradeDates';
 import { LoadingState } from '../components/Loading';
 
 interface Entity {
@@ -316,7 +317,7 @@ export function CashBalance() {
     const pendingRows = filteredPendingNotes.map(note => {
       const entity = entities.find(e => e.id === note.entity_id);
       return [
-        fmtLedgerDate(note.trade_date),
+        fmtLedgerDate(tradeLedgerDate(note)),
         fmtLedgerDate(note.trade_date),
         fmtLedgerDate(note.settlement_date),
         'Trade (pending)',
@@ -687,7 +688,7 @@ export function CashBalance() {
                   <tr key={`pending-${note.id}`} className="bg-amber-50 hover:bg-amber-100/60">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {note.trade_date ? new Date(note.trade_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        {fmtLedgerDate(tradeLedgerDate(note))}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{fmtLedgerDate(note.trade_date)}</td>

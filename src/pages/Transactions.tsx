@@ -7,7 +7,7 @@ import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
 import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrokerName } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
-import { DateRangeField } from '../components/DateField';
+import { DateField, DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useHolding } from '../hooks/useHolding';
 import { useTransactionVolume } from '../hooks/useTransactionVolume';
@@ -147,7 +147,7 @@ interface BulkRow {
   entity_id: string;
   share_id: string;
   transaction_type: 'Buy' | 'Sell';
-  settlement_date: string;
+  trade_date: string;
   no_of_shares: string;
   price_per_share: string;
   cds_account: string;
@@ -159,7 +159,7 @@ function emptyBulkRow(): BulkRow {
     entity_id: '',
     share_id: '',
     transaction_type: 'Buy',
-    settlement_date: new Date().toISOString().split('T')[0],
+    trade_date: '',
     no_of_shares: '',
     price_per_share: '',
     cds_account: '',
@@ -875,7 +875,12 @@ export function Transactions() {
   async function handleSaveBulk() {
     const validRows = bulkRows.filter(r => r.entity_id && r.share_id && r.no_of_shares && r.price_per_share);
     if (validRows.length === 0) {
-      alert('Please fill in at least one row with Entity, Share, Shares, and Price.');
+      alert('Please fill in at least one row with Entity, Share, Trade Date, Shares, and Price.');
+      return;
+    }
+    const undated = validRows.find(r => !r.trade_date);
+    if (undated) {
+      alert(`Row ${bulkRows.indexOf(undated) + 1}: Enter the trade date.`);
       return;
     }
 
@@ -891,7 +896,7 @@ export function Transactions() {
           share_id: row.share_id,
           transaction_type: row.transaction_type,
           order_type: 'DAY',
-          transaction_date: row.settlement_date,
+          transaction_date: row.trade_date,
           no_of_shares: qty,
           price_per_share: price,
           total_amount_gross: grossAmount,
@@ -2557,7 +2562,7 @@ export function Transactions() {
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Entity <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Share <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[80px]">Buy / Sell <span className="text-red-300">*</span></th>
-                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[120px]">Settlement Date <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">Trade Date <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">No. of Shares <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[130px]">Purchase / Sales Cost <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">CDS Account</th>
@@ -2643,13 +2648,14 @@ export function Transactions() {
                             </select>
                           </td>
 
-                          {/* Settlement date */}
+                          {/* Trade date */}
                           <td className="px-1 py-1">
-                            <input
-                              type="date"
-                              value={row.settlement_date}
-                              onChange={e => updateBulkRow(idx, 'settlement_date', e.target.value)}
-                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            <DateField
+                              value={row.trade_date}
+                              onChange={v => updateBulkRow(idx, 'trade_date', v)}
+                              required
+                              fullWidth
+                              className="w-full px-1.5 py-1 pr-7 border border-gray-300 rounded text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400"
                             />
                           </td>
 

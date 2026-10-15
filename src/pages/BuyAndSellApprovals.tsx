@@ -10,6 +10,7 @@ import { CcField } from '../components/EmailRecipientsField';
 import { EmailHeadline } from '../components/EmailHeadline';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useNoteReview, type EntityAccount } from '../hooks/useNoteReview';
+import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
 
 interface BuyAndSellNote {
   id: string;
@@ -241,6 +242,12 @@ export function BuyAndSellApprovals() {
 
   async function handleApprove() {
     if (!selectedNote) return;
+    const datesProblem = tradeDatesProblem(selectedNote.trade_date, selectedNote.settlement_date);
+    if (datesProblem) {
+      alert(`${datesProblem} Correct the note on Buy & Sell Notes before approving it.`);
+      return;
+    }
+    const ledgerDate = tradeLedgerDate(selectedNote);
     setIsSubmitting(true);
     try {
       const { entity, share, broker } = getDetails(selectedNote);
@@ -308,7 +315,7 @@ export function BuyAndSellApprovals() {
           description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
           code: selectedNote.contract_no || selectedNote.note_number,
           amount: totalNet,
-          date: selectedNote.trade_date || null,
+          date: ledgerDate,
           running_balance: newBalance,
           on_hold_amount: 0,
           entity_id: entity.id,
@@ -333,7 +340,7 @@ export function BuyAndSellApprovals() {
             description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
             code: selectedNote.contract_no || selectedNote.note_number,
             amount: totalNet,
-            date: selectedNote.trade_date || null,
+            date: ledgerDate,
             running_balance: newBalance,
             on_hold_amount: 0,
             entity_id: entity.id,

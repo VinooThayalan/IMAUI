@@ -17,6 +17,7 @@ import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
 import { DateField, DateRangeField } from '../components/DateField';
 import { matchBrokerByName } from '../lib/brokerMatch';
+import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
@@ -214,6 +215,7 @@ interface ManualRow {
   share_id: string;
   note_type: "Buy" | "Sell";
   no_of_shares: string;
+  trade_date: string;
   settlement_date: string;
   total_cost: string;
   /**
@@ -252,13 +254,17 @@ interface EditNoteForm {
   remarks: string;
 }
 
+const MANUAL_DATE_CLASS =
+  "w-full px-1.5 py-1 pr-7 border border-gray-300 rounded text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400";
+
 function emptyManualRow(): ManualRow {
   return {
     entity_id: "",
     share_id: "",
     note_type: "Buy",
     no_of_shares: "",
-    settlement_date: new Date().toISOString().split("T")[0],
+    trade_date: "",
+    settlement_date: "",
     total_cost: "",
     broker_id: "",
     broker_cds_account: "",
@@ -2669,8 +2675,9 @@ export function BuyAndSellNotes() {
       alert("Please select a transaction");
       return;
     }
-    if (!extractedData.trade_date || !extractedData.settlement) {
-      alert("Enter the trade date and settlement date from the contract note before saving.");
+    const datesProblem = tradeDatesProblem(extractedData.trade_date, extractedData.settlement);
+    if (datesProblem) {
+      alert(`${datesProblem} Check the dates against the contract note.`);
       return;
     }
     if (isProcessing) return;
@@ -2744,7 +2751,7 @@ export function BuyAndSellNotes() {
         description: `${selectedTransaction.transaction_type} - ${contractNo}`,
         code: contractNo,
         amount: totalNet,
-        date: extractedData.settlement || null,
+        date: tradeLedgerDate({ settlement_date: extractedData.settlement }),
         running_balance: newBalance,
         on_hold_amount: 0,
         entity_id: entity.id,
@@ -2787,8 +2794,9 @@ export function BuyAndSellNotes() {
       alert("Please select a transaction");
       return;
     }
-    if (!extractedData.trade_date || !extractedData.settlement) {
-      alert("Enter the trade date and settlement date from the contract note before saving.");
+    const datesProblem = tradeDatesProblem(extractedData.trade_date, extractedData.settlement);
+    if (datesProblem) {
+      alert(`${datesProblem} Check the dates against the contract note.`);
       return;
     }
     if (isProcessing) return;
@@ -2931,14 +2939,20 @@ export function BuyAndSellNotes() {
         r.entity_id &&
         r.share_id &&
         r.no_of_shares &&
-        r.total_cost &&
-        r.settlement_date,
+        r.total_cost,
     );
     if (validRows.length === 0) {
       alert(
-        "Please fill in at least one row with Entity, Share, No. of Shares, Settlement Date, and Total Cost.",
+        "Please fill in at least one row with Entity, Share, No. of Shares, Trade Date, Settlement Date, and Total Cost.",
       );
       return;
+    }
+    for (const r of validRows) {
+      const datesProblem = tradeDatesProblem(r.trade_date, r.settlement_date);
+      if (datesProblem) {
+        alert(`Row ${manualRows.indexOf(r) + 1}: ${datesProblem}`);
+        return;
+      }
     }
 
     setIsSavingManual(true);
@@ -2957,7 +2971,7 @@ export function BuyAndSellNotes() {
           share_id: row.share_id,
           transaction_type: row.note_type === "Buy" ? "BUY" : "SELL",
           order_type: "DAY",
-          transaction_date: row.settlement_date,
+          transaction_date: row.trade_date,
           no_of_shares: qty,
           price_per_share: pricePerShare,
           total_amount_gross: totalCost,
@@ -3002,7 +3016,7 @@ export function BuyAndSellNotes() {
             || "Manual Entry",
           settlement_date: row.settlement_date,
           transaction_date: row.settlement_date,
-          trade_date: row.settlement_date,
+          trade_date: row.trade_date,
           no_of_shares: qty,
           price_avg: pricePerShare,
           gross_amount: totalCost,
@@ -3047,7 +3061,7 @@ export function BuyAndSellNotes() {
           type: transactionType,
           description: `${row.note_type} - ${shares.find((s) => s.id === row.share_id)?.ticker || ""}`,
           amount: totalCost,
-          date: row.settlement_date,
+          date: tradeLedgerDate(row),
           running_balance: newBalance,
           on_hold_amount: 0,
           entity_id: entity.id,
@@ -3122,6 +3136,11 @@ export function BuyAndSellNotes() {
 
   async function handleSaveEdit() {
     if (!editNote) return;
+    const datesProblem = tradeDatesProblem(editNote.trade_date, editNote.settlement_date);
+    if (datesProblem) {
+      alert(datesProblem);
+      return;
+    }
     setIsSavingEdit(true);
     try {
       // Fetch old record for audit logging
@@ -5018,7 +5037,10 @@ export function BuyAndSellNotes() {
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">
                         No. of Shares <span className="text-red-300">*</span>
                       </th>
-                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[120px]">
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">
+                        Trade Date <span className="text-red-300">*</span>
+                      </th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">
                         Settlement Date <span className="text-red-300">*</span>
                       </th>
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[140px]">
@@ -5119,19 +5141,24 @@ export function BuyAndSellNotes() {
                             />
                           </td>
 
-                          {/* Settlement date */}
+                          {/* Trade and settlement dates */}
                           <td className="px-1 py-1">
-                            <input
-                              type="date"
+                            <DateField
+                              value={row.trade_date}
+                              onChange={(v) => updateManualRow(idx, "trade_date", v)}
+                              required
+                              fullWidth
+                              className={MANUAL_DATE_CLASS}
+                            />
+                          </td>
+                          <td className="px-1 py-1">
+                            <DateField
                               value={row.settlement_date}
-                              onChange={(e) =>
-                                updateManualRow(
-                                  idx,
-                                  "settlement_date",
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              onChange={(v) => updateManualRow(idx, "settlement_date", v)}
+                              min={row.trade_date}
+                              required
+                              fullWidth
+                              className={MANUAL_DATE_CLASS}
                             />
                           </td>
 
