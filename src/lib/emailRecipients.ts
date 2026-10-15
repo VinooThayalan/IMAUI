@@ -225,3 +225,18 @@ export function ccToOffer<T extends { email: string }>(cc: string[], suggestions
 
   return out;
 }
+
+/**
+ * The broker name for a resolved transaction: the broker, else the assignment's
+ * free-text broker, else "Not recorded" when the entity has brokers but none is
+ * tied to this trade. Null when the entity has none.
+ */
+export function resolvedBrokerName(resolved: {
+  broker: BrokerContact | null;
+  candidates: unknown[];
+  entityBroker: (EntityBrokerLink & { broker_text?: string | null }) | null;
+}): string | null {
+  return resolved.broker?.broker_name
+    || resolved.entityBroker?.broker_text
+    || (resolved.candidates.length > 0 ? 'Not recorded' : null);
+}

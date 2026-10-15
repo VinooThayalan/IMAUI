@@ -18,20 +18,30 @@ export interface EmailPostResult {
   status: number;
   /** The function's response body, truncated. Empty when it sent nothing. */
   detail: string;
+  /** The function's `sent` flag: false when the mail server refused. Null when absent. */
+  sent: boolean | null;
 }
 
-export async function postTransactionEmail(body: unknown): Promise<EmailPostResult> {
+/** `accessToken` overrides the current session's token. */
+export async function postTransactionEmail(body: unknown, accessToken?: string): Promise<EmailPostResult> {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
   const response = await fetch(`${supabaseUrl}/functions/v1/send-transaction-email`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${await getAccessToken()}`,
+      'Authorization': `Bearer ${accessToken ?? await getAccessToken()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
   });
 
-  const detail = response.ok ? '' : await response.text().catch(() => '');
-  return { ok: response.ok, status: response.status, detail: detail.slice(0, 200) };
+  const text = await response.text().catch(() => '');
+  let sent: boolean | null = null;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed?.sent === 'boolean') sent = parsed.sent;
+  } catch {
+    // Not JSON: an error page from the gateway.
+  }
+  return { ok: response.ok, status: response.status, detail: response.ok ? '' : text.slice(0, 200), sent };
 }

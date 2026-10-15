@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (result.status === 'deactivated') {
       // The database enforces this too; this only stops the app showing a shell
       // it cannot use.
-      await supabase.auth.signOut().catch(() => {});
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
       setUser(null);
       setIdentity(null);
       setStatusReason(null);
@@ -208,7 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /** Clear the session locally whatever the server says about it. */
   async function clearSession() {
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
     } catch {
       // Already gone server-side, which is the case we are handling. Dropping
       // the local state is the part that has to happen either way.
@@ -246,7 +246,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
-    const { error } = await supabase.auth.signOut();
+    // This browser only. The default ends the user's sessions everywhere, and a
+    // device left holding a token for an ended session is refused by the email
+    // function while every other screen still works.
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
     if (error) throw error;
 
     setUser(null);
