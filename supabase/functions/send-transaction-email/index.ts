@@ -215,39 +215,28 @@ async function sendEmail(to: string, cc: string[] | undefined, subject: string, 
   }
 }
 
-/**
- * "Test — " for a subject line, or nothing when the caller had no entity to name.
- *
- * bug-52: no subject named the entity, so a broker acting for several clients
- * could not tell whose trade an email was about without opening it. Callers send
- * "N/A" or a dash when the entity is unknown; neither belongs in a subject.
- */
-function entityPrefix(name: string | null | undefined): string {
+/** " - <entity>" to end a subject; empty when the entity is unknown ("N/A", a dash, blank). */
+function entitySuffix(name: string | null | undefined): string {
   const n = (name ?? "").trim();
-  return n && n !== "N/A" && n !== "—" && n !== "-" ? `${n} — ` : "";
+  return n && n !== "N/A" && n !== "—" && n !== "-" ? ` - ${n}` : "";
 }
 
-function transactionSubject(t: TransactionData): string {
-  return `Transaction Details — ${entityPrefix(t.entity)}${t.transaction_type} ${t.ticker}`;
+function transactionSubject(t: Pick<TransactionData, "entity" | "transaction_type" | "ticker">): string {
+  return `Transaction Details — ${t.transaction_type} ${t.ticker}${entitySuffix(t.entity)}`;
 }
 
 function comparisonSubject(c: BrokerComparisonData): string {
-  return `Contract Note Comparison: ${entityPrefix(c.entity_name)}${c.contract_no} — ${c.note_type} ${c.ticker}`;
+  return `Contract Note Comparison: ${c.contract_no} — ${c.note_type} ${c.ticker}${entitySuffix(c.entity_name)}`;
 }
 
 function approvalSubject(n: ApprovalNotificationData): string {
   const actionLabel = n.action === "APPROVED" ? "Approved" : "Rejected";
-  return `Contract Note ${actionLabel}: ${entityPrefix(n.entity_name)}${n.contract_no} — ${n.note_type} ${n.ticker}`;
+  return `Contract Note ${actionLabel}: ${n.contract_no} — ${n.note_type} ${n.ticker}${entitySuffix(n.entity_name)}`;
 }
 
 /**
- * The first row of an email body: type badge, "TICKER — Share", and the
- * entity, labelled, on the right (bug-52).
- *
- * Shared by the transaction email and the broker comparison email so the entity
- * sits in the same place in both. The comparison email had it in a box below the
- * recipient. The dialogs draw the same row (EmailHeadline in src/components).
- * Values must already be escaped.
+ * First body row of both emails: type badge, "TICKER — Share", labelled entity.
+ * Mirrors EmailHeadline in src/components. Values must already be escaped.
  */
 function headlineHtml(type: string, ticker: string, share: string, entity: string): string {
   const label = type.toUpperCase();
@@ -477,7 +466,7 @@ function buildBrokerComparisonHtml(rawData: BrokerComparisonData): string {
 
     <div style="padding:20px 24px;">
 
-      <!-- Type badge + share headline + entity, as in the transaction email -->
+      <!-- Type badge + share headline + entity -->
       ${headlineHtml(data.note_type, data.ticker, data.share_name, data.entity_name)}
 
       <!-- Recipient -->
@@ -762,7 +751,11 @@ Deno.serve(async (req: Request) => {
           cc: body.cc,
           subject: body.type === "approval_notification"
             ? `Contract Note: ${body.notification?.contract_no || "Unknown"}`
-            : `Transaction Details — ${body.transaction?.transaction_type || ""} ${body.transaction?.ticker || ""}`,
+            : transactionSubject({
+              entity: body.transaction?.entity ?? "",
+              transaction_type: body.transaction?.transaction_type || "",
+              ticker: body.transaction?.ticker || "",
+            }),
           html: "",
           status: "failed",
           errorMessage: error.message || "Internal server error",

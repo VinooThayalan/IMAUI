@@ -12,6 +12,8 @@
  * *name* and projected through the header list at the end. A cell nobody set is
  * empty; a name that is not a column is a type error.
  *
+ * Cells carry their kind (money, price, count, rate); `lib/exportTable` formats them.
+ *
  * No React, no Supabase, no clock — `asOf` is passed in so the same inputs
  * always produce the same file.
  */
@@ -27,50 +29,26 @@ import {
   type ComputedRow,
   type ShareGroup,
 } from './shareLedger.service';
-
-export type Cell = string | number;
-
-export interface CsvTable {
-  /** Written above the header row, when a file opens with a summary. */
-  preamble?: Cell[][];
-  headers: string[];
-  rows: Cell[][];
-}
-
-/**
- * Money, prices and counts are written grouped: `270,430.10`, not `270430.10`.
- *
- * Fixed to `en-US` rather than the browser's locale. An export is a file two
- * people compare against each other and against the workbook, so it must not
- * come out differently depending on who pressed the button — and a locale that
- * groups with `.` and decimalises with `,` would turn every amount in this file
- * into a different number.
- *
- * A grouped value contains a comma, so the writer quotes it. Excel reads a
- * quoted `"270,430.10"` back as the number 270430.1 under a matching locale, and
- * the fixed decimal places stop a float's eighth decimal turning up in a cell
- * stated to the cent. Anything that must survive as an unambiguous number rather
- * than be read by a person — a date, a ticker — is not put through these.
- */
-const GROUPED = 'en-US';
-const money = (n: number) =>
-  n.toLocaleString(GROUPED, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const price = (n: number) =>
-  n.toLocaleString(GROUPED, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
-/** Share counts: grouped, no decimal places, matching the screen. */
-const count = (n: number) =>
-  n.toLocaleString(GROUPED, { maximumFractionDigits: 0 });
+import {
+  count,
+  money,
+  percent,
+  price,
+  type ExportCell,
+  type ExportTable,
+} from '../lib/exportTable';
+import { activityRows } from './shareWindow.service';
 
 /**
  * Nothing recorded is an empty cell, never a zero.
  *
  * A holding with no market price has no after-fee price and no AER. Writing 0.00
  * would claim a figure nobody stated — the same mistake as rendering a missing
- * balance as zero on screen. Empty is how a CSV says "no value"; Excel leaves
+ * balance as zero on screen. Empty is how a file says "no value"; Excel leaves
  * the cell blank and it stays out of a SUM.
  */
-const orBlank = (n: number | null | undefined, fmt: (v: number) => string): Cell =>
-  n == null ? '' : fmt(n);
+const orBlank = (n: number | null | undefined, fmt: (v: number) => ExportCell): ExportCell =>
+  n == null ? null : fmt(n);
 
 // ── Per-holding breakdown ────────────────────────────────────────────────────
 
@@ -114,21 +92,21 @@ const DETAIL_COLUMNS = [
 ] as const;
 
 type DetailColumn = (typeof DETAIL_COLUMNS)[number];
-type DetailRow = Partial<Record<DetailColumn, Cell>>;
+type DetailRow = Partial<Record<DetailColumn, ExportCell>>;
 
 /** A named row laid out in header order. Unset columns are empty. */
-const projectDetail = (row: DetailRow): Cell[] =>
-  DETAIL_COLUMNS.map(c => row[c] ?? '');
+const projectDetail = (row: DetailRow): ExportCell[] =>
+  DETAIL_COLUMNS.map(c => row[c] ?? null);
 
 /**
  * The breakdown for one holding: one row per event, then the two closing rows
  * the screen shows in its footer.
  *
- * @param asOf the instant the AER discounts to, and the date stamped on the
- *             Market Value row — passed in rather than read from the clock so
- *             this can be asserted
+ * @param asOf the instant the AER discounts to — passed in rather than read
+ *             from the clock so this can be asserted
+ * @param from the screen's From date: event rows on or after it; blank for all
  */
-export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
+export function detailExport(group: ShareGroup, asOf: Date, from = ''): ExportTable {
   const aer = groupAerPercent(group, asOf);
   const afterFees = marketPricePerShareAfterFees(group);
   const priced = group.market_price > 0;
@@ -138,29 +116,29 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
     'Entity Name': group.entity_name,
     'Share': group.share_ticker,
     'Share Name': group.share_name,
-    'Mkt Price per Share': priced ? price(group.market_price) : '',
-    'Mkt Price Date': group.market_price_date ?? '',
+    'Mkt Price per Share': priced ? price(group.market_price) : null,
+    'Mkt Price Date': group.market_price_date ?? null,
     'Mkt Price after Fees per Share': orBlank(afterFees, price),
-    'AER (XIRR) %': orBlank(aer, v => v.toFixed(2)),
+    'AER (XIRR) %': orBlank(aer, percent),
   };
 
   const costs = saleCosts(group);
-  const rows: Cell[][] = group.rows.map((r: ComputedRow) =>
+  const rows: ExportCell[][] = activityRows(group, from).map((r: ComputedRow) =>
     projectDetail({
       ...identity,
-      'Date': r.trade_date ?? '',
+      'Date': r.trade_date ?? null,
       'Status': r.note_type,
-      'Unit Price': r.price_avg != null ? price(r.price_avg) : '',
-      'No. of Shares': r.no_of_shares > 0 ? count(r.no_of_shares) : '',
+      'Unit Price': r.price_avg != null ? price(r.price_avg) : null,
+      'No. of Shares': r.no_of_shares > 0 ? count(r.no_of_shares) : null,
       'Share Cum Bal': count(r.share_cum_bal),
-      'Purchase Cost': r.purchase_cost > 0 ? money(r.purchase_cost) : '',
-      'Sale Value': r.sale_value > 0 ? money(r.sale_value) : '',
+      'Purchase Cost': r.purchase_cost > 0 ? money(r.purchase_cost) : null,
+      'Sale Value': r.sale_value > 0 ? money(r.sale_value) : null,
       // What the shares sold had been carried at, which is the figure the
       // realised surplus is measured against. `saleCosts`, as the screen reads.
       'Sale Cost': orBlank(costs.get(r), money),
       'Av Cost': money(r.av_cost),
       'Av Price': orBlank(avPriceOrNull(r), money),
-      'Dividend': r.dividend > 0 ? money(r.dividend) : '',
+      'Dividend': r.dividend > 0 ? money(r.dividend) : null,
       /*
         Blank, deliberately.
 
@@ -171,11 +149,11 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
         closing rows below carry the market value, which is where it means
         something.
       */
-      'Market Value': '',
-      'Cash Flow +/-': r.cash_flow !== 0 ? money(r.cash_flow) : '',
-      'Total Surplus': r.cash_flow !== 0 ? money(r.cash_flow) : '',
+      'Market Value': null,
+      'Cash Flow +/-': r.cash_flow !== 0 ? money(r.cash_flow) : null,
+      'Total Surplus': r.cash_flow !== 0 ? money(r.cash_flow) : null,
       'Cum Surplus': money(r.cum_surplus),
-      'CDS Account': r.cds_account ?? '',
+      'CDS Account': r.cds_account ?? null,
     }),
   );
 
@@ -183,10 +161,10 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
   // draws from too. They used to be rebuilt here out of the same parts, and the
   // two copies disagreed on the sale value, the cash flow, the total surplus and
   // the cumulative surplus.
-  for (const c of closingRows(group, asOf)) {
+  for (const c of closingRows(group)) {
     rows.push(projectDetail({
       ...identity,
-      'Date': c.date ?? '',
+      'Date': c.date ?? null,
       'Status': c.label,
       'Unit Price': price(c.unitPrice),
       'No. of Shares': count(c.shares),
@@ -213,7 +191,7 @@ export function detailExport(group: ShareGroup, asOf: Date): CsvTable {
   draws, so the file's Cum Surplus cannot come out different from the screen's.
   An unpriced holding leaves its market cells empty rather than writing zero.
 */
-function summaryBlock(group: ShareGroup, asOf: Date): Cell[][] {
+function summaryBlock(group: ShareGroup, asOf: Date): ExportCell[][] {
   const s = holdingSummary(group, asOf);
   if (!s) return [];
   return [
@@ -225,19 +203,19 @@ function summaryBlock(group: ShareGroup, asOf: Date): Cell[][] {
       count(s.sharesHeld),
       orBlank(s.avPrice, money),
       orBlank(s.marketPrice, money),
-      s.marketPriceDate ?? '',
+      s.marketPriceDate ?? null,
       orBlank(s.mvAfterFeesPerShare, money),
       money(s.cumSurplus),
-      orBlank(s.aerPercent, v => v.toFixed(2)),
+      orBlank(s.aerPercent, percent),
     ],
     [],
   ];
 }
 
-/** `TICKER_Entity_analytics_2026-09-21.csv` */
+/** `TICKER_Entity_analytics_2026-09-21` -- the format adds `.xlsx` or `.csv`. */
 export function detailFilename(group: ShareGroup, asOf: Date): string {
   const date = asOf.toISOString().split('T')[0];
-  return `${group.share_ticker}_${group.entity_name}_analytics_${date}.csv`;
+  return `${group.share_ticker}_${group.entity_name}_analytics_${date}`;
 }
 
 // ── Whole-list summary ───────────────────────────────────────────────────────
@@ -266,8 +244,8 @@ const SUMMARY_COLUMNS = [
 
 type SummaryColumn = (typeof SUMMARY_COLUMNS)[number];
 
-const projectSummary = (row: Partial<Record<SummaryColumn, Cell>>): Cell[] =>
-  SUMMARY_COLUMNS.map(c => row[c] ?? '');
+const projectSummary = (row: Partial<Record<SummaryColumn, ExportCell>>): ExportCell[] =>
+  SUMMARY_COLUMNS.map(c => row[c] ?? null);
 
 /**
  * One row per holding.
@@ -276,15 +254,13 @@ const projectSummary = (row: Partial<Record<SummaryColumn, Cell>>): Cell[] =>
  * the file carried "MV after Fees" as a total but never the per-share price it
  * came from, so a reader could not check it, and never the AER at all.
  *
- * @param activityRows the rows of the holding that fall inside the report's date
- *                     window. The page owns the window; the totals below are
- *                     sums over whatever it hands in.
+ * @param activityRows a holding's rows inside the date window (`shareWindow.service`).
  */
 export function summaryExport(
   groups: ShareGroup[],
   activityRows: (group: ShareGroup) => ComputedRow[],
   asOf: Date,
-): CsvTable {
+): ExportTable {
   const rows = groups.map(g => {
     const afterFees = marketPricePerShareAfterFees(g);
     const priced = g.market_price > 0;
@@ -297,23 +273,28 @@ export function summaryExport(
       'Share Name': g.share_name,
       'Entity Name': g.entity_name,
       'CDS Accounts': g.cds_accounts.join('; '),
-      'Share Cum Bal': h ? count(h.shareCumBal) : '',
-      'Purchase Cost': h ? money(h.purchaseCost) : '',
-      'Sale Value': h ? money(h.saleValue) : '',
-      'Av Cost': h ? money(h.avCost) : '',
+      'Share Cum Bal': h ? count(h.shareCumBal) : null,
+      'Purchase Cost': h ? money(h.purchaseCost) : null,
+      'Sale Value': h ? money(h.saleValue) : null,
+      'Av Cost': h ? money(h.avCost) : null,
       'Av Price': orBlank(h?.avPrice, money),
-      'Dividend': h ? money(h.dividend) : '',
-      'Cum Surplus': h ? money(h.cumSurplus) : '',
+      'Dividend': h ? money(h.dividend) : null,
+      'Cum Surplus': h ? money(h.cumSurplus) : null,
       'Market Value': orBlank(h?.marketValue, money),
       'MV after Fees': orBlank(h?.mvAfterFees, money),
-      'Cash Flow': h ? money(h.cashFlow) : '',
+      'Cash Flow': h ? money(h.cashFlow) : null,
       'Total Surplus': orBlank(h?.totalSurplus, money),
-      'Mkt Price per Share': priced ? price(g.market_price) : '',
-      'Mkt Price Date': g.market_price_date ?? '',
+      'Mkt Price per Share': priced ? price(g.market_price) : null,
+      'Mkt Price Date': g.market_price_date ?? null,
       'Mkt Price after Fees per Share': orBlank(afterFees, price),
-      'AER (XIRR) %': orBlank(groupAerPercent(g, asOf), v => v.toFixed(2)),
+      'AER (XIRR) %': orBlank(groupAerPercent(g, asOf), percent),
     });
   });
 
   return { headers: [...SUMMARY_COLUMNS], rows };
+}
+
+/** `share_analytics_<entity or all>_2026-09-21` -- the format adds the extension. */
+export function summaryFilename(label: string, asOf: Date): string {
+  return `share_analytics_${label}_${asOf.toISOString().split('T')[0]}`;
 }

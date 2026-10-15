@@ -12,8 +12,7 @@ import { EmailHeadline } from './EmailHeadline';
  *
  * The entity is labelled and set in the body weight (bug-52). It was a small
  * grey name in the corner, here and in the email, and a broker reading an
- * email about one of several clients could not tell whose trade it was. The
- * headline row is shared with Email Broker, so it sits in the same place there.
+ * email about one of several clients could not tell whose trade it was.
  */
 
 /** Highlighted rows, as the email highlights them. */

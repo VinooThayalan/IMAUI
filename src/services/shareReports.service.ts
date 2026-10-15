@@ -163,7 +163,7 @@ export function detailedReport(
       });
     }
 
-    const mv = closingRows(g, asOf).find(c => c.label === 'Market Value');
+    const mv = closingRows(g).find(c => c.label === 'Market Value');
     const cum = closingCumSurplus(g);
     if (cum != null) totalCumSurplus += cum;
     if (mv) {
@@ -180,7 +180,7 @@ export function detailedReport(
         sale_value: null,
         av_price: mv.avPrice,
         dividend: null,
-        market_value: mv.marketValue,
+        market_value: mv.mvAfterFees,
         cash_flow: mv.cashFlow,
         cum_surplus: mv.cumSurplus,
         cds_account: cds,

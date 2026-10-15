@@ -10,6 +10,7 @@ import { useTradeOrder } from '../hooks/useTradeOrder';
 import { useShareLedger } from '../hooks/useShareLedger';
 import { useHoldingRows } from '../hooks/useHoldingRows';
 import { useHoldingBreakdown } from '../hooks/useHoldingBreakdown';
+import { useShareWindow } from '../hooks/useShareWindow';
 import { formatAer, portfolioAer } from '../lib/aer';
 import {
   type ComputedRow,
@@ -18,28 +19,9 @@ import {
   groupCashFlows,
 } from '../services/shareLedger.service';
 import { undecidedDays } from '../services/tradeOrder.service';
-import {
-  detailExport,
-  detailFilename,
-  summaryExport,
-} from '../services/shareAnalyticsExport.service';
+import { useShareAnalyticsExport } from '../hooks/useShareAnalyticsExport';
+import { ExportMenu } from '../components/ExportMenu';
 import { LoadingState, Spinner } from '../components/Loading';
-
-function exportCsv(filename: string, headers: string[], rows: (string | number)[][], preamble: (string | number)[][] = []) {
-  const escape = (v: string | number) => {
-    const s = String(v ?? '');
-    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  // Leading BOM, matching lib/exportData.ts. Without it Excel reads the file as
-  // the system codepage, and any non-ASCII character in an entity or share name
-  // opens as mojibake.
-  const csv = '﻿' + [...preamble, headers, ...rows].map(r => r.map(escape).join(',')).join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -153,11 +135,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
   const { summary, closing, saleCost, avPrice } = useHoldingBreakdown(group, new Date());
   const groupAer = summary?.aerPercent ?? null;
 
-  function exportDetail() {
-    const asOf = new Date();
-    const { preamble, headers, rows } = detailExport(group, asOf);
-    exportCsv(detailFilename(group, asOf), headers, rows, preamble);
-  }
+  const { exportDetail } = useShareAnalyticsExport();
 
   async function resolveFileUrl(fileUrl: string) {
     if (fileUrl.startsWith('http')) return fileUrl;
@@ -368,9 +346,7 @@ function BreakdownModal({ group, onClose, fromDate, onOrderSaved }: {
               )}
             </button>
           )}
-          <button onClick={exportDetail} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0" title="Export to CSV">
-            <Download className="w-5 h-5" />
-          </button>
+          <ExportMenu variant="icon" onExport={format => exportDetail(group, format, fromDate)} />
           <button onClick={onClose} title="Close" aria-label="Close" className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
@@ -678,31 +654,16 @@ export function ShareAnalytics() {
   const [toDate, setToDate]                       = useState('');
   const [loading, setLoading]                     = useState(false);
   const [groups, setGroups]                       = useState<ShareGroup[]>([]);
-  const [activeGroup, setActiveGroup]             = useState<ShareGroup | null>(null);
+  const [activeKey, setActiveKey]                 = useState<string | null>(null);
   const [cacheError, setCacheError]               = useState<string | null>(null);
   const { loadGroups } = useShareLedger();
+  const { exportSummary } = useShareAnalyticsExport();
 
   useEffect(() => {
     supabase.from('entities').select('id, name').order('name').then(({ data }) => setEntities(data || []));
   }, []);
 
   useEffect(() => { fetchData(); }, [selectedEntityId]);
-
-  /*
-    Keep the open breakdown pointing at the refreshed group.
-
-    `activeGroup` holds the object, not a key, so after a refetch it is a
-    detached copy of the pre-refetch numbers. Saving a same-day order refetches
-    precisely so the figures move, and without this the modal the user is looking
-    at would go on showing the ones they just changed. Cleared, rather than left
-    stale, if the holding is no longer in the result.
-  */
-  useEffect(() => {
-    setActiveGroup(prev => {
-      if (!prev) return prev;
-      return groups.find(g => g.entity_id === prev.entity_id && g.share_id === prev.share_id) ?? null;
-    });
-  }, [groups]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -919,34 +880,14 @@ export function ShareAnalytics() {
     }
   }, [selectedEntityId, loadGroups]);
 
-  /*
-    The end date truncates history; the start date does not.
+  const period = useShareWindow(groups, fromDate, toDate);
+  const { activityRows } = period;
 
-    This asymmetry is the whole design. Every row carries the cumulative state
-    after it, so dropping everything after the end date leaves the last
-    surviving row holding the position exactly as it stood that day -- an "as
-    of" report, no recomputation needed.
+  // Looked up by key so the breakdown follows refetches and the date window.
+  const holdingKey = (g: ShareGroup) => `${g.entity_id}__${g.share_id}`;
+  const activeGroup = activeKey ? period.groups.find(g => holdingKey(g) === activeKey) ?? null : null;
 
-    Dropping rows *before* a start date would do the opposite. The balance,
-    average cost and cumulative totals all depend on the purchases that came
-    first, so a report that hid them would show a holding with no record of
-    having been bought. The start date therefore filters what is listed and
-    what the activity columns sum, and never what the position is built from.
-
-    Undated rows are kept: an opening balance predates any window, and nothing
-    else should be silently dropped for want of a date.
-  */
-  const inWindow = groups
-    .map(g => (toDate
-      ? { ...g, rows: g.rows.filter(r => !r.trade_date || r.trade_date <= toDate) }
-      : g))
-    .filter(g => g.rows.length > 0);
-
-  /** Rows a period's activity columns should sum: within the window. */
-  const activityRows = (g: ShareGroup) =>
-    fromDate ? g.rows.filter(r => r.trade_date && r.trade_date >= fromDate) : g.rows;
-
-  const filtered = inWindow.filter(g => {
+  const filtered = period.groups.filter(g => {
     if (!search) return true;
     const q = search.toLowerCase();
     return g.share_ticker.toLowerCase().includes(q) || g.share_name.toLowerCase().includes(q) || g.entity_name.toLowerCase().includes(q);
@@ -979,13 +920,10 @@ export function ShareAnalytics() {
 
   const entityName = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? '') : '';
 
-  function exportSummary() {
-    const asOf = new Date();
-    const { headers, rows } = summaryExport(filtered, activityRows, asOf);
-    const date  = asOf.toISOString().split('T')[0];
-    const label = selectedEntityId ? (entities.find(e => e.id === selectedEntityId)?.name ?? 'all') : 'all';
-    exportCsv(`share_analytics_${label}_${date}.csv`, headers, rows);
-  }
+  const exportLabel = entityName || 'all';
+  const periodLabel = toDate
+    ? `between ${fmtDate(fromDate)} and ${fmtDate(toDate)}`
+    : `from ${fmtDate(fromDate)} onward`;
 
   return (
     <div className="p-6 space-y-5">
@@ -1045,13 +983,7 @@ export function ShareAnalytics() {
           <div className="ml-auto flex items-center gap-3 self-end pb-2">
             <span className="text-sm text-gray-500">{filtered.length} share{filtered.length !== 1 ? 's' : ''}</span>
             {filtered.length > 0 && (
-              <button
-                onClick={exportSummary}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <Download className="w-4 h-4" />
-                Export
-              </button>
+              <ExportMenu onExport={format => exportSummary(filtered, activityRows, exportLabel, format)} />
             )}
           </div>
         </div>
@@ -1064,7 +996,7 @@ export function ShareAnalytics() {
               <>Balance, average cost and market value are <strong>as at {fmtDate(toDate)}</strong>; anything traded later is excluded. </>
             )}
             {fromDate && (
-              <>Purchase cost, sale value, dividend and cash flow cover <strong>{fmtDate(fromDate)} onward</strong> only — the position itself, Cum Surplus and Total Surplus included, still counts everything bought before then, or it would not add up. </>
+              <>Only holdings bought, sold, paid a dividend or issued scrip <strong>{periodLabel}</strong> are listed, and their purchase cost, sale value, dividend and cash flow cover that period only — the position itself, Cum Surplus and Total Surplus included, still counts everything bought before then. </>
             )}
             Market price is the latest on file, not the price on the as-at date.
           </div>
@@ -1083,7 +1015,7 @@ export function ShareAnalytics() {
       {selectedEntityId && !loading && filtered.length > 0 && (
         <div>
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
-            {entityName} — Portfolio Summary
+            {entityName} — {fromDate ? `Holdings with activity ${periodLabel}` : 'Portfolio Summary'}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <SummaryCard label="Total Purchase Cost"  value={`Rs. ${fmt(totals.purchaseCost)}`} />
@@ -1109,7 +1041,7 @@ export function ShareAnalytics() {
               sub={
                 unpricedShares.length > 0
                   ? `Excludes ${unpricedShares.length} share${unpricedShares.length === 1 ? '' : 's'} with no market price`
-                  : 'Annualised portfolio return'
+                  : fromDate ? 'Listed holdings, since acquisition' : 'Annualised portfolio return'
               }
             />
           </div>
@@ -1132,6 +1064,14 @@ export function ShareAnalytics() {
       {/* Main table */}
       {loading ? (
         <LoadingState />
+      ) : fromDate && period.groups.length === 0 ? (
+        <div role="status" className="bg-white rounded-xl border border-gray-200 py-16 text-center">
+          <BarChart2 className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+          <p className="text-gray-600 font-medium">
+            Nothing was bought, sold, received as dividend or issued as scrip{entityName ? ` for ${entityName}` : ''} {periodLabel}.
+          </p>
+          <p className="text-gray-400 text-sm mt-1">Clear the From date to see every holding as at {toDate ? fmtDate(toDate) : 'today'}.</p>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
           <BarChart2 className="w-12 h-12 text-gray-200 mx-auto mb-3" />
@@ -1156,7 +1096,7 @@ export function ShareAnalytics() {
                   return (
                     <tr
                       key={`${group.entity_id}__${group.share_id}`}
-                      onClick={() => setActiveGroup(group)}
+                      onClick={() => setActiveKey(holdingKey(group))}
                       className={`cursor-pointer transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'} hover:bg-blue-50/60`}
                     >
                       <td className="px-4 py-3">
@@ -1234,7 +1174,7 @@ export function ShareAnalytics() {
       {activeGroup && (
         <BreakdownModal
           group={activeGroup}
-          onClose={() => setActiveGroup(null)}
+          onClose={() => setActiveKey(null)}
           fromDate={fromDate}
           onOrderSaved={() => void fetchData()}
         />

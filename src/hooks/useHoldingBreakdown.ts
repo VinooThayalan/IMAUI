@@ -30,7 +30,7 @@ export function useHoldingBreakdown(group: ShareGroup, asOf: Date): HoldingBreak
   const costs = saleCosts(group);
   return {
     summary: holdingSummary(group, asOf),
-    closing: closingRows(group, asOf),
+    closing: closingRows(group),
     saleCost: row => costs.get(row) ?? null,
     avPrice: avPriceOrNull,
   };

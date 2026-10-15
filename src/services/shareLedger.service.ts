@@ -192,6 +192,7 @@ export function saleCosts(group: ShareGroup): Map<ComputedRow, number> {
  */
 export interface ClosingRow {
   label: 'Market Value' | 'Cost per share';
+  /** Market Value row: the date of the price it uses. */
   date: string | null;
   unitPrice: number;
   shares: number;
@@ -202,7 +203,9 @@ export interface ClosingRow {
   avCost: number;
   avPrice: number | null;
   dividend: number | null;
+  /** Before fees, as the list's Market Value column. */
   marketValue: number;
+  mvAfterFees: number;
   cashFlow: number;
   totalSurplus: number;
   cumSurplus: number;
@@ -360,7 +363,7 @@ export function holdingSummary(group: ShareGroup, asOf: Date): HoldingSummary | 
   };
 }
 
-export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
+export function closingRows(group: ShareGroup): ClosingRow[] {
   const last = group.rows[group.rows.length - 1];
   const mvAfterFees = holdingMvAfterFees(group);
   const cumSurplus = closingCumSurplus(group);
@@ -386,7 +389,7 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
   return [
     {
       label: 'Market Value',
-      date: asOf.toISOString().split('T')[0],
+      date: group.market_price_date,
       unitPrice: group.market_price,
       shares: last.share_cum_bal,
       shareCumBal: last.share_cum_bal,
@@ -396,7 +399,8 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
       avCost: last.av_cost,
       avPrice: avPriceOrNull(last),
       dividend: null,
-      marketValue: mvAfterFees,
+      marketValue: last.market_value,
+      mvAfterFees,
       cashFlow: mvAfterFees,
       totalSurplus: mvAfterFees,
       /*
@@ -422,7 +426,8 @@ export function closingRows(group: ShareGroup, asOf: Date): ClosingRow[] {
       avCost: last.av_cost,
       avPrice: avPriceOrNull(last),
       dividend: totalDividend,
-      marketValue: mvAfterFees,
+      marketValue: last.market_value,
+      mvAfterFees,
       cashFlow: totalCashFlow + mvAfterFees,
       // The list row's Total Surplus too (bug-50). This summed the rows a second
       // way, which agreed, and a second way is how bug-50 disagreed.
