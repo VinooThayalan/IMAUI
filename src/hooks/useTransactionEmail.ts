@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import type { BrokerContact } from '../lib/emailRecipients';
 import type { TransactionEmailData } from '../lib/transactionEmail';
+import { deliverEmail } from '../services/emailDelivery.service';
 import {
   loadFeeTypeNames,
   transactionEmailData,
@@ -35,4 +36,9 @@ export function useTransactionEmail<B extends BrokerContact, L extends EmailEnti
   }, []);
 
   return (transaction, note) => transactionEmailData(transaction, { ...lookups, feeTypes }, note);
+}
+
+/** Sends through the email function: one retry after a refused sign-in, and a reason when not sent. */
+export function useEmailDelivery(): typeof deliverEmail {
+  return deliverEmail;
 }

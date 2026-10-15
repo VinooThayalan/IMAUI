@@ -18,7 +18,7 @@
  */
 
 import { ccForSend, entityCcAddresses, type EntityCcContacts } from '../lib/emailRecipients';
-import { postTransactionEmail } from '../repositories/transactionEmail.repo';
+import { deliverEmail } from './emailDelivery.service';
 
 /** The note fields both emails quote. Optional so the page's own row satisfies it. */
 export interface EmailNote {
@@ -106,7 +106,7 @@ export async function sendComparisonEmail(
 
   const ccList = ccForSend(brokerEmail, cc);
 
-  const result = await postTransactionEmail({
+  const result = await deliverEmail({
     type: 'broker_comparison',
     to: brokerEmail,
     // Absent rather than empty: an empty recipient reaching the send path is a
@@ -132,11 +132,7 @@ export async function sendComparisonEmail(
     },
   });
 
-  if (!result.ok) {
-    throw new Error(
-      `Email service returned ${result.status}${result.detail ? `: ${result.detail}` : ''}`,
-    );
-  }
+  if (!result.ok) throw new Error(result.reason ?? 'The email was not sent.');
 
   return ccList;
 }
@@ -189,7 +185,7 @@ export async function sendReviewNotification(
   });
 
   try {
-    const result = await postTransactionEmail({
+    const result = await deliverEmail({
       type: 'approval_notification',
       to: brokerEmail,
       cc: ccList.length > 0 ? ccList : undefined,
@@ -223,8 +219,8 @@ export async function sendReviewNotification(
     });
 
     if (!result.ok) {
-      console.error('Email notification failed:', result.status, result.detail);
-      return { sent: false, reason: `Email service returned ${result.status}.`, cc: ccList };
+      console.error('Email notification failed:', result.reason);
+      return { sent: false, reason: result.reason ?? 'The email was not sent.', cc: ccList };
     }
     return { sent: true, cc: ccList };
   } catch (err) {
