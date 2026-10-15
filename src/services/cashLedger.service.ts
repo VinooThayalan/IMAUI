@@ -6,6 +6,7 @@
  */
 
 import type { NoteDatesRow } from '../repositories/cashLedger.repo';
+import { tradeLedgerDate } from '../lib/tradeDates';
 
 /** Trade and settlement dates, absent unless the entry came from a trade. */
 export interface TradeDates {
@@ -291,15 +292,15 @@ export function matchesLedgerFilters(
  * trade rather than matching none of them by accident, and the caller says so
  * on screen instead of leaving a row count that silently disagrees.
  *
- * Its date is the trade date, since that is the only date it has.
+ * Its date is the one it will post on when approved: the settlement date.
  */
 export function matchesPendingFilters(
-  note: { entity_id: string; trade_date?: string | null },
+  note: { entity_id: string; settlement_date?: string | null },
   f: LedgerFilters,
 ): boolean {
   if (f.entityId && note.entity_id !== f.entityId) return false;
   if (f.bankId) return false;
-  const date = (note.trade_date ?? '').slice(0, 10);
+  const date = tradeLedgerDate(note) ?? '';
   if (f.from && (!date || date < f.from)) return false;
   if (f.to && (!date || date > f.to)) return false;
   return true;

@@ -23,6 +23,7 @@ import {
   type RecipientTransaction,
 } from '../lib/emailRecipients';
 import type { TransactionEmailData } from '../lib/transactionEmail';
+import { formatDisplayDate } from '../lib/dateInput';
 import * as feeTypesRepo from '../repositories/brokerageFeeTypes.repo';
 
 type Num = number | string | null | undefined;
@@ -94,7 +95,7 @@ export function transactionEmailData<B extends BrokerContact, L extends EmailEnt
     transaction_type: transaction.transaction_type,
     share: share?.share_name || 'N/A',
     ticker: share?.ticker || 'N/A',
-    transaction_date: new Date(transaction.transaction_date).toLocaleDateString(),
+    transaction_date: formatDisplayDate(transaction.transaction_date) || 'N/A',
     cds_acc_type: entityBroker?.relationship_type || 'N/A',
     cds_acc_no: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
     order_type: transaction.order_type || 'N/A',

@@ -24,6 +24,14 @@ export function formatDisplayDate(iso: string | null | undefined): string {
   return v ? `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}` : '';
 }
 
+/** A timestamp as `12 Oct 2026, 14:59`, local time; anything that is not one → `''`. */
+export function formatDisplayDateTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 /**
  * A typed dd/mm/yyyy date (separator `/ - .` or space, or `ddmmyyyy`, or ISO) as
  * `YYYY-MM-DD`. `''` for blank, `null` for anything that is not a real date.

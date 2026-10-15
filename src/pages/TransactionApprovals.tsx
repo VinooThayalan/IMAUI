@@ -10,6 +10,7 @@ import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrok
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateField, DateRangeField } from '../components/DateField';
 import { ApprovalChanges } from '../components/ApprovalChanges';
+import { ApprovalTrail } from '../components/ApprovalTrail';
 import { formatDisplayDate } from '../lib/dateInput';
 import { LoadingState } from '../components/Loading';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
@@ -415,7 +416,7 @@ export function TransactionApprovals() {
       const cancelUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
-        approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+        approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString('en-GB')}. ${actionFormData.approval_notes || ''}`.trim(),
       };
       const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(cancelUpdates).eq('id', selectedTransaction.id);
@@ -461,7 +462,7 @@ export function TransactionApprovals() {
       const cancelApproveUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
-        approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+        approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString('en-GB')}. ${actionFormData.approval_notes || ''}`.trim(),
       };
       const oldApproveRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(cancelApproveUpdates).eq('id', selectedTransaction.id);
@@ -726,7 +727,7 @@ export function TransactionApprovals() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{getShareInfo(transaction.share_id)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{new Date(transaction.transaction_date).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{formatDisplayDate(transaction.transaction_date) || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 text-right tabular-nums">{Number(transaction.no_of_shares).toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right tabular-nums">
                       LKR {Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1030,21 +1031,7 @@ export function TransactionApprovals() {
                     </div>
                   </div>
 
-                  {selectedTransaction.submitted_by && (
-                    <div className="pt-2 border-t border-gray-100">
-                      <p className="text-xs text-gray-400">
-                        Submitted by <span className="font-medium text-gray-600">{selectedTransaction.submitted_by}</span>
-                        {selectedTransaction.submitted_for_approval_at && ` on ${new Date(selectedTransaction.submitted_for_approval_at).toLocaleString()}`}
-                      </p>
-                      {selectedTransaction.approved_by && (
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'Approved' : 'Actioned'} by{' '}
-                          <span className="font-medium text-gray-600">{selectedTransaction.approved_by}</span>
-                          {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString()}`}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                  <ApprovalTrail transaction={selectedTransaction} amended={!!amendment} className="pt-3 border-t border-gray-100" />
 
                   {amendment && (
                     <ApprovalChanges

@@ -1,0 +1,27 @@
+/**
+ * The broker a contract note's printed name refers to, or null.
+ *
+ * Generic words (Pvt, Ltd, Securities, Capital…) are ignored: a broker matches
+ * when every distinctive word of its name appears in the note's, and only an
+ * unambiguous single match counts. A guessed broker is worse than none (bug-56).
+ */
+
+const GENERIC = new Set([
+  'pvt', 'private', 'ltd', 'limited', 'plc', 'co', 'company', 'the', 'and', 'of',
+  'securities', 'equities', 'capital', 'brokers', 'stockbrokers', 'stock', 'broking',
+]);
+
+const words = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+
+const distinctive = (name: string) => words(name).filter(w => !GENERIC.has(w));
+
+export function matchBrokerByName<B extends { broker_name: string }>(printedName: string | null | undefined, brokers: B[]): B | null {
+  if (!printedName) return null;
+  const printed = new Set(words(printedName));
+  const matches = brokers.filter(b => {
+    const own = distinctive(b.broker_name);
+    return own.length > 0 && own.every(w => printed.has(w));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
