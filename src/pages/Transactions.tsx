@@ -14,7 +14,7 @@ import { useTransactionVolume } from '../hooks/useTransactionVolume';
 import { useEmailDelivery, useTransactionEmail } from '../hooks/useTransactionEmail';
 import { useTransactionPrint } from '../hooks/useTransactionPrint';
 import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
-import { ApprovalChanges } from '../components/ApprovalChanges';
+import { AmendmentBanner, ChangedFrom } from '../components/ApprovalChanges';
 import { ApprovalTrail } from '../components/ApprovalTrail';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
@@ -239,6 +239,8 @@ export function Transactions() {
   const deliver = useEmailDelivery();
   const approval = useTransactionApproval();
   const viewedAmendment = useApprovalAmendment(showViewModal ? selectedTransaction : null);
+  const changeOf = (field: string) => viewedAmendment?.changes.find(c => c.field === field);
+  const nameOfId = (kind: 'entity' | 'share', id: string) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id));
 
   useEffect(() => {
     if (!formData.share_id) { setLatestSharePrice(null); return; }
@@ -2143,16 +2145,21 @@ export function Transactions() {
               <h2 className="text-2xl font-bold text-gray-900">Transaction Details</h2>
             </div>
             <div className="p-6 space-y-6">
+              {viewedAmendment && (
+                <AmendmentBanner by={viewedAmendment.by} at={viewedAmendment.at} count={viewedAmendment.changes.length} />
+              )}
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <p className="text-sm font-medium text-gray-500">Entity</p>
                   <p className="text-base font-bold text-gray-900 mt-1">{getEntityName(selectedTransaction.entity_id)}</p>
+                  <ChangedFrom change={changeOf('entity_id')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Transaction Date</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     {new Date(selectedTransaction.transaction_date).toLocaleDateString()}
                   </p>
+                  <ChangedFrom change={changeOf('transaction_date')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Transaction Type</p>
@@ -2166,6 +2173,7 @@ export function Transactions() {
                         : selectedTransaction.transaction_type}
                     </span>
                   </p>
+                  <ChangedFrom change={changeOf('transaction_type')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Order Type</p>
@@ -2174,24 +2182,28 @@ export function Transactions() {
                 <div className="col-span-2">
                   <p className="text-sm font-medium text-gray-500">Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">{getShareInfo(selectedTransaction.share_id)}</p>
+                  <ChangedFrom change={changeOf('share_id')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Number of Shares</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     {Number(selectedTransaction.no_of_shares).toLocaleString()}
                   </p>
+                  <ChangedFrom change={changeOf('no_of_shares')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
+                  <ChangedFrom change={changeOf('price_per_share')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Amount (Gross)</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.total_amount_gross).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </p>
+                  <ChangedFrom change={changeOf('total_amount_gross')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Fees</p>
@@ -2203,18 +2215,21 @@ export function Transactions() {
                       </span>
                     )}
                   </p>
+                  <ChangedFrom change={changeOf('fees')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Net Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
+                  <ChangedFrom change={changeOf('net_price_per_share')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Amount (Net)</p>
                   <p className="text-lg font-bold text-blue-900 mt-1">
                     LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </p>
+                  <ChangedFrom change={changeOf('total_amount')} nameOf={nameOfId} />
                 </div>
                 <div className="col-span-2">
                   <p className="text-sm font-medium text-gray-500 mb-2">Fee Breakdown</p>
@@ -2222,26 +2237,32 @@ export function Transactions() {
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Brokerage Fee</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('brokerage_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">CSE Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('cse_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">CDS Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('cds_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Clearing Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('clearing_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">SEC CESS</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('sec_cess')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Share Transaction Levy</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('share_transaction_levy')} nameOf={nameOfId} />
                     </div>
                   </div>
                 </div>
@@ -2284,15 +2305,6 @@ export function Transactions() {
                     >
                       {selectedTransaction.approval_document_name}
                     </a>
-                  </div>
-                )}
-                {viewedAmendment && (
-                  <div className="col-span-2">
-                    <ApprovalChanges
-                      heading={<>Amended at approval by {viewedAmendment.by ?? 'an approver not recorded'}{viewedAmendment.at && ` on ${new Date(viewedAmendment.at).toLocaleString('en-GB')}`}</>}
-                      changes={viewedAmendment.changes}
-                      nameOf={(kind, id) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id))}
-                    />
                   </div>
                 )}
               </div>
