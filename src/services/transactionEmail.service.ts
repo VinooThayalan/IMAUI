@@ -17,6 +17,7 @@
 
 import {
   resolveTransactionRecipient,
+  resolvedBrokerName,
   type BrokerContact,
   type EntityBrokerLink,
   type RecipientTransaction,
@@ -83,17 +84,10 @@ export function transactionEmailData<B extends BrokerContact, L extends EmailEnt
     ? lookups.feeTypes.find(ft => ft.id === transaction.brokerage_fee_type_id)
     : null;
 
-  const { broker, candidates, entityBroker } =
-    resolveTransactionRecipient(transaction, lookups.entityBrokers, lookups.brokers);
+  const resolved = resolveTransactionRecipient(transaction, lookups.entityBrokers, lookups.brokers);
+  const { entityBroker } = resolved;
 
-  /*
-    Only the broker this transaction resolves to. A list of the entity's brokers
-    is not a broker name: it rendered as "First Capital Equities (Pvt) Ltd,
-    Softlogic Brokers (Pvt) Ltd" and read as though the trade had two.
-  */
-  const brokerName = broker?.broker_name
-    || entityBroker?.broker_text
-    || (candidates.length > 0 ? 'Not recorded' : 'N/A');
+  const brokerName = resolvedBrokerName(resolved) ?? 'N/A';
 
   return {
     entity: entity?.name || 'N/A',

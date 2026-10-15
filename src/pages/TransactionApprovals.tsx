@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
-import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrokerName } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateField, DateRangeField } from '../components/DateField';
 import { ApprovalChanges } from '../components/ApprovalChanges';
@@ -249,11 +249,6 @@ export function TransactionApprovals() {
   function getShareInfo(shareId: string) {
     const share = shares.find(s => s.id === shareId);
     return share ? `${share.ticker} - ${share.share_name}` : shareId;
-  }
-
-  function getBrokerName(brokerId: string | null) {
-    if (!brokerId) return 'N/A';
-    return brokers.find(b => b.id === brokerId)?.broker_name || 'N/A';
   }
 
   function getTimeRemaining(transaction: Transaction): string {
@@ -975,7 +970,7 @@ export function TransactionApprovals() {
                           : amount(v, field === 'no_of_shares' ? 0 : field.includes('price') ? 4 : 2);
                       return [
                         { label: 'Entity', field: 'entity_id', value: getEntityName(shown.entity_id) },
-                        { label: 'Broker', field: '', value: getBrokerName(shown.broker_id) },
+                        { label: 'Broker', field: '', value: resolvedBrokerName(resolveTransactionRecipient(shown, entityBrokers, brokers)) ?? '—' },
                         { label: 'Share', field: 'share_id', value: getShareInfo(shown.share_id) },
                         { label: 'Transaction Date', field: 'transaction_date', value: formatDisplayDate(shown.transaction_date) || '—' },
                         { label: 'No. of Shares', field: 'no_of_shares', value: Number(shown.no_of_shares).toLocaleString() },

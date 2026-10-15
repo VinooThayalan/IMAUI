@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
-import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrokerName } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
@@ -915,17 +915,14 @@ export function Transactions() {
   }
 
   function handlePrintTransaction(transaction: Transaction) {
-    // The shared resolver: it names no broker it cannot resolve.
-    const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
-      resolveTransactionBroker(transaction);
+    const resolved = resolveTransactionBroker(transaction);
+    const { entityBroker } = resolved;
 
     void printTransaction(transaction, {
       entityName: getEntityName(transaction.entity_id),
       shareInfo: getShareInfo(transaction.share_id),
       cdsAccount: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
-      brokerName: resolvedBroker?.broker_name
-        || (entityBroker as { broker_text?: string } | null)?.broker_text
-        || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A'),
+      brokerName: resolvedBrokerName(resolved) ?? 'N/A',
       preparedBy: appUser?.full_name?.trim() || appUser?.email || user?.email || null,
       generatedOn: new Date().toLocaleDateString('en-GB'),
     });
@@ -2196,7 +2193,7 @@ export function Transactions() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Brokerage Fee</p>
+                  <p className="text-sm font-medium text-gray-500">Total Fees</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     {selectedTransaction.brokerage_fee_rate && (
@@ -2248,6 +2245,10 @@ export function Transactions() {
                   </div>
                 </div>
                 <div>
+                  <p className="text-sm font-medium text-gray-500">Broker</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">{resolvedBrokerName(resolveTransactionBroker(selectedTransaction)) ?? '—'}</p>
+                </div>
+                <div>
                   <p className="text-sm font-medium text-gray-500">CDS/Broker Account</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">{selectedTransaction.cds_account_id || 'N/A'}</p>
                 </div>
@@ -2269,6 +2270,12 @@ export function Transactions() {
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>
                     )}
                   </p>
+                  {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
+                    <p className="mt-1 text-sm text-gray-600">
+                      Approved by <span className="font-semibold text-gray-900">{selectedTransaction.approved_by || 'an approver not recorded'}</span>
+                      {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString('en-GB')}`}
+                    </p>
+                  )}
                 </div>
                 {selectedTransaction.approval_document_name && (
                   <div className="col-span-2">
