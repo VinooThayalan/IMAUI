@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWriteError } from '../hooks/useWriteError';
+import { useEntityAccounts } from '../hooks/useEntityAccounts';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { createEntity } from '../services/entities.service';
 import { Spinner } from '../components/Loading';
@@ -71,7 +72,7 @@ interface EntityBroker {
   assigned_date: string;
   custodian_account_number?: string;
   custodian_account_name?: string;
-  custodian_account_fee?: number;
+  facility_interest_rate?: string | null;
   broker_account_number?: string;
   bank_account_number?: string;
   bank_name?: string;
@@ -85,6 +86,7 @@ interface EntityBroker {
 export function Entities() {
   const { user, refreshPermissions } = useAuth();
   const reportWriteError = useWriteError();
+  const entityAccounts = useEntityAccounts();
   const [showModal, setShowModal] = useState(false);
   const [showBrokerModal, setShowBrokerModal] = useState(false);
   const [editingBrokerId, setEditingBrokerId] = useState<string | null>(null);
@@ -124,7 +126,7 @@ export function Entities() {
     notes: '',
     custodian_account_number: '',
     custodian_account_name: '',
-    custodian_account_fee: '',
+    facility_interest_rate: '',
     broker_account_number: '',
     bank_name: '',
     bank_master_id: '',
@@ -307,7 +309,7 @@ export function Entities() {
       notes: eb.notes || '',
       custodian_account_number: eb.custodian_account_number || '',
       custodian_account_name: eb.custodian_account_name || '',
-      custodian_account_fee: eb.custodian_account_fee != null ? String(eb.custodian_account_fee) : '',
+      facility_interest_rate: eb.facility_interest_rate || '',
       broker_account_number: eb.broker_account_number || '',
       bank_name: eb.bank_name || '',
       bank_master_id: '',
@@ -331,7 +333,7 @@ export function Entities() {
       notes: '',
       custodian_account_number: '',
       custodian_account_name: '',
-      custodian_account_fee: '',
+      facility_interest_rate: '',
       broker_account_number: '',
       bank_name: '',
       bank_master_id: '',
@@ -357,7 +359,7 @@ export function Entities() {
       notes: '',
       custodian_account_number: '',
       custodian_account_name: '',
-      custodian_account_fee: '',
+      facility_interest_rate: '',
       broker_account_number: '',
       bank_name: '',
       bank_master_id: '',
@@ -396,61 +398,8 @@ export function Entities() {
     if (!selectedEntityId) return;
 
     try {
-      const insertData: Record<string, unknown> = {
-        entity_id: selectedEntityId,
-        broker_id: brokerFormData.relationship_type === 'Custodian' ? null : (brokerFormData.broker_id || null),
-        relationship_type: brokerFormData.relationship_type,
-        assigned_date: brokerFormData.assigned_date,
-        notes: brokerFormData.notes || null,
-        bank_name: brokerFormData.bank_name || null,
-        bank_master_id: brokerFormData.bank_master_id || null,
-        bank_branch_id: brokerFormData.bank_branch_id || null,
-        currency: brokerFormData.currency,
-        is_active: true
-      };
-
-      insertData.bank_account_number = brokerFormData.bank_account_number || null;
-
-      if (brokerFormData.relationship_type === 'Custodian') {
-        insertData.custodian_account_number = brokerFormData.custodian_account_number || null;
-        insertData.custodian_account_name = brokerFormData.custodian_account_name || null;
-        insertData.custodian_account_fee = brokerFormData.custodian_account_fee ? parseFloat(brokerFormData.custodian_account_fee) : null;
-      } else {
-        insertData.broker_account_number = brokerFormData.broker_account_number || null;
-        insertData.broker_text = brokerFormData.broker_text || null;
-      }
-
-      let error, data;
       const wasEditing = !!editingBrokerId;
-      if (editingBrokerId) {
-        const oldRecord = await fetchRecordForAudit('entity_brokers', editingBrokerId);
-        ({ error, data } = await supabase.from('entity_brokers').update(insertData).eq('id', editingBrokerId).select('id').maybeSingle());
-        if (!error && user) {
-          await logAudit({
-            performedBy: user.email || 'system',
-            action: 'UPDATE',
-            tableName: 'entity_brokers',
-            recordId: editingBrokerId,
-            entityId: selectedEntityId,
-            oldValues: oldRecord,
-            newValues: insertData
-          });
-        }
-      } else {
-        ({ error, data } = await supabase.from('entity_brokers').insert(insertData).select('id').maybeSingle());
-        if (!error && data && user) {
-          await logAudit({
-            performedBy: user.email || 'system',
-            action: 'CREATE',
-            tableName: 'entity_brokers',
-            recordId: data.id,
-            entityId: selectedEntityId,
-            newValues: insertData
-          });
-        }
-      }
-
-      if (error) throw error;
+      await entityAccounts.save(selectedEntityId, brokerFormData, editingBrokerId);
 
       setEditingBrokerId(null);
       await fetchEntityBrokers(selectedEntityId);
@@ -461,7 +410,7 @@ export function Entities() {
         notes: '',
         custodian_account_number: '',
         custodian_account_name: '',
-        custodian_account_fee: '',
+        facility_interest_rate: '',
         broker_account_number: '',
         bank_name: '',
         bank_master_id: '',
@@ -1180,14 +1129,13 @@ export function Entities() {
 
                   {isCustodian && (
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Custodian Account Fee %</label>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">Applicable Facility Interest Rate</label>
                       <input
-                        type="number"
-                        step="0.0001"
-                        value={brokerFormData.custodian_account_fee}
-                        onChange={(e) => setBrokerFormData({...brokerFormData, custodian_account_fee: e.target.value})}
+                        type="text"
+                        value={brokerFormData.facility_interest_rate}
+                        onChange={(e) => setBrokerFormData({...brokerFormData, facility_interest_rate: e.target.value})}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter fee percentage"
+                        placeholder="e.g. AWPLR + 2%"
                       />
                     </div>
                   )}
@@ -1264,7 +1212,7 @@ export function Entities() {
                                 <>
                                   <div><span className="font-medium">Account Number:</span> {eb.custodian_account_number}</div>
                                   <div><span className="font-medium">Account Name:</span> {eb.custodian_account_name}</div>
-                                  {eb.custodian_account_fee != null && <div><span className="font-medium">Account Fee:</span> {eb.custodian_account_fee}%</div>}
+                                  {eb.facility_interest_rate && <div><span className="font-medium">Facility Interest Rate:</span> {eb.facility_interest_rate}</div>}
                                 </>
                               )}
                               {eb.relationship_type !== 'Custodian' && eb.broker_account_number && (

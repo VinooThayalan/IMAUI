@@ -7,14 +7,16 @@ import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
 import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrokerName } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
-import { DateRangeField } from '../components/DateField';
+import { DateField, DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useHolding } from '../hooks/useHolding';
 import { useTransactionVolume } from '../hooks/useTransactionVolume';
 import { useEmailDelivery, useTransactionEmail } from '../hooks/useTransactionEmail';
 import { useTransactionPrint } from '../hooks/useTransactionPrint';
 import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
-import { ApprovalChanges } from '../components/ApprovalChanges';
+import { AmendmentBanner, ChangedFrom } from '../components/ApprovalChanges';
+import { ApprovalTrail } from '../components/ApprovalTrail';
+import { formatDisplayDate, formatDisplayDateTime } from '../lib/dateInput';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
 const ALL_STATUSES = [
@@ -145,7 +147,7 @@ interface BulkRow {
   entity_id: string;
   share_id: string;
   transaction_type: 'Buy' | 'Sell';
-  settlement_date: string;
+  trade_date: string;
   no_of_shares: string;
   price_per_share: string;
   cds_account: string;
@@ -157,7 +159,7 @@ function emptyBulkRow(): BulkRow {
     entity_id: '',
     share_id: '',
     transaction_type: 'Buy',
-    settlement_date: new Date().toISOString().split('T')[0],
+    trade_date: '',
     no_of_shares: '',
     price_per_share: '',
     cds_account: '',
@@ -238,6 +240,8 @@ export function Transactions() {
   const deliver = useEmailDelivery();
   const approval = useTransactionApproval();
   const viewedAmendment = useApprovalAmendment(showViewModal ? selectedTransaction : null);
+  const changeOf = (field: string) => viewedAmendment?.changes.find(c => c.field === field);
+  const nameOfId = (kind: 'entity' | 'share', id: string) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id));
 
   useEffect(() => {
     if (!formData.share_id) { setLatestSharePrice(null); return; }
@@ -728,7 +732,7 @@ export function Transactions() {
         .update({
           approval_status: 'CANCELLED',
           rejection_reason: reason.trim(),
-          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString()}. Reason: ${reason.trim()}`,
+          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString('en-GB')}. Reason: ${reason.trim()}`,
         })
         .eq('id', transaction.id);
 
@@ -871,7 +875,12 @@ export function Transactions() {
   async function handleSaveBulk() {
     const validRows = bulkRows.filter(r => r.entity_id && r.share_id && r.no_of_shares && r.price_per_share);
     if (validRows.length === 0) {
-      alert('Please fill in at least one row with Entity, Share, Shares, and Price.');
+      alert('Please fill in at least one row with Entity, Share, Trade Date, Shares, and Price.');
+      return;
+    }
+    const undated = validRows.find(r => !r.trade_date);
+    if (undated) {
+      alert(`Row ${bulkRows.indexOf(undated) + 1}: Enter the trade date.`);
       return;
     }
 
@@ -887,7 +896,7 @@ export function Transactions() {
           share_id: row.share_id,
           transaction_type: row.transaction_type,
           order_type: 'DAY',
-          transaction_date: row.settlement_date,
+          transaction_date: row.trade_date,
           no_of_shares: qty,
           price_per_share: price,
           total_amount_gross: grossAmount,
@@ -1417,7 +1426,7 @@ export function Transactions() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
-                      {new Date(transaction.transaction_date).toLocaleDateString()}
+                      {formatDisplayDate(transaction.transaction_date) || '—'}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -2142,16 +2151,21 @@ export function Transactions() {
               <h2 className="text-2xl font-bold text-gray-900">Transaction Details</h2>
             </div>
             <div className="p-6 space-y-6">
+              {viewedAmendment && (
+                <AmendmentBanner by={viewedAmendment.by} at={viewedAmendment.at} count={viewedAmendment.changes.length} />
+              )}
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <p className="text-sm font-medium text-gray-500">Entity</p>
                   <p className="text-base font-bold text-gray-900 mt-1">{getEntityName(selectedTransaction.entity_id)}</p>
+                  <ChangedFrom change={changeOf('entity_id')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Transaction Date</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
-                    {new Date(selectedTransaction.transaction_date).toLocaleDateString()}
+                    {formatDisplayDate(selectedTransaction.transaction_date) || '—'}
                   </p>
+                  <ChangedFrom change={changeOf('transaction_date')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Transaction Type</p>
@@ -2165,6 +2179,7 @@ export function Transactions() {
                         : selectedTransaction.transaction_type}
                     </span>
                   </p>
+                  <ChangedFrom change={changeOf('transaction_type')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Order Type</p>
@@ -2173,24 +2188,28 @@ export function Transactions() {
                 <div className="col-span-2">
                   <p className="text-sm font-medium text-gray-500">Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">{getShareInfo(selectedTransaction.share_id)}</p>
+                  <ChangedFrom change={changeOf('share_id')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Number of Shares</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     {Number(selectedTransaction.no_of_shares).toLocaleString()}
                   </p>
+                  <ChangedFrom change={changeOf('no_of_shares')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
+                  <ChangedFrom change={changeOf('price_per_share')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Amount (Gross)</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.total_amount_gross).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </p>
+                  <ChangedFrom change={changeOf('total_amount_gross')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Fees</p>
@@ -2202,18 +2221,21 @@ export function Transactions() {
                       </span>
                     )}
                   </p>
+                  <ChangedFrom change={changeOf('fees')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Net Price Per Share</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                   </p>
+                  <ChangedFrom change={changeOf('net_price_per_share')} nameOf={nameOfId} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-500">Total Amount (Net)</p>
                   <p className="text-lg font-bold text-blue-900 mt-1">
                     LKR {Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </p>
+                  <ChangedFrom change={changeOf('total_amount')} nameOf={nameOfId} />
                 </div>
                 <div className="col-span-2">
                   <p className="text-sm font-medium text-gray-500 mb-2">Fee Breakdown</p>
@@ -2221,26 +2243,32 @@ export function Transactions() {
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Brokerage Fee</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.brokerage_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('brokerage_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">CSE Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cse_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('cse_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">CDS Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.cds_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('cds_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Clearing Fees</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.clearing_fee || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('clearing_fee')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">SEC CESS</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.sec_cess || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('sec_cess')} nameOf={nameOfId} />
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3">
                       <p className="text-xs text-gray-500">Share Transaction Levy</p>
                       <p className="text-sm font-semibold text-gray-900 mt-0.5">LKR {Number(selectedTransaction.share_transaction_levy || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                      <ChangedFrom change={changeOf('share_transaction_levy')} nameOf={nameOfId} />
                     </div>
                   </div>
                 </div>
@@ -2270,12 +2298,7 @@ export function Transactions() {
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>
                     )}
                   </p>
-                  {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
-                    <p className="mt-1 text-sm text-gray-600">
-                      Approved by <span className="font-semibold text-gray-900">{selectedTransaction.approved_by || 'an approver not recorded'}</span>
-                      {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString('en-GB')}`}
-                    </p>
-                  )}
+                  <ApprovalTrail transaction={selectedTransaction} amended={!!viewedAmendment} className="mt-3" />
                 </div>
                 {selectedTransaction.approval_document_name && (
                   <div className="col-span-2">
@@ -2288,15 +2311,6 @@ export function Transactions() {
                     >
                       {selectedTransaction.approval_document_name}
                     </a>
-                  </div>
-                )}
-                {viewedAmendment && (
-                  <div className="col-span-2">
-                    <ApprovalChanges
-                      heading={<>Amended at approval by {viewedAmendment.by ?? 'an approver not recorded'}{viewedAmendment.at && ` on ${new Date(viewedAmendment.at).toLocaleString('en-GB')}`}</>}
-                      changes={viewedAmendment.changes}
-                      nameOf={(kind, id) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id))}
-                    />
                   </div>
                 )}
               </div>
@@ -2343,7 +2357,7 @@ export function Transactions() {
                       <p className="text-sm font-semibold text-blue-900">{selectedTransaction.approval_document_name}</p>
                       {selectedTransaction.approval_document_uploaded_at && (
                         <p className="text-xs text-blue-600 mt-0.5">
-                          Uploaded {new Date(selectedTransaction.approval_document_uploaded_at).toLocaleDateString()}
+                          Uploaded {formatDisplayDateTime(selectedTransaction.approval_document_uploaded_at)}
                         </p>
                       )}
                     </div>
@@ -2548,7 +2562,7 @@ export function Transactions() {
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Entity <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[150px]">Share <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[80px]">Buy / Sell <span className="text-red-300">*</span></th>
-                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[120px]">Settlement Date <span className="text-red-300">*</span></th>
+                      <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">Trade Date <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[100px]">No. of Shares <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-right font-semibold whitespace-nowrap min-w-[130px]">Purchase / Sales Cost <span className="text-red-300">*</span></th>
                       <th className="px-2 py-2.5 text-left font-semibold whitespace-nowrap min-w-[130px]">CDS Account</th>
@@ -2634,13 +2648,14 @@ export function Transactions() {
                             </select>
                           </td>
 
-                          {/* Settlement date */}
+                          {/* Trade date */}
                           <td className="px-1 py-1">
-                            <input
-                              type="date"
-                              value={row.settlement_date}
-                              onChange={e => updateBulkRow(idx, 'settlement_date', e.target.value)}
-                              className="w-full px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                            <DateField
+                              value={row.trade_date}
+                              onChange={v => updateBulkRow(idx, 'trade_date', v)}
+                              required
+                              fullWidth
+                              className="w-full px-1.5 py-1 pr-7 border border-gray-300 rounded text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-400"
                             />
                           </td>
 
