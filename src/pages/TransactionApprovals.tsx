@@ -416,7 +416,7 @@ export function TransactionApprovals() {
       const cancelUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
-        approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+        approval_notes: `Cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString('en-GB')}. ${actionFormData.approval_notes || ''}`.trim(),
       };
       const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(cancelUpdates).eq('id', selectedTransaction.id);
@@ -462,7 +462,7 @@ export function TransactionApprovals() {
       const cancelApproveUpdates = {
         approval_status: 'CANCELLED',
         rejection_reason: actionFormData.cancel_reason,
-        approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString()}. ${actionFormData.approval_notes || ''}`.trim(),
+        approval_notes: `Approval cancelled by ${user?.email || 'system'} on ${new Date().toLocaleDateString('en-GB')}. ${actionFormData.approval_notes || ''}`.trim(),
       };
       const oldApproveRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
       const { error } = await supabase.from('transactions').update(cancelApproveUpdates).eq('id', selectedTransaction.id);
@@ -727,7 +727,7 @@ export function TransactionApprovals() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{getShareInfo(transaction.share_id)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{new Date(transaction.transaction_date).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{formatDisplayDate(transaction.transaction_date) || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-900 text-right tabular-nums">{Number(transaction.no_of_shares).toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right tabular-nums">
                       LKR {Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}

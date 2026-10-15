@@ -16,6 +16,7 @@ import { useTransactionPrint } from '../hooks/useTransactionPrint';
 import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
 import { AmendmentBanner, ChangedFrom } from '../components/ApprovalChanges';
 import { ApprovalTrail } from '../components/ApprovalTrail';
+import { formatDisplayDate, formatDisplayDateTime } from '../lib/dateInput';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
 const ALL_STATUSES = [
@@ -731,7 +732,7 @@ export function Transactions() {
         .update({
           approval_status: 'CANCELLED',
           rejection_reason: reason.trim(),
-          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString()}. Reason: ${reason.trim()}`,
+          approval_notes: `Cancelled by user on ${new Date().toLocaleDateString('en-GB')}. Reason: ${reason.trim()}`,
         })
         .eq('id', transaction.id);
 
@@ -1420,7 +1421,7 @@ export function Transactions() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
-                      {new Date(transaction.transaction_date).toLocaleDateString()}
+                      {formatDisplayDate(transaction.transaction_date) || '—'}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -2157,7 +2158,7 @@ export function Transactions() {
                 <div>
                   <p className="text-sm font-medium text-gray-500">Transaction Date</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
-                    {new Date(selectedTransaction.transaction_date).toLocaleDateString()}
+                    {formatDisplayDate(selectedTransaction.transaction_date) || '—'}
                   </p>
                   <ChangedFrom change={changeOf('transaction_date')} nameOf={nameOfId} />
                 </div>
@@ -2351,7 +2352,7 @@ export function Transactions() {
                       <p className="text-sm font-semibold text-blue-900">{selectedTransaction.approval_document_name}</p>
                       {selectedTransaction.approval_document_uploaded_at && (
                         <p className="text-xs text-blue-600 mt-0.5">
-                          Uploaded {new Date(selectedTransaction.approval_document_uploaded_at).toLocaleDateString()}
+                          Uploaded {formatDisplayDateTime(selectedTransaction.approval_document_uploaded_at)}
                         </p>
                       )}
                     </div>
