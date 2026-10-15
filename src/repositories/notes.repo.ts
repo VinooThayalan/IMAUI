@@ -52,6 +52,43 @@ export async function listProcessed(): Promise<NoteRow[]> {
   return rows as unknown as NoteRow[];
 }
 
+/** A contract note's figures, for comparing it with its transaction. */
+export interface NoteFiguresRow {
+  id: string;
+  status: string;
+  contract_no: string | null;
+  trade_date: string | null;
+  no_of_shares: number | string | null;
+  price_avg: number | string | null;
+  gross_amount: number | string | null;
+  brokerage: number | string | null;
+  sec: number | string | null;
+  exchange: number | string | null;
+  cds: number | string | null;
+  gov_cess: number | string | null;
+  clearing_fees: number | string | null;
+  foreign_brokerage: number | string | null;
+  net_amount: number | string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+}
+
+/** Every note on one transaction, any status. */
+export async function listForTransaction(transactionId: string): Promise<NoteFiguresRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('buy_sell_notes')
+      .select(
+        'id, status, contract_no, trade_date, no_of_shares, price_avg, gross_amount, brokerage, sec, ' +
+        'exchange, cds, gov_cess, clearing_fees, foreign_brokerage, net_amount, approved_by, approved_at',
+      )
+      .eq('transaction_id', transactionId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as NoteFiguresRow[];
+}
+
 /** One note's new position, or null to withdraw the one it has. */
 export interface SeqAssignment {
   id: string;

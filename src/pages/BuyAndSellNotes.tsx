@@ -15,7 +15,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
-import { DateRangeField } from '../components/DateField';
+import { DateField, DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
@@ -333,7 +333,7 @@ export function BuyAndSellNotes() {
     broker_id: "",
     dealer_name: "",
     entity_account_number: "",
-    settlement_date: new Date().toISOString().split("T")[0],
+    settlement_date: "",
     remarks: "",
   });
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
@@ -2165,9 +2165,8 @@ export function BuyAndSellNotes() {
       const totalAmount = sum((r) => r.amount);
       const avgRate = totalShares > 0 ? totalGross / totalShares : 0;
 
-      const today = new Date().toISOString().split("T")[0];
       const extracted: ExtractedData = {
-        trade_date: header.trade_date || today,
+        trade_date: header.trade_date || "",
         contract_no: rows[0]?.contract_no || "",
         no_of_shares: String(totalShares),
         price_avg: avgRate.toFixed(2),
@@ -2179,7 +2178,7 @@ export function BuyAndSellNotes() {
         gov_cess: totalStl.toFixed(2),
         clearing_fees: totalClearing.toFixed(2),
         net_amount: totalAmount.toFixed(2),
-        settlement: header.settlement || today,
+        settlement: header.settlement || "",
         foreign_brokerage: totalForeign.toFixed(2),
         account_no: header.account_no,
         broker_name: header.broker_name,
@@ -2210,7 +2209,7 @@ export function BuyAndSellNotes() {
         ...prev,
         ...(bestCandidate?.id ? { transaction_id: bestCandidate.id } : {}),
         ...(resolvedBrokerId ? { broker_id: resolvedBrokerId } : {}),
-        settlement_date: extracted.settlement || prev.settlement_date,
+        settlement_date: extracted.settlement,
       }));
     } catch (err) {
       console.error("PDF extraction failed", err);
@@ -2648,10 +2647,8 @@ export function BuyAndSellNotes() {
         broker: brokerName,
         broker_id: formData.broker_id || null,
         dealer_name: formData.dealer_name || null,
-        transaction_date:
-          extractedData.settlement || formData.settlement_date || null,
-        settlement_date:
-          extractedData.settlement || formData.settlement_date || null,
+        transaction_date: extractedData.settlement || null,
+        settlement_date: extractedData.settlement || null,
         file_url: storagePath ?? uploadedFile?.name ?? null,
         remarks: formData.remarks || null,
         trade_date: extractedData.trade_date || null,
@@ -2678,6 +2675,10 @@ export function BuyAndSellNotes() {
   async function handleApproval() {
     if (!formData.transaction_id) {
       alert("Please select a transaction");
+      return;
+    }
+    if (!extractedData.trade_date || !extractedData.settlement) {
+      alert("Enter the trade date and settlement date from the contract note before saving.");
       return;
     }
     if (isProcessing) return;
@@ -2751,7 +2752,7 @@ export function BuyAndSellNotes() {
         description: `${selectedTransaction.transaction_type} - ${contractNo}`,
         code: contractNo,
         amount: totalNet,
-        date: extractedData.settlement || formData.settlement_date || null,
+        date: extractedData.settlement || null,
         running_balance: newBalance,
         on_hold_amount: 0,
         entity_id: entity.id,
@@ -2792,6 +2793,10 @@ export function BuyAndSellNotes() {
   async function handleSendForApproval() {
     if (!formData.transaction_id) {
       alert("Please select a transaction");
+      return;
+    }
+    if (!extractedData.trade_date || !extractedData.settlement) {
+      alert("Enter the trade date and settlement date from the contract note before saving.");
       return;
     }
     if (isProcessing) return;
@@ -4339,10 +4344,7 @@ export function BuyAndSellNotes() {
                   )}
 
                   {/* PDF header info */}
-                  {(extractedData.broker_name ||
-                    extractedData.buyer_name ||
-                    extractedData.trade_date) && (
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
                       <div>
                         {extractedData.broker_name && (
                           <p className="font-semibold text-gray-800">
@@ -4377,25 +4379,34 @@ export function BuyAndSellNotes() {
                             </span>
                           </p>
                         )}
-                        {extractedData.trade_date && (
-                          <p>
-                            <span className="text-gray-400">Trade Date:</span>{" "}
-                            <span className="font-semibold text-gray-700">
-                              {extractedData.trade_date}
-                            </span>
-                          </p>
-                        )}
-                        {extractedData.settlement && (
-                          <p>
-                            <span className="text-gray-400">Settlement:</span>{" "}
-                            <span className="font-semibold text-gray-700">
-                              {extractedData.settlement}
-                            </span>
-                          </p>
-                        )}
+                        <div className="pt-1">
+                          <DateField
+                            label="Trade Date"
+                            required
+                            value={extractedData.trade_date}
+                            onChange={(v) => setExtractedData((prev) => ({ ...prev, trade_date: v }))}
+                          />
+                          {!extractedData.trade_date && (
+                            <p className="mt-1 text-red-600">
+                              Not found in the PDF. Enter it from the contract note.
+                            </p>
+                          )}
+                        </div>
+                        <div className="pt-1">
+                          <DateField
+                            label="Settlement Date"
+                            required
+                            value={extractedData.settlement}
+                            onChange={(v) => setExtractedData((prev) => ({ ...prev, settlement: v }))}
+                          />
+                          {!extractedData.settlement && (
+                            <p className="mt-1 text-red-600">
+                              Not found in the PDF. Enter it from the contract note.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  )}
 
                   {/* Extracted PDF line items — read only */}
                   {extractedRows.length > 0 && (

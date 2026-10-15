@@ -3,15 +3,19 @@ import {
   Search, Filter, Mail, FileText, Ban, RotateCcw, X
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase, getAccessToken } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
-import { DateRangeField } from '../components/DateField';
+import { DateField, DateRangeField } from '../components/DateField';
+import { ApprovalChanges } from '../components/ApprovalChanges';
+import { formatDisplayDate } from '../lib/dateInput';
 import { LoadingState } from '../components/Loading';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 import { useTransactionEmail } from '../hooks/useTransactionEmail';
+import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
+import { useEmailDelivery } from '../hooks/useTransactionEmail';
 
 interface Transaction {
   id: string;
@@ -39,6 +43,7 @@ interface Transaction {
   approved_by: string | null;
   approval_date: string | null;
   approval_notes: string | null;
+  submitted_figures?: Record<string, unknown> | null;
   rejection_reason: string | null;
   approval_document_url: string | null;
   approval_document_name: string | null;
@@ -220,6 +225,23 @@ export function TransactionApprovals() {
     }
   }
 
+  const approval = useTransactionApproval();
+  const deliver = useEmailDelivery();
+  const amendment = useApprovalAmendment(showModal ? selectedTransaction : null);
+  const nameOf = (kind: 'entity' | 'share', id: string) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id));
+
+  function savedEdits() {
+    return {
+      ...editFormData,
+      no_of_shares: parseFloat(editFormData.no_of_shares),
+      price_per_share: parseFloat(editFormData.price_per_share),
+    };
+  }
+
+  const approvalPreview = showModal && selectedTransaction && actionType === 'APPROVE' && editSaved
+    ? approval.preview(selectedTransaction, savedEdits())
+    : null;
+
   function getEntityName(entityId: string) {
     return entities.find(e => e.id === entityId)?.name || entityId;
   }
@@ -290,37 +312,7 @@ export function TransactionApprovals() {
     if (!selectedTransaction) return;
     try {
       setSubmitting(true);
-      const updates: any = {
-        approval_status: 'MANUAL_APPROVED',
-        approved_by: user?.email || 'system',
-        approval_date: new Date().toISOString(),
-        approval_notes: actionFormData.approval_notes || null
-      };
-      if (isEditing || editSaved) {
-        updates.entity_id = editFormData.entity_id;
-        updates.share_id = editFormData.share_id;
-        updates.transaction_type = editFormData.transaction_type;
-        updates.transaction_date = editFormData.transaction_date;
-        updates.no_of_shares = parseFloat(editFormData.no_of_shares);
-        updates.price_per_share = parseFloat(editFormData.price_per_share);
-        updates.total_amount_gross = updates.no_of_shares * updates.price_per_share;
-        // Recalculate fees using the stored blended rate so fee stays proportional to new gross
-        const storedRate = selectedTransaction.brokerage_fee_rate != null ? Number(selectedTransaction.brokerage_fee_rate) : 0;
-        const recalcFees = (updates.total_amount_gross * storedRate) / 100;
-        updates.fees = recalcFees;
-        updates.net_price_per_share = updates.no_of_shares > 0
-          ? (selectedTransaction.transaction_type === 'BUY'
-              ? (updates.total_amount_gross + recalcFees) / updates.no_of_shares
-              : (updates.total_amount_gross - recalcFees) / updates.no_of_shares)
-          : 0;
-        updates.total_amount = selectedTransaction.transaction_type === 'BUY'
-          ? updates.total_amount_gross + recalcFees
-          : updates.total_amount_gross - recalcFees;
-      }
-      const oldRecord = await fetchRecordForAudit('transactions', selectedTransaction.id);
-      const { error } = await supabase.from('transactions').update(updates).eq('id', selectedTransaction.id);
-      if (error) throw error;
-      logAudit({ tableName: 'transactions', recordId: selectedTransaction.id, action: 'UPDATE', performedBy: user?.email || 'system', oldValues: oldRecord, newValues: { ...oldRecord, ...updates }, entityId: selectedTransaction.entity_id, description: 'Approved transaction' });
+      await approval.approve(selectedTransaction, editSaved ? savedEdits() : null, actionFormData.approval_notes || null);
       alert('Transaction approved successfully');
       closeModal();
       loadData();
@@ -438,26 +430,21 @@ export function TransactionApprovals() {
       await releaseOnHoldCash(selectedTransaction);
 
       // Optionally notify broker
+      let brokerNotice = '';
       if (actionFormData.notify_broker && selectedTransaction.broker_id) {
         const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
         if (broker?.contact_person_email) {
-          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${await getAccessToken()}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              to: broker.contact_person_email,
-              triggered_by: user?.email || null,
-              source: 'transaction-approvals',
-              transaction: buildTransactionEmail(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
-            }),
+          const notice = await deliver({
+            to: broker.contact_person_email,
+            triggered_by: user?.email || null,
+            source: 'transaction-approvals',
+            transaction: buildTransactionEmail(selectedTransaction, `CANCELLATION — Reason: ${actionFormData.cancel_reason}`  + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
           });
+          if (!notice.ok) brokerNotice = ` The broker was not emailed: ${notice.reason}`;
         }
       }
 
-      alert('Transaction cancelled and cash released');
+      alert(`Transaction cancelled and cash released.${brokerNotice}`);
       closeModal();
       loadData();
     } catch (error) {
@@ -488,26 +475,21 @@ export function TransactionApprovals() {
 
       await releaseOnHoldCash(selectedTransaction);
 
+      let brokerNotice = '';
       if (actionFormData.notify_broker && selectedTransaction.broker_id) {
         const broker = brokers.find(b => b.id === selectedTransaction.broker_id);
         if (broker?.contact_person_email) {
-          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${await getAccessToken()}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              to: broker.contact_person_email,
-              triggered_by: user?.email || null,
-              source: 'transaction-approvals',
-              transaction: buildTransactionEmail(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
-            }),
+          const notice = await deliver({
+            to: broker.contact_person_email,
+            triggered_by: user?.email || null,
+            source: 'transaction-approvals',
+            transaction: buildTransactionEmail(selectedTransaction, `APPROVAL CANCELLED — Reason: ${actionFormData.cancel_reason}. Note: Buy/Sell Note was not uploaded.` + (actionFormData.approval_notes ? `\n\n${actionFormData.approval_notes}` : '')),
           });
+          if (!notice.ok) brokerNotice = ` The broker was not emailed: ${notice.reason}`;
         }
       }
 
-      alert('Approval cancelled and cash released');
+      alert(`Approval cancelled and cash released.${brokerNotice}`);
       closeModal();
       loadData();
     } catch (error) {
@@ -529,21 +511,14 @@ export function TransactionApprovals() {
     }
     try {
       setSendingEmail(true);
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${await getAccessToken()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          to: emailAddress.trim(),
-          cc: ccForSend(emailAddress, ccAddresses),
-          triggered_by: user?.email || null,
-          source: 'transaction-approvals',
-          transaction: buildTransactionEmail(selectedTransaction, emailNote.trim() || undefined),
-        }),
+      const response = await deliver({
+        to: emailAddress.trim(),
+        cc: ccForSend(emailAddress, ccAddresses),
+        triggered_by: user?.email || null,
+        source: 'transaction-approvals',
+        transaction: buildTransactionEmail(selectedTransaction, emailNote.trim() || undefined),
       });
-      if (!response.ok) throw new Error('Failed to send email');
+      if (!response.ok) throw new Error(response.reason ?? 'The email was not sent.');
       alert(`Transaction details sent to ${emailAddress}${ccAddresses.length ? ` (CC: ${ccAddresses.join(', ')})` : ''}`);
       setShowEmailModal(false);
       setEmailAddress('');
@@ -551,7 +526,7 @@ export function TransactionApprovals() {
       setEmailNote('');
     } catch (error) {
       console.error('Error sending email:', error);
-      alert('Failed to send email');
+      alert(`Could not send the email. ${error instanceof Error ? error.message : ''}`);
     } finally {
       setSendingEmail(false);
     }
@@ -740,7 +715,7 @@ export function TransactionApprovals() {
                 const timeRemaining = getTimeRemaining(transaction);
                 const cfg = statusConfig[transaction.approval_status] || statusConfig['PENDING_APPROVAL'];
                 const StatusIcon = cfg.icon;
-                const isSelf = transaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
+                const isSelf = !approval.canApprove(transaction);
                 const isPending = transaction.approval_status === 'PENDING_APPROVAL' || transaction.approval_status === 'ON_HOLD';
                 const isApproved = transaction.approval_status === 'MANUAL_APPROVED';
                 const hasDoc = !!transaction.approval_document_url;
@@ -848,6 +823,16 @@ export function TransactionApprovals() {
                           </button>
                         )}
 
+                        {isPending && (
+                          <button
+                            onClick={() => openEmailModal(transaction)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Send Email"
+                          >
+                            <Mail className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {/* Cancelled: send cancel notification to broker */}
                         {transaction.approval_status === 'CANCELLED' && transaction.broker_id && (
                           <button
@@ -929,7 +914,7 @@ export function TransactionApprovals() {
                 </div>
               )}
               {selectedTransaction.approval_status === 'PENDING_APPROVAL' &&
-                selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase() && (
+                !approval.canApprove(selectedTransaction) && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center space-x-2">
                   <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   <p className="text-sm text-amber-800 font-medium">You submitted this transaction — it must be approved by another user</p>
@@ -979,25 +964,39 @@ export function TransactionApprovals() {
               {!isEditing ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { label: 'Entity', value: getEntityName(selectedTransaction.entity_id) },
-                      { label: 'Broker', value: getBrokerName(selectedTransaction.broker_id) },
-                      { label: 'Share', value: getShareInfo(selectedTransaction.share_id) },
-                      { label: 'Transaction Date', value: new Date(selectedTransaction.transaction_date).toLocaleDateString() },
-                      { label: 'No. of Shares', value: Number(selectedTransaction.no_of_shares).toLocaleString() },
-                      { label: 'Price Per Share (LKR)', value: Number(selectedTransaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) },
-                      { label: 'Brokerage Fee (LKR)', value: Number(selectedTransaction.fees || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) },
-                      { label: 'Net Price Per Share (LKR)', value: Number(selectedTransaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) },
-                      { label: 'Total Value (LKR)', value: Number(selectedTransaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 }) },
-                      { label: 'Order Type', value: selectedTransaction.order_type || 'N/A' },
-                      { label: 'CDS Account', value: selectedTransaction.cds_account_id || 'N/A' },
-                      { label: 'Currency', value: selectedTransaction.currency || 'LKR' },
-                    ].map(({ label, value }) => (
-                      <div key={label}>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
-                        <p className="mt-0.5 text-sm font-semibold text-gray-900">{value}</p>
-                      </div>
-                    ))}
+                    {(() => {
+                      const shown = { ...selectedTransaction, ...(approvalPreview?.figures ?? {}) } as Transaction;
+                      const was = (field: string) => approvalPreview?.changes.find(c => c.field === field);
+                      const amount = (v: unknown, d = 2) => Number(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+                      const before = (field: string, v: unknown) =>
+                        field === 'entity_id' ? nameOf('entity', String(v))
+                          : field === 'share_id' ? nameOf('share', String(v))
+                          : field === 'transaction_date' ? formatDisplayDate(String(v))
+                          : amount(v, field === 'no_of_shares' ? 0 : field.includes('price') ? 4 : 2);
+                      return [
+                        { label: 'Entity', field: 'entity_id', value: getEntityName(shown.entity_id) },
+                        { label: 'Broker', field: '', value: getBrokerName(shown.broker_id) },
+                        { label: 'Share', field: 'share_id', value: getShareInfo(shown.share_id) },
+                        { label: 'Transaction Date', field: 'transaction_date', value: formatDisplayDate(shown.transaction_date) || '—' },
+                        { label: 'No. of Shares', field: 'no_of_shares', value: Number(shown.no_of_shares).toLocaleString() },
+                        { label: 'Price Per Share (LKR)', field: 'price_per_share', value: amount(shown.price_per_share, 4) },
+                        { label: 'Total Fees (LKR)', field: 'fees', value: amount(shown.fees) },
+                        { label: 'Net Price Per Share (LKR)', field: 'net_price_per_share', value: amount(shown.net_price_per_share, 4) },
+                        { label: 'Total Value (LKR)', field: 'total_amount', value: amount(shown.total_amount) },
+                        { label: 'Order Type', field: '', value: shown.order_type || 'N/A' },
+                        { label: 'CDS Account', field: '', value: shown.cds_account_id || 'N/A' },
+                        { label: 'Currency', field: '', value: shown.currency || 'LKR' },
+                      ].map(({ label, field, value }) => {
+                        const change = field ? was(field) : undefined;
+                        return (
+                          <div key={label}>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</p>
+                            <p className={`mt-0.5 text-sm font-semibold ${change ? 'text-amber-700' : 'text-gray-900'}`}>{value}</p>
+                            {change && <p className="text-xs text-gray-500">was {before(field, change.from)}</p>}
+                          </div>
+                        );
+                      });
+                    })()}
 
                     {/* Transaction type */}
                     <div>
@@ -1052,6 +1051,14 @@ export function TransactionApprovals() {
                     </div>
                   )}
 
+                  {amendment && (
+                    <ApprovalChanges
+                      heading={<>Amended at approval by {amendment.by ?? 'an approver not recorded'}{amendment.at && ` on ${new Date(amendment.at).toLocaleString('en-GB')}`}</>}
+                      changes={amendment.changes}
+                      nameOf={nameOf}
+                    />
+                  )}
+
                   {selectedTransaction.approval_notes && (
                     <div>
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Notes</p>
@@ -1075,8 +1082,18 @@ export function TransactionApprovals() {
                         <Edit2 className="w-4 h-4" />
                         <span>Edit Transaction (Audit Trail Maintained)</span>
                       </button>
-                      {editSaved && !isEditing && (
-                        <p className="mt-1 text-xs text-amber-700 font-medium">Edited values will be applied on approval.</p>
+                      {approvalPreview && (
+                        <div className="mt-2">
+                          {approvalPreview.changes.length > 0 ? (
+                            <ApprovalChanges
+                              heading={<>Your changes, applied when you approve. They are recorded with your name.</>}
+                              changes={approvalPreview.changes}
+                              nameOf={nameOf}
+                            />
+                          ) : (
+                            <p className="text-xs text-gray-500">No figures changed.</p>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1109,7 +1126,7 @@ export function TransactionApprovals() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Date</label>
-                      <input type="date" value={editFormData.transaction_date} onChange={e => setEditFormData({ ...editFormData, transaction_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                      <DateField value={editFormData.transaction_date} onChange={v => setEditFormData({ ...editFormData, transaction_date: v })} fullWidth />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Number of Shares</label>
@@ -1122,7 +1139,20 @@ export function TransactionApprovals() {
                   </div>
                   <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
                     <button onClick={() => { setIsEditing(false); setEditSaved(false); }} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg">Cancel Edit</button>
-                    <button onClick={() => { setIsEditing(false); setEditSaved(true); }} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save Changes</button>
+                    <button
+                      onClick={() => {
+                        const e = savedEdits();
+                        if (!(e.no_of_shares > 0) || !(e.price_per_share > 0) || !e.transaction_date) {
+                          alert('Enter a transaction date, and a number of shares and price per share above zero.');
+                          return;
+                        }
+                        setIsEditing(false);
+                        setEditSaved(true);
+                      }}
+                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
+                      Save Changes
+                    </button>
                   </div>
                 </div>
               )}
@@ -1213,7 +1243,7 @@ export function TransactionApprovals() {
               </button>
 
               {actionType === 'APPROVE' && !isEditing && (() => {
-                const isSelf = selectedTransaction.submitted_by?.toLowerCase() === user?.email?.toLowerCase();
+                const isSelf = !approval.canApprove(selectedTransaction);
                 return (
                   <button
                     onClick={handleApprove}

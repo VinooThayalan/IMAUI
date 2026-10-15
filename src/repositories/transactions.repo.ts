@@ -33,3 +33,9 @@ export async function listApproved(): Promise<TransactionRow[]> {
   );
   return rows as unknown as TransactionRow[];
 }
+
+/** Writes `values` onto one transaction. Throws the PostgREST error. */
+export async function update(id: string, values: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from('transactions').update(values).eq('id', id);
+  if (error) throw error;
+}
