@@ -10,6 +10,7 @@ import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrok
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateField, DateRangeField } from '../components/DateField';
 import { ApprovalChanges } from '../components/ApprovalChanges';
+import { ApprovalTrail } from '../components/ApprovalTrail';
 import { formatDisplayDate } from '../lib/dateInput';
 import { LoadingState } from '../components/Loading';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
@@ -1030,21 +1031,7 @@ export function TransactionApprovals() {
                     </div>
                   </div>
 
-                  {selectedTransaction.submitted_by && (
-                    <div className="pt-2 border-t border-gray-100">
-                      <p className="text-xs text-gray-400">
-                        Submitted by <span className="font-medium text-gray-600">{selectedTransaction.submitted_by}</span>
-                        {selectedTransaction.submitted_for_approval_at && ` on ${new Date(selectedTransaction.submitted_for_approval_at).toLocaleString()}`}
-                      </p>
-                      {selectedTransaction.approved_by && (
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {selectedTransaction.approval_status === 'MANUAL_APPROVED' ? 'Approved' : 'Actioned'} by{' '}
-                          <span className="font-medium text-gray-600">{selectedTransaction.approved_by}</span>
-                          {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString()}`}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                  <ApprovalTrail transaction={selectedTransaction} amended={!!amendment} className="pt-3 border-t border-gray-100" />
 
                   {amendment && (
                     <ApprovalChanges

@@ -15,6 +15,7 @@ import { useEmailDelivery, useTransactionEmail } from '../hooks/useTransactionEm
 import { useTransactionPrint } from '../hooks/useTransactionPrint';
 import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
 import { ApprovalChanges } from '../components/ApprovalChanges';
+import { ApprovalTrail } from '../components/ApprovalTrail';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
 const ALL_STATUSES = [
@@ -2270,12 +2271,7 @@ export function Transactions() {
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>
                     )}
                   </p>
-                  {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
-                    <p className="mt-1 text-sm text-gray-600">
-                      Approved by <span className="font-semibold text-gray-900">{selectedTransaction.approved_by || 'an approver not recorded'}</span>
-                      {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString('en-GB')}`}
-                    </p>
-                  )}
+                  <ApprovalTrail transaction={selectedTransaction} amended={!!viewedAmendment} className="mt-3" />
                 </div>
                 {selectedTransaction.approval_document_name && (
                   <div className="col-span-2">
