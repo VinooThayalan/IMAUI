@@ -673,13 +673,6 @@ const displayNotes = notes.filter(n => {
                               <p className="text-sm font-semibold text-gray-700 mt-0.5">{parties.clientName}</p>
                             )}
                             {parties.clientBank && <p className="text-xs text-gray-500">{parties.clientBank}</p>}
-                            {parties.clientAccount && !parties.accountOnRecord && (
-                              <p className="text-xs text-amber-700 mt-0.5">
-                                This number is not one of the entity's recorded accounts
-                                {parties.recordedAccounts.length ? ` (${parties.recordedAccounts.join(', ')})` : ' (none recorded)'}.
-                                {' '}Check Entities → Broker/Custodian.
-                              </p>
-                            )}
                             {parties.brokerAccount && <p className="text-xs text-gray-500 mt-0.5">Broker account: <span className="font-mono">{parties.brokerAccount}</span></p>}
                             <div className="mt-2 pt-2 border-t border-gray-100">
                               <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Settlement Date</p>
