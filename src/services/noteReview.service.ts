@@ -26,6 +26,8 @@ export interface NoteParties {
   clientBank: string | null;
   /** False when the entity has no account record matching the number. */
   accountOnRecord: boolean;
+  /** The entity's recorded account numbers, to compare against when not on record. */
+  recordedAccounts: string[];
   /** The entity's account with the note's broker, when they are linked. */
   brokerAccount: string | null;
   /** The transaction's broker, when it is not the note's. */
@@ -51,6 +53,7 @@ export function noteParties(
     clientName: record?.custodian_account_name?.trim() || entityName,
     clientBank: record?.bank_name || null,
     accountOnRecord: !!record,
+    recordedAccounts: [...new Set(own.flatMap(a => [a.custodian_account_number, a.broker_account_number]).filter((n): n is string => !!n?.trim()))],
     brokerAccount: brokerLink?.broker_account_number || null,
     transactionBroker: differs ? brokers.find(b => b.id === txn!.broker_id)?.broker_name ?? null : null,
   };
