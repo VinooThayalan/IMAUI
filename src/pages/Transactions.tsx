@@ -1,17 +1,20 @@
 import { Plus, Search, TrendingUp, TrendingDown, XCircle, Eye, Printer, Clock, Mail, Upload, FileText, X, Trash2, CheckCircle, Pencil } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { supabase, getAccessToken } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { accountBalance } from '../services/cashLedger.service';
-import { ccForSend, entityCcAddresses, resolveTransactionRecipient } from '../lib/emailRecipients';
+import { ccForSend, entityCcAddresses, resolveTransactionRecipient, resolvedBrokerName } from '../lib/emailRecipients';
 import { EmailRecipientsField, type RecipientOption } from '../components/EmailRecipientsField';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useHolding } from '../hooks/useHolding';
 import { useTransactionVolume } from '../hooks/useTransactionVolume';
-import { useTransactionEmail } from '../hooks/useTransactionEmail';
+import { useEmailDelivery, useTransactionEmail } from '../hooks/useTransactionEmail';
+import { useTransactionPrint } from '../hooks/useTransactionPrint';
+import { useApprovalAmendment, useTransactionApproval } from '../hooks/useTransactionApproval';
+import { ApprovalChanges } from '../components/ApprovalChanges';
 import { TransactionEmailPreview } from '../components/TransactionEmailPreview';
 
 const ALL_STATUSES = [
@@ -53,6 +56,7 @@ interface Transaction {
   approval_expires_at: string | null;
   submitted_by: string | null;
   approved_by: string | null;
+  submitted_figures?: Record<string, unknown> | null;
   approval_date: string | null;
   approval_notes: string | null;
   rejection_reason: string | null;
@@ -230,6 +234,10 @@ export function Transactions() {
   // The confirmation email: one builder for the preview and the send, shared
   // with Transaction Approvals (bug-52).
   const buildTransactionEmail = useTransactionEmail({ entities, shares, banks, brokers, entityBrokers });
+  const printTransaction = useTransactionPrint();
+  const deliver = useEmailDelivery();
+  const approval = useTransactionApproval();
+  const viewedAmendment = useApprovalAmendment(showViewModal ? selectedTransaction : null);
 
   useEffect(() => {
     if (!formData.share_id) { setLatestSharePrice(null); return; }
@@ -727,27 +735,24 @@ export function Transactions() {
       if (error) throw error;
 
       // Send email notification to broker if one is assigned
+      let brokerNotice = ' Please notify the broker.';
       if (transaction.broker_id) {
         const broker = brokers.find(b => b.id === transaction.broker_id);
         if (broker?.contact_person_email) {
           const txnData = buildTransactionEmail(transaction);
-          await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${await getAccessToken()}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              to: broker.contact_person_email,
-              triggered_by: user?.email || null,
-              source: 'transactions',
-              transaction: { ...txnData, note: `CANCELLATION NOTICE — Reason: ${reason.trim()}` },
-            }),
-          }).catch(err => console.error('Broker email failed:', err));
+          const notice = await deliver({
+            to: broker.contact_person_email,
+            triggered_by: user?.email || null,
+            source: 'transactions',
+            transaction: { ...txnData, note: `CANCELLATION NOTICE — Reason: ${reason.trim()}` },
+          });
+          brokerNotice = notice.ok
+            ? ` The broker was emailed at ${broker.contact_person_email}.`
+            : ` The broker was not emailed: ${notice.reason}`;
         }
       }
 
-      alert('Transaction cancelled successfully. Please notify the broker.');
+      alert(`Transaction cancelled successfully.${brokerNotice}`);
       loadData();
     } catch (error) {
       console.error('Error cancelling transaction:', error);
@@ -798,6 +803,7 @@ export function Transactions() {
       };
 
       if (selectedTransaction.approval_status === 'PENDING_APPROVAL') {
+        Object.assign(updates, approval.snapshot(selectedTransaction));
         updates.approval_status = 'MANUAL_APPROVED';
         updates.approved_by = user?.email || 'system';
         updates.approval_date = new Date().toISOString();
@@ -909,183 +915,17 @@ export function Transactions() {
   }
 
   function handlePrintTransaction(transaction: Transaction) {
-    const entityName = getEntityName(transaction.entity_id);
-    const shareInfo = getShareInfo(transaction.share_id);
+    const resolved = resolveTransactionBroker(transaction);
+    const { entityBroker } = resolved;
 
-    // The shared resolver, not the copy of the old lookup that used to sit here.
-    // That copy fell back to the first broker assigned to the entity, so an
-    // approval document could be printed naming a brokerage that was guessed.
-    const { broker: resolvedBroker, candidates: brokerCandidates, entityBroker } =
-      resolveTransactionBroker(transaction);
-
-    const cdsAccount = transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A';
-    const brokerName = resolvedBroker?.broker_name
-      || (entityBroker as { broker_text?: string } | null)?.broker_text
-      || (brokerCandidates.length > 0 ? 'Not recorded' : 'N/A');
-    const currentDate = new Date().toLocaleDateString();
-
-    // Who generated this document. Falls back to a signature line when the
-    // signed-in user has no name on record, so the field is never blank-and-
-    // unsignable. Escaped because full_name is user-entered and this is
-    // interpolated straight into markup.
-    const escapeHtml = (v: string) =>
-      v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const preparedByName = appUser?.full_name?.trim() || appUser?.email || user?.email || '';
-    const preparedBy = preparedByName ? escapeHtml(preparedByName) : '..........................';
-
-    const html = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Transaction Approval - ${transaction.id}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 40px;
-              margin: 0 auto;
-              max-width: 1200px;
-            }
-            .header {
-              margin-bottom: 30px;
-            }
-            .info-table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 20px;
-            }
-            .info-table td {
-              padding: 4px 8px;
-              vertical-align: top;
-            }
-            .info-table td:first-child {
-              font-weight: bold;
-              width: 200px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 20px;
-            }
-            th, td {
-              border: 1px solid #000;
-              padding: 8px;
-              text-align: left;
-              font-size: 13px;
-            }
-            th {
-              background-color: #f5f5f5;
-              font-weight: bold;
-            }
-            .green-bg {
-              background-color: #f5f5f5;
-              font-weight: bold;
-            }
-            .total-row {
-              font-weight: bold;
-              background-color: #f5f5f5;
-            }
-            .total-row .green-text {
-              font-style: italic;
-            }
-            @media print {
-              body { padding: 20px; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h2 style="margin: 0 0 20px 0;">Transaction Approval Details</h2>
-          </div>
-
-          <table class="info-table">
-            <tr>
-              <td>Entity:</td>
-              <td>${entityName}</td>
-            </tr>
-            <tr>
-              <td>Investment</td>
-              <td>${transaction.transaction_type === 'BUY' ? 'Purchase' : 'Sale'}</td>
-            </tr>
-            <tr>
-              <td>Name of the Investment</td>
-              <td>${shareInfo}</td>
-            </tr>
-          </table>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Date of Transaction</th>
-                <th>Share</th>
-                <th>Buy/Sell</th>
-                <th>Number of Shares</th>
-                <th>Per Share Sales Price / Purchase Cost (Gross)</th>
-                <th>Per Share Sales Price / Purchase Cost (Net)</th>
-                <th>Purchase/ Sale Value</th>
-                <th>CDS Acc. No</th>
-                <th>Broker Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${new Date(transaction.transaction_date).toLocaleDateString()}</td>
-                <td>${shareInfo}</td>
-                <td>${transaction.transaction_type}</td>
-                <td>${Number(transaction.no_of_shares).toLocaleString()}</td>
-                <td>${Number(transaction.price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                <td>${Number(transaction.net_price_per_share).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                <td>${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                <td>${cdsAccount}</td>
-                <td>${brokerName}</td>
-              </tr>
-              <tr class="total-row">
-                <td colspan="2">Total Sales Values /Purchase Values</td>
-                <td>${transaction.transaction_type}</td>
-                <td colspan="2" class="green-text">${Number(transaction.no_of_shares).toLocaleString()} shares</td>
-                <td colspan="4" class="green-text">LKR ${Number(transaction.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-              </tr>
-              <tr>
-                <td colspan="9" style="border: none; padding: 20px 8px;"></td>
-              </tr>
-              <tr>
-                <td colspan="3" style="border-right: none; font-weight: normal;">Prepared by</td>
-                <td colspan="6" style="border-left: none;">${preparedBy}</td>
-              </tr>
-              <tr>
-                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized by</td>
-                <td colspan="6" style="border-left: none;">..........................</td>
-              </tr>
-              <tr>
-                <td colspan="3" style="border-right: none; font-weight: normal;">Authorized date</td>
-                <td colspan="6" style="border-left: none;">..........................</td>
-              </tr>
-              <tr>
-                <td colspan="3" style="border-right: none; font-weight: normal;">Generate Date</td>
-                <td colspan="6" style="border-left: none;">${currentDate}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <script>
-            setTimeout(function() {
-              window.print();
-            }, 500);
-          </script>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Please allow pop-ups to print the document');
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    void printTransaction(transaction, {
+      entityName: getEntityName(transaction.entity_id),
+      shareInfo: getShareInfo(transaction.share_id),
+      cdsAccount: transaction.cds_account_id || entityBroker?.custodian_account_number || 'N/A',
+      brokerName: resolvedBrokerName(resolved) ?? 'N/A',
+      preparedBy: appUser?.full_name?.trim() || appUser?.email || user?.email || null,
+      generatedOn: new Date().toLocaleDateString('en-GB'),
+    });
   }
 
   function handleEmailTransaction(transaction: Transaction) {
@@ -1130,24 +970,15 @@ export function Transactions() {
       // The same builder the preview above it uses, so what is sent is what was shown.
       const transactionData = buildTransactionEmail(selectedTransaction, emailNote.trim() || undefined);
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-transaction-email`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${await getAccessToken()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          to: emailAddress.trim(),
-          cc: ccForSend(emailAddress, ccAddresses),
-          triggered_by: user?.email || null,
-          source: 'transactions',
-          transaction: transactionData
-        })
+      const response = await deliver({
+        to: emailAddress.trim(),
+        cc: ccForSend(emailAddress, ccAddresses),
+        triggered_by: user?.email || null,
+        source: 'transactions',
+        transaction: transactionData
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to send email');
-      }
+      if (!response.ok) throw new Error(response.reason ?? 'The email was not sent.');
 
       alert(`Transaction details sent successfully to ${emailAddress}${ccAddresses.length ? ` (CC: ${ccAddresses.join(', ')})` : ''}`);
       setShowEmailModal(false);
@@ -1155,7 +986,7 @@ export function Transactions() {
       setCcAddresses([]);
       } catch (error) {
       console.error('Error sending email:', error);
-      alert('Failed to send email. Please try again.');
+      alert(`Could not send the email. ${error instanceof Error ? error.message : ''}`);
     } finally {
       setSendingEmail(false);
     }
@@ -1258,6 +1089,7 @@ export function Transactions() {
         };
 
         if (isApprover) {
+          Object.assign(updatePayload, approval.snapshot(txn));
           updatePayload.approval_status = 'MANUAL_APPROVED';
           updatePayload.approved_by = currentEmail;
           updatePayload.approval_date = now.toISOString();
@@ -1668,7 +1500,7 @@ export function Transactions() {
                       >
                         <Printer className="w-5 h-5" />
                       </button>
-                      {transaction.approval_status === 'MANUAL_APPROVED' && (
+                      {['MANUAL_APPROVED', 'PENDING_APPROVAL', 'ON_HOLD'].includes(transaction.approval_status) && (
                         <button
                           onClick={() => handleEmailTransaction(transaction)}
                           className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
@@ -2361,7 +2193,7 @@ export function Transactions() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-500">Brokerage Fee</p>
+                  <p className="text-sm font-medium text-gray-500">Total Fees</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">
                     LKR {Number(selectedTransaction.fees).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     {selectedTransaction.brokerage_fee_rate && (
@@ -2413,6 +2245,10 @@ export function Transactions() {
                   </div>
                 </div>
                 <div>
+                  <p className="text-sm font-medium text-gray-500">Broker</p>
+                  <p className="text-base font-semibold text-gray-900 mt-1">{resolvedBrokerName(resolveTransactionBroker(selectedTransaction)) ?? '—'}</p>
+                </div>
+                <div>
                   <p className="text-sm font-medium text-gray-500">CDS/Broker Account</p>
                   <p className="text-base font-semibold text-gray-900 mt-1">{selectedTransaction.cds_account_id || 'N/A'}</p>
                 </div>
@@ -2434,6 +2270,12 @@ export function Transactions() {
                       <span className="ml-2 text-sm text-blue-600 font-medium">(Offline Approval)</span>
                     )}
                   </p>
+                  {selectedTransaction.approval_status === 'MANUAL_APPROVED' && (
+                    <p className="mt-1 text-sm text-gray-600">
+                      Approved by <span className="font-semibold text-gray-900">{selectedTransaction.approved_by || 'an approver not recorded'}</span>
+                      {selectedTransaction.approval_date && ` on ${new Date(selectedTransaction.approval_date).toLocaleString('en-GB')}`}
+                    </p>
+                  )}
                 </div>
                 {selectedTransaction.approval_document_name && (
                   <div className="col-span-2">
@@ -2446,6 +2288,15 @@ export function Transactions() {
                     >
                       {selectedTransaction.approval_document_name}
                     </a>
+                  </div>
+                )}
+                {viewedAmendment && (
+                  <div className="col-span-2">
+                    <ApprovalChanges
+                      heading={<>Amended at approval by {viewedAmendment.by ?? 'an approver not recorded'}{viewedAmendment.at && ` on ${new Date(viewedAmendment.at).toLocaleString('en-GB')}`}</>}
+                      changes={viewedAmendment.changes}
+                      nameOf={(kind, id) => (kind === 'entity' ? getEntityName(id) : getShareInfo(id))}
+                    />
                   </div>
                 )}
               </div>
