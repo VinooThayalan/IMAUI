@@ -269,7 +269,6 @@ export interface HoldingRow {
   purchaseCost: number;
   saleValue: number;
   dividend: number;
-  cashFlow: number;
   txnCount: number;
   avCost: number;
   avPrice: number | null;
@@ -288,7 +287,6 @@ export function holdingRow(group: ShareGroup, activity: ComputedRow[]): HoldingR
     purchaseCost: sum(r => r.purchase_cost),
     saleValue: sum(r => r.sale_value),
     dividend: sum(r => r.dividend),
-    cashFlow: sum(r => r.cash_flow),
     txnCount: activity.filter(r => r.row_type === 'buy' || r.row_type === 'sell' || r.row_type === 'scrip').length,
     avCost: last.av_cost,
     avPrice: avPriceOrNull(last),
@@ -321,7 +319,6 @@ export function holdingTotals(rows: HoldingRow[]): HoldingTotals {
     purchaseCost: total(r => r.purchaseCost),
     saleValue: total(r => r.saleValue),
     dividend: total(r => r.dividend),
-    cashFlow: total(r => r.cashFlow),
     txnCount: total(r => r.txnCount),
     avCost: total(r => r.avCost),
     cumSurplus: total(r => r.cumSurplus),
