@@ -996,7 +996,7 @@ export function ShareAnalytics() {
               <>Balance, average cost and market value are <strong>as at {fmtDate(toDate)}</strong>; anything traded later is excluded. </>
             )}
             {fromDate && (
-              <>Only holdings bought, sold, paid a dividend or issued scrip <strong>{periodLabel}</strong> are listed, and their purchase cost, sale value, dividend and cash flow cover that period only — the position itself, Cum Surplus and Total Surplus included, still counts everything bought before then. </>
+              <>Only holdings bought, sold, paid a dividend or issued scrip <strong>{periodLabel}</strong> are listed, and their purchase cost, sale value, dividend cover that period only — the position itself, Realised Gains/Loss and Total Surplus included, still counts everything bought before then. </>
             )}
             Market price is the latest on file, not the price on the as-at date.
           </div>
@@ -1024,12 +1024,11 @@ export function ShareAnalytics() {
             <SummaryCard label="Total Market Value"   value={`Rs. ${fmt(totals.marketValue)}`}  color="text-blue-700" />
             <SummaryCard label="MV after Brokerage"   value={`Rs. ${fmt(totals.mvAfterFees)}`} color="text-indigo-700" />
             <SummaryCard
-              label="Cum Surplus (Realized)"
+              label="Realised Gains/Loss"
               value={`Rs. ${fmt(totals.cumSurplus)}`}
               color={totals.cumSurplus >= 0 ? 'text-green-700' : 'text-red-600'}
             />
             <SummaryCard label="Total Av Cost (Held)" value={`Rs. ${fmt(totals.avCost)}`}      color="text-blue-700" />
-            <SummaryCard label="Total Cash Flow"      value={`Rs. ${fmt(totals.cashFlow)}`}    color={totals.cashFlow >= 0 ? 'text-green-700' : 'text-red-600'} />
             <SummaryCard
               label="AER (XIRR)"
               value={formatAer(portfolioAerPct)}
@@ -1084,7 +1083,7 @@ export function ShareAnalytics() {
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Share','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Cum Surplus','Market Value','MV after Fees','Cash Flow','Total Surplus','Txns'].map(h => (
+                  {['Share','Entity','CDS Account','Share Cum Bal','Purchase Cost','Sale Value','Av Cost','Av Price','Dividend','Realised Gains/Loss','Market Value','MV after Fees','Total Surplus','Txns'].map(h => (
                     <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${h === 'Share' || h === 'Entity' || h === 'CDS Account' ? 'text-left' : 'text-right'}`}>
                       {h}
                     </th>
@@ -1130,11 +1129,6 @@ export function ShareAnalytics() {
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
-                        <span className={row.cashFlow > 0 ? 'text-green-700 font-semibold' : row.cashFlow < 0 ? 'text-red-600 font-semibold' : 'text-gray-300'}>
-                          {fmt(row.cashFlow)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
                         {row.totalSurplus != null
                           ? <span className={clsSurplus(row.totalSurplus)}>{fmt(row.totalSurplus)}</span>
                           : <span className="text-gray-300">—</span>}
@@ -1160,7 +1154,6 @@ export function ShareAnalytics() {
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cumSurplus)}>{fmt(totals.cumSurplus)}</span></td>
                   <td className="px-4 py-3 text-right font-mono text-blue-600">{fmt(totals.marketValue)}</td>
                   <td className="px-4 py-3 text-right font-mono text-indigo-600">{fmt(totals.mvAfterFees)}</td>
-                  <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.cashFlow)}>{fmt(totals.cashFlow)}</span></td>
                   <td className="px-4 py-3 text-right font-mono"><span className={clsSurplus(totals.totalSurplus)}>{fmt(totals.totalSurplus)}</span></td>
                   <td />
                 </tr>
