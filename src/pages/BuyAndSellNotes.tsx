@@ -16,7 +16,8 @@ import { supabase } from "../lib/supabase";
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
 import { DateField, DateRangeField } from '../components/DateField';
-import { matchBrokerByName } from '../lib/brokerMatch';
+import { matchBrokerByName, matchBrokerOnPage } from '../lib/brokerMatch';
+import { matchNoteTransaction, matchShareByTicker, noteBroker, printedTradeDate } from '../lib/contractNote';
 import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
@@ -337,7 +338,6 @@ export function BuyAndSellNotes() {
   });
   const [formData, setFormData] = useState({
     transaction_id: "",
-    broker_id: "",
     dealer_name: "",
     entity_account_number: "",
     settlement_date: "",
@@ -1678,7 +1678,7 @@ export function BuyAndSellNotes() {
       ) {
         colX.amount = rx;
       }
-      else if (s === "settlement") colX.settlement = rx;
+      else if (s === "settlement" || s === "settlement date") colX.settlement = rx;
     }
 
     // Build Voronoi column boundaries sorted by X position.
@@ -1806,11 +1806,13 @@ export function BuyAndSellNotes() {
         rawText.match(
           /Transaction\s*Date\s*[:\s]*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
         )?.[1];
-      const trade_date = txnDateRaw
-        ? txnDateRaw.match(/^\d{2}\//)
-          ? dmyToIso(txnDateRaw)
-          : toIso(txnDateRaw)
-        : "";
+      const trade_date =
+        printedTradeDate(rows.map((r) => r.map((c) => c.str).join(" "))) ||
+        (txnDateRaw
+          ? txnDateRaw.match(/^\d{2}\//)
+            ? dmyToIso(txnDateRaw)
+            : toIso(txnDateRaw)
+          : "");
 
       // Settlement: take the first settlement date from the data rows (per-row in this format)
       const firstSettlement = extractedRows?.[0]?._settlement_date || "";
@@ -1886,8 +1888,9 @@ export function BuyAndSellNotes() {
     }
 
     // ── Bought/Sold Note format ────────────────────────────────────────────
+    // The account has a digit: "Account No Name & Address of…" is a heading, not "Name".
     let accountMatch = rawText.match(
-      /Account\s*No\.?\s*([A-Z0-9][A-Z0-9\-\/]+)/i,
+      /Account\s*No\.?\s*((?=[A-Z0-9/-]*\d)[A-Z0-9][A-Z0-9\-\/]+)/i,
     );
     let txnDateMatch = rawText.match(
       /Transaction\s*Date\s*(\d{4}[\/\-]\d{2}[\/\-]\d{2})/i,
@@ -2116,46 +2119,29 @@ export function BuyAndSellNotes() {
 
       const header = extractHeader(rawText, grouped, rows, template);
 
-      const noteType = (header.note_type || "").toLowerCase();
-      const typeOk = (t: Transaction) =>
-        !noteType || t.transaction_type?.toLowerCase() === noteType;
-
-      // Group rows by security ticker and sum their quantities
-      const securityTotals: Record<string, number> = {};
-      for (const row of rows) {
-        const ticker = row.security.split(".")[0].toUpperCase();
-        securityTotals[ticker] = (securityTotals[ticker] || 0) + row.qty;
-      }
-
-      // Try to auto-map to a single transaction using total qty per security
-      let bestCandidate: Transaction | undefined;
-      let bestCandidateScore = Number.NEGATIVE_INFINITY;
-      for (const [ticker, totalQty] of Object.entries(securityTotals)) {
-        const share = shares.find((s) => s.ticker?.toUpperCase() === ticker);
-        // Only auto-map when we can confirm the share exists in the system
-        if (!share) continue;
-        const shareOk = (t: Transaction) => t.share_id === share.id;
-        const candidates = transactions.filter((t) => shareOk(t) && typeOk(t));
-
-        for (const candidate of candidates) {
-          const txnShares = Number(candidate.no_of_shares) || 0;
-          const qtyBonus = Math.abs(txnShares - totalQty) < 0.01 ? 40 : 0;
-          const totalScore = scoreRowsAgainstTransaction(rows, candidate) + qtyBonus;
-          if (totalScore > bestCandidateScore) {
-            bestCandidateScore = totalScore;
-            bestCandidate = candidate;
-          }
-        }
-      }
-
-      if (bestCandidate && bestCandidate.id !== selectedTxn?.id) {
-        rows = repairParsedRows(rows, inferredNoteType, bestCandidate);
-      }
-
       // Backfill security ticker into Trade Confirmation rows (it's in the doc header, not per-row)
       if (header.security || securityHint) {
         const sec = header.security || securityHint;
         rows = rows.map((r) => (r.security ? r : { ...r, security: sec }));
+      }
+
+      const noteShareIds = new Set(rows.map((r) => matchShareByTicker(r.security, shares)?.id ?? null));
+      const noteShareId = noteShareIds.size === 1 ? [...noteShareIds][0] : null;
+      const matchedTxn = noteShareId
+        ? matchNoteTransaction(
+            {
+              shareId: noteShareId,
+              type: header.note_type,
+              quantity: rows.reduce((s, r) => s + r.qty, 0),
+              tradeDate: header.trade_date || null,
+              account: header.account_no || null,
+            },
+            transactions,
+          )
+        : null;
+
+      if (matchedTxn && matchedTxn.id !== selectedTxn?.id) {
+        rows = repairParsedRows(rows, inferredNoteType, matchedTxn);
       }
 
       const sum = (fn: (r: ExtractedRow) => number) =>
@@ -2188,7 +2174,9 @@ export function BuyAndSellNotes() {
         settlement: header.settlement || "",
         foreign_brokerage: totalForeign.toFixed(2),
         account_no: header.account_no,
-        broker_name: header.broker_name,
+        broker_name: matchBrokerByName(header.broker_name, brokers)
+          ? header.broker_name
+          : matchBrokerOnPage(items.map((i) => i.str), brokers)?.line ?? header.broker_name,
         broker_address: header.broker_address,
         buyer_name: header.buyer_name,
         buyer_address: header.buyer_address,
@@ -2200,13 +2188,9 @@ export function BuyAndSellNotes() {
       setExtractedRows(rows);
       setExtractedData(extracted);
 
-      // The matched transaction's broker, else the one the PDF names unambiguously.
-      const resolvedBrokerId = bestCandidate?.broker_id || matchBrokerByName(extracted.broker_name, brokers)?.id || null;
-
       setFormData((prev) => ({
         ...prev,
-        ...(bestCandidate?.id ? { transaction_id: bestCandidate.id } : {}),
-        ...(resolvedBrokerId ? { broker_id: resolvedBrokerId } : {}),
+        ...(matchedTxn ? { transaction_id: matchedTxn.id } : {}),
         settlement_date: extracted.settlement,
       }));
     } catch (err) {
@@ -2622,6 +2606,12 @@ export function BuyAndSellNotes() {
     }
   }
 
+  /** The broker the uploaded note is saved under, and whether its transaction is booked with another. */
+  function uploadNoteBroker() {
+    const txn = transactions.find((t) => t.id === formData.transaction_id);
+    return noteBroker(matchBrokerByName(extractedData.broker_name, brokers)?.id, txn?.broker_id);
+  }
+
   function buildNotePayload(
     noteType: "Buy" | "Sell",
     status: string,
@@ -2634,7 +2624,8 @@ export function BuyAndSellNotes() {
     const avgPrice = totalShares > 0 ? totalGross / totalShares : 0;
     const contractNo =
       extractedRows[0]?.contract_no || extractedData.contract_no || "";
-    const selectedBroker = brokers.find((b) => b.id === formData.broker_id);
+    const { brokerId } = uploadNoteBroker();
+    const selectedBroker = brokers.find((b) => b.id === brokerId);
     const brokerName =
       selectedBroker?.broker_name || extractedData.broker_name || "";
     return {
@@ -2643,7 +2634,7 @@ export function BuyAndSellNotes() {
         note_type: noteType,
         note_number: contractNo || "N/A",
         broker: brokerName,
-        broker_id: formData.broker_id || null,
+        broker_id: brokerId,
         dealer_name: formData.dealer_name || null,
         transaction_date: extractedData.settlement || null,
         settlement_date: extractedData.settlement || null,
@@ -3371,7 +3362,6 @@ export function BuyAndSellNotes() {
     handleCloseProcessModal();
     setFormData({
       transaction_id: "",
-      broker_id: "",
       dealer_name: "",
       entity_account_number: "",
       settlement_date: new Date().toISOString().split("T")[0],
@@ -3958,7 +3948,6 @@ export function BuyAndSellNotes() {
                                       setFormData({
                                         ...formData,
                                         transaction_id: t.id,
-                                        broker_id: t.broker_id || "",
                                       });
                                       setTxnDropdownOpen(false);
                                       setTxnSearchTerm("");
@@ -4007,15 +3996,19 @@ export function BuyAndSellNotes() {
                 const selEntity = entities.find(
                   (e) => e.id === selTxn.entity_id,
                 );
-                const selBroker = formData.broker_id
-                  ? brokers.find((b) => b.id === formData.broker_id)
+                const { brokerId, differs } = uploadNoteBroker();
+                const selBroker = brokerId
+                  ? brokers.find((b) => b.id === brokerId)
+                  : null;
+                const txnBroker = differs
+                  ? brokers.find((b) => b.id === selTxn.broker_id)
                   : null;
                 const selEb =
-                  selEntity && formData.broker_id
+                  selEntity && brokerId
                     ? entityBrokers.find(
                         (eb) =>
                           eb.entity_id === selEntity.id &&
-                          eb.broker_id === formData.broker_id,
+                          eb.broker_id === brokerId,
                       )
                     : null;
                 const entityBank = selEntity
@@ -4075,6 +4068,12 @@ export function BuyAndSellNotes() {
                               <span className="font-mono">
                                 {selEb.custodian_account_number}
                               </span>
+                            </p>
+                          )}
+                          {txnBroker && (
+                            <p className="mt-2 flex items-start gap-1 rounded bg-amber-50 px-2 py-1 font-medium text-amber-800">
+                              <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" />
+                              The transaction is with {txnBroker.broker_name}. Check this note&apos;s broker.
                             </p>
                           )}
                         </div>

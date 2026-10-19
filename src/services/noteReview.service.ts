@@ -2,6 +2,7 @@
 
 import * as entityBrokersRepo from '../repositories/entityBrokers.repo';
 import * as transactionsRepo from '../repositories/transactions.repo';
+import { accountKey } from '../lib/contractNote';
 
 export type NoteReviewTransaction = transactionsRepo.NoteReviewTransactionRow;
 export type EntityAccount = entityBrokersRepo.EntityAccountRow;
@@ -13,9 +14,6 @@ export function loadNoteReviewTransactions(): Promise<NoteReviewTransaction[]> {
 export function loadEntityAccounts(): Promise<EntityAccount[]> {
   return entityBrokersRepo.listAccounts();
 }
-
-/** Account numbers compared without spacing or hyphens: "SBL - 4328 -LC/00" is "SBL-4328-LC/00". */
-const accountKey = (n: string) => n.replace(/[\s-]/g, '').toUpperCase();
 
 export interface NoteParties {
   /** The CDS account the trade was booked to. */
