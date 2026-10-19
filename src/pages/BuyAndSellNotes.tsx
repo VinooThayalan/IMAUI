@@ -19,6 +19,7 @@ import { DateField, DateRangeField } from '../components/DateField';
 import { matchBrokerByName, matchBrokerOnPage } from '../lib/brokerMatch';
 import { matchNoteTransaction, matchShareByTicker, noteBroker, printedTradeDate } from '../lib/contractNote';
 import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
+import { formatDisplayDate } from '../lib/dateInput';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
   GlobalWorkerOptions: { workerSrc: string };
@@ -344,7 +345,6 @@ export function BuyAndSellNotes() {
     remarks: "",
   });
   const [validationIssues, setValidationIssues] = useState<string[]>([]);
-  const [parserTrace, setParserTrace] = useState<string>("");
 
   useEffect(() => {
     loadData();
@@ -2022,7 +2022,6 @@ export function BuyAndSellNotes() {
         );
         setExtractedRows([]);
         setDebugRawText(rawText);
-        setParserTrace("");
         alert(
           "PDF format not matching. Please upload a PDF that matches one of the 4 supported broker templates:\n" +
             "1) Bought Note (Custodian Account)\n" +
@@ -2101,9 +2100,7 @@ export function BuyAndSellNotes() {
 
       rows = repairParsedRows(rows, inferredNoteType, selectedTxn);
 
-      const parserTraceText = parserLog.join(" | ");
-      setParserTrace(parserTraceText);
-      parserDebug(parserTraceText);
+      parserDebug(parserLog.join(" | "));
 
       if (rows.length === 0) {
         if (import.meta.env.DEV) console.warn("PDF raw text (no rows parsed):", rawText);
@@ -2111,7 +2108,6 @@ export function BuyAndSellNotes() {
           "Could not detect valid transaction rows from this PDF. Please try another note format or map manually.",
         );
         setDebugRawText(rawText);
-        setParserTrace("");
         setExtractedRows([]);
         return;
       }
@@ -3625,9 +3621,7 @@ export function BuyAndSellNotes() {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                        {note.trade_date
-                          ? new Date(note.trade_date).toLocaleDateString()
-                          : "-"}
+                        {formatDisplayDate(note.trade_date) || "—"}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right tabular-nums">
                         {note.no_of_shares?.toLocaleString() || "-"}
@@ -3643,9 +3637,7 @@ export function BuyAndSellNotes() {
                           : "-"}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                        {note.settlement_date
-                          ? new Date(note.settlement_date).toLocaleDateString()
-                          : "-"}
+                        {formatDisplayDate(note.settlement_date) || "—"}
                       </td>
                       <td
                         className="px-4 py-3 whitespace-nowrap"
@@ -3971,9 +3963,7 @@ export function BuyAndSellNotes() {
                                     </span>
                                     {t.transaction_date && (
                                       <span className="text-gray-400 flex-shrink-0">
-                                        {new Date(
-                                          t.transaction_date,
-                                        ).toLocaleDateString()}
+                                        {formatDisplayDate(t.transaction_date)}
                                       </span>
                                     )}
                                   </button>
@@ -4705,19 +4695,8 @@ export function BuyAndSellNotes() {
                       (c) => !c.matches,
                     );
                     const parserMismatchIssue = hasParserMismatchIssue();
-                    const hasParserTrace = parserTrace.trim().length > 0;
                     return (
                       <div className="pt-4 border-t border-gray-200 space-y-3">
-                        {hasParserTrace && (
-                          <details className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-xs text-slate-700">
-                            <summary className="cursor-pointer font-semibold text-slate-800">
-                              Parser trace
-                            </summary>
-                            <p className="mt-2 font-mono whitespace-pre-wrap leading-5">
-                              {parserTrace}
-                            </p>
-                          </details>
-                        )}
                         {parserMismatchIssue && (
                           <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
                             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-red-600" />
