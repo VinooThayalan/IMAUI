@@ -45,34 +45,31 @@ export function tradeDatesFor(
   return index.get(row.reference_id) ?? NO_TRADE_DATES;
 }
 
+/** The contract note a posted entry settles, or null. A dividend's entry references the dividend. */
+export function noteIdFor(
+  row: { reference_id?: string | null },
+  index: Map<string, TradeDates>,
+): string | null {
+  return row.reference_id && index.has(row.reference_id) ? row.reference_id : null;
+}
+
 /**
- * The balance a new entry will build on.
+ * The entity's balance, and the one a new entry builds on: its entries' signed
+ * amounts, summed. Zero for an entity with none.
  *
- * `running_balance` is a stored cumulative figure **per entity**, not per bank
- * account: the one ledger row against account 1416173401 carries the whole
- * entity's balance, and `banks.balance` is 0 for every account because nothing
- * maintains it. So an account has no running balance of its own, and the number
- * a new entry continues from is the entity's.
- *
- * Ordered by `timestamp`, not `date`. The stored figure accumulates in the order
- * rows were written, so insertion time is what identifies the latest one — a
- * back-dated entry still continues from the balance as it stood when it was
- * entered.
- *
- * Extracted because the submit path and the form both need it. They each had
- * their own copy, which is two chances for the figure shown to differ from the
- * figure saved.
+ * Not the stored `running_balance` of its latest entry. That column is written
+ * from the entry before it, so one broken restatement carries into every entry
+ * after; nothing reads it as a balance.
  */
 export function entityRunningBalance(
-  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  rows: Array<{ entity_id?: string | null; type: string; amount: number }>,
   entityId: string,
 ): number {
-  let latest: { timestamp: string; running_balance: number } | null = null;
+  let total = 0;
   for (const r of rows) {
-    if (r.entity_id !== entityId) continue;
-    if (!latest || r.timestamp > latest.timestamp) latest = r;
+    if (r.entity_id === entityId) total += signedAmount(r);
   }
-  return latest ? latest.running_balance : 0;
+  return Math.round(total * 100) / 100;
 }
 
 /**
@@ -173,11 +170,10 @@ function hasLedgerEntry(
 /**
  * An entity's balance for display, or null when it has no entries.
  *
- * Delegates to `entityRunningBalance` rather than picking the latest row again,
- * so there is still one rule for which row the balance comes from.
+ * Delegates to `entityRunningBalance`, so there is one rule for an entity's balance.
  */
 export function entityBalance(
-  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  rows: Array<{ entity_id?: string | null; type: string; amount: number }>,
   entityId: string,
 ): number | null {
   return hasLedgerEntry(rows, entityId) ? entityRunningBalance(rows, entityId) : null;
@@ -222,11 +218,8 @@ export interface CashPosition {
  *
  * `entities.current_balance` is a denormalised copy, written alongside each new
  * ledger row, and it drifts: for ENT004 it holds 1,000,000,000.00 against a
- * ledger that adds to 999,140,480.00 — 859,520 out. The ledger itself is
- * internally consistent, and by a check worth stating: summing every row's signed
- * amount reproduces the latest stored `running_balance` exactly, for every entity,
- * to the cent. It is also what each new entry is computed from. So the ledger
- * decides and the cached column is not read here.
+ * ledger that adds to 999,140,480.00 — 859,520 out. So the ledger decides, as
+ * the sum of the entity's entries, and the cached column is not read here.
  *
  * Available credit is deliberately entity-level. Facility limits belong to
  * accounts and are summed, but balances do not exist per account at all —
@@ -236,7 +229,7 @@ export interface CashPosition {
  * here should be read as answering it.
  */
 export function entityCashPosition(
-  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  rows: Array<{ entity_id?: string | null; type: string; amount: number }>,
   accounts: AccountFacility[],
   entityId: string,
   onHold: number,
@@ -506,9 +499,9 @@ export interface PendingEntryPosition {
  * disagrees with what gets written is worse than no preview, so there is now one
  * of these and everything reads it.
  *
- * Entity grain throughout, and deliberately: `running_balance` is what a new
- * entry continues from and it accumulates per entity, so this is the balance the
- * row will actually store. The facility limit prefers the selected account's own
+ * Entity grain throughout, and deliberately: a new entry continues from the
+ * entity's balance, so this is the balance the row will actually store. The
+ * facility limit prefers the selected account's own
  * — the reading the deduction guard already used — because a limit is the one
  * thing here that genuinely belongs to an account.
  *
@@ -517,7 +510,7 @@ export interface PendingEntryPosition {
  * reading — see `entityBalance` for the one a cell may show.
  */
 export function pendingEntryPosition(
-  rows: Array<{ entity_id?: string | null; timestamp: string; running_balance: number }>,
+  rows: Array<{ entity_id?: string | null; type: string; amount: number }>,
   accounts: AccountFacility[],
   entityId: string,
   bankId: string,

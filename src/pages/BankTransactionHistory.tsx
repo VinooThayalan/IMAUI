@@ -4,12 +4,8 @@ import { supabase } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import * as banksRepo from '../repositories/banks.repo';
 import * as entitiesRepo from '../repositories/entities.repo';
-import {
-  indexNoteDates,
-  tradeDatesFor,
-  accountRunningBalances,
-  accountBalance,
-} from '../services/cashLedger.service';
+import { accountBalance } from '../services/cashLedger.service';
+import { useAccountLedger, type AccountLedgerEntry } from '../hooks/useAccountLedger';
 import { exportData, type ExportColumn } from '../lib/exportData';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
@@ -34,19 +30,7 @@ interface Bank {
   current_balance: number | null;
 }
 
-interface LedgerEntry {
-  id: string;
-  date: string | null;
-  type: string;
-  description: string | null;
-  code: string | null;
-  amount: number;
-  running_balance: number;
-  reference_id: string | null;
-  /** From the contract note this entry settles. Null for a manual entry. */
-  tradeDate: string | null;
-  settlementDate: string | null;
-}
+type LedgerEntry = AccountLedgerEntry;
 
 interface BuyAndSellNote {
   id: string;
@@ -214,8 +198,7 @@ export function BankTransactionHistory() {
   const [loading, setLoading]                 = useState(false);
   const [banks, setBanks]                     = useState<Bank[]>([]);
   const [expandedBankId, setExpandedBankId]   = useState<string | null>(null);
-  const [ledger, setLedger]                   = useState<LedgerEntry[]>([]);
-  const [ledgerLoading, setLedgerLoading]     = useState(false);
+  const { entries: ledger, loading: ledgerLoading } = useAccountLedger(expandedBankId);
   const [sortAsc, setSortAsc]                 = useState(true);
   const [periodFrom, setPeriodFrom]           = useState('');
   const [periodTo, setPeriodTo]               = useState('');
@@ -233,7 +216,6 @@ export function BankTransactionHistory() {
   useEffect(() => {
     loadBanks();
     setExpandedBankId(null);
-    setLedger([]);
   }, [selectedEntityId]);
 
   async function loadBanks() {
@@ -275,61 +257,6 @@ export function BankTransactionHistory() {
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadLedger(bankId: string) {
-    setLedgerLoading(true);
-    try {
-      // Only this bank's own entries. This used to also pull the entity's
-      // entries with bank_id IS NULL, which meant a manual ledger entry saved
-      // without a bank appeared under *every* bank belonging to that entity —
-      // and was counted into each one's transaction count and net movement, so
-      // an entity with three banks triple-counted it. Entries with no bank
-      // remain visible on the Cash Balance screen, which shows them whenever no
-      // bank filter is applied.
-      //
-      // Read and date resolution are shared with the Cash Balance ledger, which
-      // needed the same two columns: same repository, same rule about where a
-      // trade date may come from. The select here was also unpaged.
-      const [bankRows, noteDateRows] = await Promise.all([
-        cashLedgerRepo.listByBank(bankId),
-        cashLedgerRepo.listNoteDates(),
-      ]);
-      const noteDates = indexNoteDates(noteDateRows);
-
-      // Sorted and accumulated in one place. The page sorted on `date` alone —
-      // which ties, so same-day entries fell in an arbitrary order — and then
-      // printed the stored `running_balance`, which accumulates per entity in
-      // write order. Two different orders and two different grains in one table,
-      // so the balance column could not be reconciled against the amount beside
-      // it: a credit of +5,841,004.33 sat next to -426,197,711.24.
-      const series = accountRunningBalances(
-        bankRows.map(r => ({ ...r, amount: Number(r.amount) || 0 })),
-        bankId,
-      );
-
-      setLedger(
-        series.map(({ row: r, balance }) => {
-          const dates = tradeDatesFor(r, noteDates);
-          return {
-            id: r.id,
-            date: r.date,
-            type: r.type,
-            description: r.description,
-            code: r.code,
-            amount: Number(r.amount) || 0,
-            running_balance: balance,
-            reference_id: r.reference_id || null,
-            tradeDate: dates.tradeDate,
-            settlementDate: dates.settlementDate,
-          };
-        })
-      );
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLedgerLoading(false);
     }
   }
 
@@ -386,13 +313,7 @@ export function BankTransactionHistory() {
   }
 
   function toggleBank(bankId: string) {
-    if (expandedBankId === bankId) {
-      setExpandedBankId(null);
-      setLedger([]);
-    } else {
-      setExpandedBankId(bankId);
-      loadLedger(bankId);
-    }
+    setExpandedBankId(expandedBankId === bankId ? null : bankId);
   }
 
   const filtered = banks.filter(b => {
@@ -695,7 +616,7 @@ export function BankTransactionHistory() {
                                     <tbody>
                                       {sortedLedger.map((entry, i) => {
                                         const isAdd = entry.type === 'Addition' || entry.type === 'addition';
-                                        const isLoadingThis = noteLoading === entry.reference_id;
+                                        const isLoadingThis = noteLoading === entry.noteId;
                                         return (
                                           <tr
                                             key={entry.id}
@@ -729,9 +650,9 @@ export function BankTransactionHistory() {
                                               </span>
                                             </td>
                                             <td className="px-3 py-2 text-center">
-                                              {entry.reference_id ? (
+                                              {entry.noteId ? (
                                                 <button
-                                                  onClick={e => handleViewNote(entry.reference_id!, e)}
+                                                  onClick={e => handleViewNote(entry.noteId!, e)}
                                                   disabled={isLoadingThis}
                                                   className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
                                                 >

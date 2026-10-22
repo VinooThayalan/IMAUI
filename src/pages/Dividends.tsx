@@ -1,8 +1,8 @@
 import { Plus, Search, Wallet, TrendingUp, Calendar, Clock, Pencil, Trash2, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { writeErrorMessage } from '../lib/errorMessage';
+import { useDividendWrites } from '../hooks/useDividendWrites';
 import { DateField } from '../components/DateField';
 import { LoadingState } from '../components/Loading';
 
@@ -79,7 +79,7 @@ const EMPTY_FORM = {
 };
 
 export function Dividends() {
-  const { user } = useAuth();
+  const { save, remove } = useDividendWrites();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -182,37 +182,6 @@ export function Dividends() {
     setFormData({ ...EMPTY_FORM });
   }
 
-  async function updateCashLedgerOnFinalize(entityId: string, amountNet: number, ticker: string, performedBy: string) {
-    const { data: ledgerRows } = await supabase
-      .from('cash_balance_ledger')
-      .select('running_balance')
-      .eq('entity_id', entityId)
-      .order('timestamp', { ascending: false })
-      .limit(1);
-
-    const lastBalance = ledgerRows && ledgerRows.length > 0 ? Number(ledgerRows[0].running_balance) : 0;
-    const newBalance = lastBalance + amountNet;
-
-    const { error: ledgerError } = await supabase.from('cash_balance_ledger').insert({
-      type: 'Addition',
-      description: `Dividend — ${ticker}`,
-      amount: amountNet,
-      date: new Date().toISOString().split('T')[0],
-      running_balance: newBalance,
-      on_hold_amount: 0,
-      source: 'Dividend',
-      entity_id: entityId,
-      created_by: performedBy,
-    });
-
-    if (ledgerError) {
-      console.error('Failed to write cash ledger entry:', ledgerError);
-      return;
-    }
-
-    await supabase.from('entities').update({ current_balance: newBalance }).eq('id', entityId);
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     try {
@@ -259,51 +228,41 @@ export function Dividends() {
         status: formData.status,
       };
 
-      const performedBy = user?.email || 'system';
-      const ticker = getShareTicker(formData.share_id);
-      const becomingFinalized = formData.status === 'Finalized';
-
-      if (editingId) {
-        const oldRecord = await fetchRecordForAudit('dividends', editingId);
-        const wasFinalized = oldRecord?.status === 'Finalized';
-        const { error } = await supabase.from('dividends').update(payload).eq('id', editingId);
-        if (error) throw error;
-        logAudit({ tableName: 'dividends', recordId: editingId, action: 'UPDATE', performedBy, oldValues: oldRecord, newValues: { ...oldRecord, ...payload }, entityId: payload.entity_id });
-
-        // Only write cashflow when transitioning into Finalized (not already there)
-        if (!wasFinalized && becomingFinalized) {
-          await updateCashLedgerOnFinalize(payload.entity_id, payload.amount_net, ticker, performedBy);
-        }
-      } else {
-        const { data: inserted, error } = await supabase.from('dividends').insert(payload).select('id').maybeSingle();
-        if (error) throw error;
-        logAudit({ tableName: 'dividends', recordId: inserted?.id || 'new', action: 'CREATE', performedBy, newValues: payload, entityId: payload.entity_id });
-
-        if (becomingFinalized) {
-          await updateCashLedgerOnFinalize(payload.entity_id, payload.amount_net, ticker, performedBy);
-        }
+      const result = await save({
+        id: editingId,
+        values: payload,
+        ticker: getShareTicker(formData.share_id),
+        bankId: selectedBank?.id ?? null,
+      });
+      if (!result.saved) {
+        alert(result.problem);
+        return;
+      }
+      if (result.cashError) {
+        alert(`The dividend was saved, but Cash Balance was not updated: ${result.cashError}`);
       }
 
       closeModal();
       loadData();
     } catch (error) {
       console.error('Error saving dividend:', error);
-      alert('Failed to save dividend');
+      alert(writeErrorMessage(error, 'save the dividend'));
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Are you sure you want to delete this dividend record?')) return;
-    setDeletingId(id);
+  async function handleDelete(d: Dividend) {
+    const cashNote = d.status === 'Finalized'
+      ? ` Its ${fmtRs(d.amount_net || 0)} will be removed from Cash Balance.`
+      : '';
+    if (!confirm(`Are you sure you want to delete this dividend record?${cashNote}`)) return;
+    setDeletingId(d.id);
     try {
-      const oldRecord = await fetchRecordForAudit('dividends', id);
-      const { error } = await supabase.from('dividends').delete().eq('id', id);
-      if (error) throw error;
-      logAudit({ tableName: 'dividends', recordId: id, action: 'DELETE', performedBy: user?.email || 'system', oldValues: oldRecord, entityId: oldRecord?.entity_id });
+      const { cashError } = await remove(d.id);
+      if (cashError) alert(`The dividend was deleted, but Cash Balance was not updated: ${cashError}`);
       loadData();
     } catch (error) {
       console.error('Error deleting dividend:', error);
-      alert('Failed to delete dividend');
+      alert(writeErrorMessage(error, 'delete the dividend'));
     } finally {
       setDeletingId(null);
     }
@@ -544,7 +503,7 @@ export function Dividends() {
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDelete(d.id)}
+                        onClick={() => handleDelete(d)}
                         disabled={deletingId === d.id}
                         className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                         title="Delete"
@@ -873,7 +832,7 @@ export function Dividends() {
                       <option value="Finalized">Finalized</option>
                     </select>
                     <p className="text-xs text-gray-400 mt-1">
-                      Setting to <strong>Finalized</strong> adds the net amount to Cash Balance
+                      <strong>Finalized</strong> adds the net amount to Cash Balance on the payment date; moving it back removes it
                     </p>
                   </div>
                 </div>

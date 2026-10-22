@@ -87,6 +87,12 @@ export async function insertEntity(row: EntityInsert): Promise<void> {
   if (error) throw error;
 }
 
+/** The denormalised copy of the entity's ledger balance, kept beside each new entry. */
+export async function setCurrentBalance(entityId: string, balance: number): Promise<void> {
+  const { error } = await supabase.from('entities').update({ current_balance: balance }).eq('id', entityId);
+  if (error) throw error;
+}
+
 /** Grant one user access to one entity. Admin-only at the database. */
 export async function grantEntityAccess(userId: string, entityId: string): Promise<{ ok: boolean }> {
   const { error } = await supabase
