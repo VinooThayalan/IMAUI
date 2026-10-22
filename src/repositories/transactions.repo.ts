@@ -70,3 +70,15 @@ export async function listForNoteReview(): Promise<NoteReviewTransactionRow[]> {
   );
   return rows as unknown as NoteReviewTransactionRow[];
 }
+
+/** One transaction as stored, every column. */
+export async function getById(id: string): Promise<Record<string, unknown> & { id: string; bank_id: string | null } | null> {
+  const { data, error } = await supabase.from('transactions').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function remove(id: string): Promise<void> {
+  const { error } = await supabase.from('transactions').delete().eq('id', id);
+  if (error) throw error;
+}

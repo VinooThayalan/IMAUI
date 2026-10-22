@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWriteError } from '../hooks/useWriteError';
 import { useEntityAccounts } from '../hooks/useEntityAccounts';
+import { useEntityCashBalances } from '../hooks/useEntityCashBalances';
 import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
 import { createEntity } from '../services/entities.service';
 import { Spinner } from '../components/Loading';
@@ -85,6 +86,7 @@ interface EntityBroker {
 
 export function Entities() {
   const { user, refreshPermissions } = useAuth();
+  const cash = useEntityCashBalances();
   const reportWriteError = useWriteError();
   const entityAccounts = useEntityAccounts();
   const [showModal, setShowModal] = useState(false);
@@ -1337,7 +1339,14 @@ export function Entities() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Current Balance</label>
-                  <p className="text-gray-900">Rs. {selectedEntity.current_balance?.toLocaleString() || '0.00'}</p>
+                  <p className="text-gray-900">
+                    {(() => {
+                      const balance = cash.balanceOf(selectedEntity.id);
+                      if (balance === undefined) return cash.error ? '—' : <Spinner size="sm" />;
+                      if (balance === null) return <span className="text-gray-400" title="No Cash Balance entries for this entity">—</span>;
+                      return `Rs. ${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    })()}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-500 mb-1">Status</label>

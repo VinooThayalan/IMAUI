@@ -10,6 +10,7 @@ import { EmailRecipientsField, type RecipientOption } from '../components/EmailR
 import { DateField, DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useHolding } from '../hooks/useHolding';
+import { useEntityCashBalances } from '../hooks/useEntityCashBalances';
 import { useTransactionVolume } from '../hooks/useTransactionVolume';
 import { useEmailDelivery, useTransactionEmail } from '../hooks/useTransactionEmail';
 import { useTransactionPrint } from '../hooks/useTransactionPrint';
@@ -74,7 +75,6 @@ interface Transaction {
 interface Entity {
   id: string;
   name: string;
-  current_balance: number;
   contact_email_company_individual: string | null;
   cc_email: string | null;
   cc_email_2: string | null;
@@ -232,6 +232,7 @@ export function Transactions() {
   // Analytics reads. This page used to add up `transactions` itself, cancelled
   // and expired ones included (bug-51).
   const holding = useHolding(formData.entity_id, formData.share_id);
+  const cash = useEntityCashBalances();
 
   // The confirmation email: one builder for the preview and the send, shared
   // with Transaction Approvals (bug-52).
@@ -330,7 +331,7 @@ export function Transactions() {
 
       const [transactionsRes, entitiesRes, sharesRes, banksRes, brokersRes, brokerageRes, entityBrokersRes, ledgerRes] = await Promise.all([
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
-        supabase.from('entities').select('id, name, current_balance, contact_email_company_individual, cc_email, cc_email_2, cc_email_3').order('name'),
+        supabase.from('entities').select('id, name, contact_email_company_individual, cc_email, cc_email_2, cc_email_3').order('name'),
         supabase.from('shares').select('id, share_name, ticker').order('share_name'),
         supabase.from('banks').select('id, name, account_number, balance, entity_id, facility_limit').order('name'),
         supabase.from('brokers').select('id, broker_name, contact_person_email').order('broker_name'),
@@ -512,8 +513,9 @@ export function Transactions() {
     return entities.find(e => e.id === entityId)?.name || 'Unknown';
   }
 
+  /** The entity's cash from the ledger; nothing to spend when it has no entries. */
   function getEntityBalance(entityId: string) {
-    return entities.find(e => e.id === entityId)?.current_balance || 0;
+    return cash.balanceOf(entityId) ?? 0;
   }
 
   function getBalanceColor(balance: number, requiredAmount: number) {
@@ -599,11 +601,16 @@ export function Transactions() {
     }
 
     if (formData.transaction_type === 'BUY') {
-      const entity = entities.find(e => e.id === formData.entity_id);
       const totalRequired = calculateTotalAmountNet ? calculateTotalAmountNet() : 0;
-      if (entity && totalRequired > 0 && entity.current_balance < totalRequired) {
-        alert('Insufficient funds to create the transaction.');
-        return;
+      if (totalRequired > 0) {
+        if (!cash.loaded) {
+          alert('Cash balances are still loading. Try again in a moment.');
+          return;
+        }
+        if (getEntityBalance(formData.entity_id) < totalRequired) {
+          alert('Insufficient funds to create the transaction.');
+          return;
+        }
       }
     }
 
@@ -1870,7 +1877,7 @@ export function Transactions() {
                         entityBalance >= requiredAmount ? 'bg-yellow-50 border-yellow-300' :
                         'bg-red-50 border-red-300'
                       }`}>
-                        <p className="font-semibold text-gray-600">Available Balance</p>
+                        <p className="font-semibold text-gray-600">Cash Balance</p>
                         <p className={`font-bold text-base ${getBalanceColor(entityBalance, requiredAmount)}`}>LKR {entityBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                         <p className="text-gray-500">Required: LKR {requiredAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                         <p className={`font-semibold ${getBalanceColor(entityBalance, requiredAmount)}`}>{getBalanceStatus(entityBalance, requiredAmount)}</p>

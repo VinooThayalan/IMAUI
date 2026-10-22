@@ -10,7 +10,8 @@ import { CcField } from '../components/EmailRecipientsField';
 import { EmailHeadline } from '../components/EmailHeadline';
 import { LoadingState, Spinner } from '../components/Loading';
 import { useNoteReview, type EntityAccount } from '../hooks/useNoteReview';
-import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
+import { tradeDatesProblem } from '../lib/tradeDates';
+import { useContractNoteCash } from '../hooks/useContractNoteCash';
 
 interface BuyAndSellNote {
   id: string;
@@ -114,6 +115,7 @@ type EmailModalNote = BuyAndSellNote | null;
 
 export function BuyAndSellApprovals() {
   const { user } = useAuth();
+  const { postCash, cashProblem } = useContractNoteCash();
   const [notes, setNotes] = useState<BuyAndSellNote[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -247,7 +249,20 @@ export function BuyAndSellApprovals() {
       alert(`${datesProblem} Correct the note on Buy & Sell Notes before approving it.`);
       return;
     }
-    const ledgerDate = tradeLedgerDate(selectedNote);
+    const noteCash = {
+      noteId: selectedNote.id,
+      transactionId: selectedNote.transaction_id,
+      noteType: selectedNote.note_type,
+      netAmount: Number(selectedNote.net_amount) || 0,
+      settlementDate: selectedNote.settlement_date ?? null,
+      description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
+      code: selectedNote.contract_no || selectedNote.note_number || null,
+    };
+    const cashIssue = cashProblem(noteCash);
+    if (cashIssue) {
+      alert(`${cashIssue} Correct the note on Buy & Sell Notes before approving it.`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const { entity, share, broker } = getDetails(selectedNote);
@@ -296,61 +311,7 @@ export function BuyAndSellApprovals() {
         },
       });
 
-      const totalNet = Number(selectedNote.net_amount) || 0;
-      const transactionType = selectedNote.note_type === 'Buy' ? 'Deduction' : 'Addition';
-
-      const { data: existing } = await supabase
-        .from('cash_balance_ledger')
-        .select('running_balance')
-        .eq('entity_id', entity.id)
-        .order('timestamp', { ascending: false })
-        .limit(1);
-      const lastBalance = existing && existing.length > 0 ? Number(existing[0].running_balance) : 0;
-      const newBalance = transactionType === 'Addition' ? lastBalance + totalNet : lastBalance - totalNet;
-
-      const { data: ledgerData, error: ledgerErr } = await supabase
-        .from('cash_balance_ledger')
-        .insert({
-          type: transactionType,
-          description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
-          code: selectedNote.contract_no || selectedNote.note_number,
-          amount: totalNet,
-          date: ledgerDate,
-          running_balance: newBalance,
-          on_hold_amount: 0,
-          entity_id: entity.id,
-          bank_id: null,
-          reference_id: selectedNote.id,
-          created_by: reviewerName,
-          notes: actionRemarks || null,
-        })
-        .select('id')
-        .maybeSingle();
-      if (ledgerErr) throw ledgerErr;
-
-      // Log CREATE audit for cash_balance_ledger
-      if (ledgerData) {
-        await logAudit({
-        action: 'CREATE',
-          performedBy: user?.email || 'system',
-          tableName: 'cash_balance_ledger',
-          recordId: ledgerData.id,
-          newValues: {
-            type: transactionType,
-            description: `${selectedNote.note_type} - ${selectedNote.contract_no || selectedNote.note_number} (Approved)`,
-            code: selectedNote.contract_no || selectedNote.note_number,
-            amount: totalNet,
-            date: ledgerDate,
-            running_balance: newBalance,
-            on_hold_amount: 0,
-            entity_id: entity.id,
-            bank_id: null,
-            reference_id: selectedNote.id,
-            created_by: reviewerName,
-            notes: actionRemarks || null,
-          },
-        });
-      }
+      await postCash({ ...noteCash, entityId: entity.id, notes: actionRemarks || null }, reviewerName);
 
       const emailResult = REVIEW_EMAIL_ENABLED && sendEmail
         ? await sendReviewNotification({

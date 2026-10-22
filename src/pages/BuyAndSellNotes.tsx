@@ -13,12 +13,13 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { logAudit, fetchRecordForAudit } from '../lib/auditLog';
+import { logAudit } from '../lib/auditLog';
 import { useAuth } from '../contexts/AuthContext';
 import { DateField, DateRangeField } from '../components/DateField';
 import { matchBrokerByName, matchBrokerOnPage } from '../lib/brokerMatch';
 import { matchNoteTransaction, matchShareByTicker, noteBroker, printedTradeDate } from '../lib/contractNote';
-import { tradeDatesProblem, tradeLedgerDate } from '../lib/tradeDates';
+import { tradeDatesProblem } from '../lib/tradeDates';
+import { useContractNoteCash } from '../hooks/useContractNoteCash';
 import { formatDisplayDate } from '../lib/dateInput';
 import { LoadingState, Spinner } from '../components/Loading';
 interface PdfJsLib {
@@ -275,6 +276,7 @@ function emptyManualRow(): ManualRow {
 
 export function BuyAndSellNotes() {
   const { user } = useAuth();
+  const { postCash, saveEdit, removeNote, cashProblem } = useContractNoteCash();
   const [showModal, setShowModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
@@ -2570,6 +2572,11 @@ export function BuyAndSellNotes() {
         !allMatch,
         storagePath,
       );
+      const cashIssue = cashProblem({ netAmount: totalNet, settlementDate: extractedData.settlement });
+      if (cashIssue) {
+        alert(`${cashIssue} Check the figures against the contract note.`);
+        return;
+      }
 
       const { data: insertedNote, error: insertError } = await supabase
         .from("buy_sell_notes")
@@ -2587,51 +2594,18 @@ export function BuyAndSellNotes() {
         performedBy: user?.email || 'system',
       });
 
-      const transactionType = noteType === "Buy" ? "Deduction" : "Addition";
-      const { data: existing } = await supabase
-        .from("cash_balance_ledger")
-        .select("running_balance")
-        .eq("entity_id", entity.id)
-        .order("timestamp", { ascending: false })
-        .limit(1);
-      const lastBalance =
-        existing && existing.length > 0
-          ? Number(existing[0].running_balance)
-          : 0;
-      const newBalance =
-        transactionType === "Addition"
-          ? lastBalance + totalNet
-          : lastBalance - totalNet;
-
-      const ledgerPayload = {
-        type: transactionType,
+      if (!insertedNote?.id) throw new Error("The note was saved but could not be read back, so its cash was not posted.");
+      await postCash({
+        noteId: insertedNote.id,
+        transactionId: selectedTransaction.id,
+        entityId: entity.id,
+        noteType,
+        netAmount: totalNet,
+        settlementDate: extractedData.settlement,
         description: `${selectedTransaction.transaction_type} - ${contractNo}`,
         code: contractNo,
-        amount: totalNet,
-        date: tradeLedgerDate({ settlement_date: extractedData.settlement }),
-        running_balance: newBalance,
-        on_hold_amount: 0,
-        entity_id: entity.id,
-        bank_id: null,
-        reference_id: insertedNote?.id || null,
-        created_by: "System",
         notes: formData.remarks || null,
-      };
-      const { data: insertedLedger, error: ledgerError } = await supabase
-        .from("cash_balance_ledger")
-        .insert(ledgerPayload)
-        .select()
-        .maybeSingle();
-      if (ledgerError) throw ledgerError;
-
-      // Audit log for cash_balance_ledger insert
-      await logAudit({
-        tableName: 'cash_balance_ledger',
-        recordId: insertedLedger?.id,
-        action: 'CREATE',
-        newValues: ledgerPayload,
-        performedBy: user?.email || 'system',
-      });
+      }, "System");
 
       await loadData();
       handleCloseProcessModal();
@@ -2805,7 +2779,8 @@ export function BuyAndSellNotes() {
       return;
     }
     for (const r of validRows) {
-      const datesProblem = tradeDatesProblem(r.trade_date, r.settlement_date);
+      const datesProblem = tradeDatesProblem(r.trade_date, r.settlement_date)
+        ?? cashProblem({ netAmount: parseFloat(r.total_cost) || 0, settlementDate: r.settlement_date });
       if (datesProblem) {
         alert(`Row ${manualRows.indexOf(r) + 1}: ${datesProblem}`);
         return;
@@ -2896,52 +2871,18 @@ export function BuyAndSellNotes() {
           performedBy: user?.email || 'system',
         });
 
-        // Update cash ledger — use entity.id (UUID), not entity.entity_id (code string)
-        const transactionType =
-          row.note_type === "Buy" ? "Deduction" : "Addition";
-        const { data: existing } = await supabase
-          .from("cash_balance_ledger")
-          .select("running_balance")
-          .eq("entity_id", entity.id)
-          .order("timestamp", { ascending: false })
-          .limit(1);
-        const lastBalance =
-          existing && existing.length > 0
-            ? Number(existing[0].running_balance)
-            : 0;
-        const newBalance =
-          transactionType === "Addition"
-            ? lastBalance + totalCost
-            : lastBalance - totalCost;
-
-        const ledgerPayload2 = {
-          type: transactionType,
+        if (!insertedNote?.id) throw new Error("A note was saved but could not be read back, so its cash was not posted.");
+        await postCash({
+          noteId: insertedNote.id,
+          transactionId: insertedTxn?.id ?? null,
+          entityId: entity.id,
+          noteType: row.note_type,
+          netAmount: totalCost,
+          settlementDate: row.settlement_date,
           description: `${row.note_type} - ${shares.find((s) => s.id === row.share_id)?.ticker || ""}`,
-          amount: totalCost,
-          date: tradeLedgerDate(row),
-          running_balance: newBalance,
-          on_hold_amount: 0,
-          entity_id: entity.id,
-          bank_id: null,
-          reference_id: insertedNote?.id || null,
-          created_by: "System",
-        };
-        const { data: insertedLedger2, error: ledgerError } = await supabase
-          .from("cash_balance_ledger")
-          .insert(ledgerPayload2)
-          .select()
-          .maybeSingle();
-
-        if (ledgerError) throw ledgerError;
-
-        // Audit log for cash_balance_ledger insert
-        await logAudit({
-          tableName: 'cash_balance_ledger',
-          recordId: insertedLedger2?.id,
-          action: 'CREATE',
-          newValues: ledgerPayload2,
-          performedBy: user?.email || 'system',
-        });
+          code: null,
+          notes: null,
+        }, "System");
       }
 
       await loadData();
@@ -3000,9 +2941,6 @@ export function BuyAndSellNotes() {
     }
     setIsSavingEdit(true);
     try {
-      // Fetch old record for audit logging
-      const oldRecord = await fetchRecordForAudit('buy_sell_notes', editNote.id);
-
       const updatePayload = {
         note_type: editNote.note_type,
         note_number: editNote.note_number || `NOTE-${Date.now()}`,
@@ -3035,21 +2973,14 @@ export function BuyAndSellNotes() {
             : null,
         remarks: editNote.remarks || null,
       };
-      const { error } = await supabase
-        .from("buy_sell_notes")
-        .update(updatePayload)
-        .eq("id", editNote.id);
-      if (error) throw error;
-
-      // Audit log for buy_sell_notes update
-      await logAudit({
-        tableName: 'buy_sell_notes',
-        recordId: editNote.id,
-        action: 'UPDATE',
-        oldValues: oldRecord,
-        newValues: updatePayload,
-        performedBy: user?.email || 'system',
-      });
+      const result = await saveEdit(editNote.id, updatePayload);
+      if (!result.saved) {
+        alert(result.problem);
+        return;
+      }
+      if (result.cashError) {
+        alert(`The note was saved, but Cash Balance was not updated: ${result.cashError}`);
+      }
 
       await loadData();
       setEditNote(null);
@@ -3070,124 +3001,7 @@ export function BuyAndSellNotes() {
       return;
     setDeletingId(id);
     try {
-      // Find ledger entry and transaction_id linked to this note
-      const [ledgerRes, noteRes] = await Promise.all([
-        supabase
-          .from("cash_balance_ledger")
-          .select("id, entity_id, amount, timestamp, type")
-          .eq("reference_id", id)
-          .maybeSingle(),
-        supabase
-          .from("buy_sell_notes")
-          .select("transaction_id")
-          .eq("id", id)
-          .maybeSingle(),
-      ]);
-      const ledgerEntry = ledgerRes.data;
-      const linkedTransactionId = noteRes.data?.transaction_id ?? null;
-
-      // Fetch old records for audit logging before deletion
-      const oldNote = await fetchRecordForAudit('buy_sell_notes', id);
-      const oldTransaction = linkedTransactionId ? await fetchRecordForAudit('transactions', linkedTransactionId) : null;
-      const oldLedger = ledgerEntry ? await fetchRecordForAudit('cash_balance_ledger', ledgerEntry.id) : null;
-
-      // Delete the buy/sell note
-      const { error: deleteError } = await supabase
-        .from("buy_sell_notes")
-        .delete()
-        .eq("id", id);
-      if (deleteError) throw deleteError;
-
-      // Audit log for buy_sell_notes delete
-      await logAudit({
-        tableName: 'buy_sell_notes',
-        recordId: id,
-        action: 'DELETE',
-        oldValues: oldNote,
-        performedBy: user?.email || 'system',
-      });
-
-      // Delete the linked transaction so it disappears from analytics
-      if (linkedTransactionId) {
-        await supabase
-          .from("transactions")
-          .delete()
-          .eq("id", linkedTransactionId);
-
-        // Audit log for transactions delete
-        await logAudit({
-          tableName: 'transactions',
-          recordId: linkedTransactionId,
-          action: 'DELETE',
-          oldValues: oldTransaction,
-          performedBy: user?.email || 'system',
-        });
-      }
-
-      // Reverse the cash ledger entry and recompute running balances
-      if (ledgerEntry) {
-        const { error: ledgerDeleteError } = await supabase
-          .from("cash_balance_ledger")
-          .delete()
-          .eq("id", ledgerEntry.id);
-        if (ledgerDeleteError) throw ledgerDeleteError;
-
-        // Audit log for cash_balance_ledger delete
-        await logAudit({
-          tableName: 'cash_balance_ledger',
-          recordId: ledgerEntry.id,
-          action: 'DELETE',
-          oldValues: oldLedger,
-          performedBy: user?.email || 'system',
-        });
-
-        // Recompute running balances for all subsequent entries of the same entity
-        const { data: subsequentEntries } = await supabase
-          .from("cash_balance_ledger")
-          .select("id, type, amount, timestamp")
-          .eq("entity_id", ledgerEntry.entity_id)
-          .gte("timestamp", ledgerEntry.timestamp)
-          .order("timestamp", { ascending: true });
-
-        if (subsequentEntries && subsequentEntries.length > 0) {
-          // Get balance just before the deleted entry
-          const { data: priorEntry } = await supabase
-            .from("cash_balance_ledger")
-            .select("running_balance")
-            .eq("entity_id", ledgerEntry.entity_id)
-            .lt("timestamp", ledgerEntry.timestamp)
-            .order("timestamp", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          let runningBal = priorEntry ? Number(priorEntry.running_balance) : 0;
-          for (const entry of subsequentEntries) {
-            runningBal =
-              entry.type === "Addition"
-                ? runningBal + Number(entry.amount)
-                : runningBal - Number(entry.amount);
-
-            // Fetch old record for audit logging
-            const oldEntryRecord = await fetchRecordForAudit('cash_balance_ledger', entry.id);
-
-            await supabase
-              .from("cash_balance_ledger")
-              .update({ running_balance: runningBal })
-              .eq("id", entry.id);
-
-            // Audit log for cash_balance_ledger update
-            await logAudit({
-              tableName: 'cash_balance_ledger',
-              recordId: entry.id,
-              action: 'UPDATE',
-              oldValues: oldEntryRecord,
-              newValues: { running_balance: runningBal },
-              performedBy: user?.email || 'system',
-            });
-          }
-        }
-      }
-
+      await removeNote(id);
       await loadData();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
