@@ -151,3 +151,80 @@ export async function listNoteDates(): Promise<NoteDatesRow[]> {
   );
   return rows as unknown as NoteDatesRow[];
 }
+
+export interface EntityEntryRow {
+  id: string;
+  entity_id: string | null;
+  type: string;
+  amount: number | string;
+}
+
+/** Every entry of one entity, enough to sum its balance. */
+export async function listForEntity(entityId: string): Promise<EntityEntryRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('cash_balance_ledger')
+      .select('id, entity_id, type, amount')
+      .eq('entity_id', entityId)
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as EntityEntryRow[];
+}
+
+export interface ReferencedEntryRow {
+  id: string;
+  entity_id: string | null;
+  bank_id: string | null;
+  date: string;
+  description: string | null;
+  amount: number | string;
+}
+
+/** Entries raised by one source record, a contract note or a dividend. */
+export async function listByReference(referenceId: string): Promise<ReferencedEntryRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('cash_balance_ledger')
+      .select('id, entity_id, bank_id, date, description, amount')
+      .eq('reference_id', referenceId)
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as ReferencedEntryRow[];
+}
+
+export interface CashLedgerInsert {
+  type: 'Addition' | 'Deduction';
+  description: string;
+  code: string | null;
+  amount: number;
+  date: string;
+  running_balance: number;
+  on_hold_amount: number;
+  source: string;
+  entity_id: string;
+  bank_id: string | null;
+  reference_id: string | null;
+  created_by: string;
+}
+
+export type CashLedgerUpdate = Partial<Pick<CashLedgerInsert, 'entity_id' | 'bank_id' | 'date' | 'description' | 'amount'>>;
+
+export async function insert(entry: CashLedgerInsert): Promise<{ id: string }> {
+  const { data, error } = await supabase
+    .from('cash_balance_ledger')
+    .insert(entry)
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data as { id: string };
+}
+
+export async function update(id: string, values: CashLedgerUpdate): Promise<void> {
+  const { error } = await supabase.from('cash_balance_ledger').update(values).eq('id', id);
+  if (error) throw error;
+}
+
+export async function remove(id: string): Promise<void> {
+  const { error } = await supabase.from('cash_balance_ledger').delete().eq('id', id);
+  if (error) throw error;
+}
