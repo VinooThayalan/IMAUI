@@ -64,6 +64,23 @@ export async function remove(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export interface DividendDatesRow {
+  id: string;
+  /** XD date. */
+  dividend_date: string | null;
+  payment_date: string | null;
+}
+
+export async function listDates(): Promise<DividendDatesRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('dividends')
+      .select('id, dividend_date, payment_date')
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as DividendDatesRow[];
+}
+
 export async function listAll(): Promise<DividendRow[]> {
   const rows = await selectAll(() =>
     supabase
