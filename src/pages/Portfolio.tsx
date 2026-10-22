@@ -8,6 +8,7 @@ import * as portfolioCacheRepo from '../repositories/portfolioCache.repo';
 import { holdingsInWindow, isFresh } from '../services/portfolioHoldings.service';
 import { CHART_COLOR_FALLBACK, buildSectorColorMap } from '../lib/chartColors';
 import { Spinner } from '../components/Loading';
+import { useEntityCashBalances } from '../hooks/useEntityCashBalances';
 
 /**
  * supabase-js types a to-one embed as an array; PostgREST returns a single object
@@ -38,7 +39,6 @@ interface PortfolioSummary {
   totalValue: number;
   totalGainLoss: number;
   percentChange: number;
-  cashBalance: number;
 }
 
 interface SectorRow {
@@ -93,7 +93,6 @@ export function Portfolio() {
     totalValue: 0,
     totalGainLoss: 0,
     percentChange: 0,
-    cashBalance: 0,
   });
   const [sectorAllocation, setSectorAllocation] = useState<SectorRow[]>([]);
   const [entityBreakdown, setEntityBreakdown] = useState<EntityRow[]>([]);
@@ -101,6 +100,7 @@ export function Portfolio() {
   const [bottomPerformers, setBottomPerformers] = useState<PerformerRow[]>([]);
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState('');
+  const cash = useEntityCashBalances();
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
@@ -133,7 +133,7 @@ export function Portfolio() {
         if (cacheErr) throw cacheErr;
 
         if (cached) {
-          let totalValue = 0, totalGainLoss = 0, percentChange = 0, cashBalance = 0;
+          let totalValue = 0, totalGainLoss = 0, percentChange = 0;
           const sectors: SectorRow[] = [];
           const entities_: EntityRow[] = [];
           const tops: PerformerRow[] = [];
@@ -144,7 +144,6 @@ export function Portfolio() {
               if (c.label === 'totalValue') totalValue = Number(c.value) || 0;
               if (c.label === 'totalGainLoss') totalGainLoss = Number(c.value) || 0;
               if (c.label === 'percentChange') percentChange = Number(c.value) || 0;
-              if (c.label === 'cashBalance') cashBalance = Number(c.value) || 0;
             } else if (c.section === 'sector') {
               // Colour is filled in below, once every sector name is known.
               sectors.push({
@@ -170,7 +169,7 @@ export function Portfolio() {
           }
 
           const cachedSectorColors = sectorBarColors(sectors.map(s => s.sector));
-          setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
+          setPortfolioData({ totalValue, totalGainLoss, percentChange });
           setSectorAllocation(sectors.map(s => ({
             ...s,
             color: cachedSectorColors.get(s.sector) ?? CHART_COLOR_FALLBACK,
@@ -220,11 +219,7 @@ export function Portfolio() {
           );
         });
 
-        const { data: entData } = await supabase.from('entities').select('id, name, current_balance');
-        let cashBalance = 0;
-        (entData || []).forEach((e: { id: string; name: string; current_balance: number }) => {
-          if (!entityId || e.id === entityId) cashBalance += Number(e.current_balance) || 0;
-        });
+        const { data: entData } = await supabase.from('entities').select('id, name');
         setEntities((entData || []).map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
 
         lastRowMap.forEach((h, _key) => {
@@ -245,7 +240,7 @@ export function Portfolio() {
         });
 
         const percentChange = totalCost > 0 ? (totalGainLoss / totalCost) * 100 : 0;
-        setPortfolioData({ totalValue, totalGainLoss, percentChange, cashBalance });
+        setPortfolioData({ totalValue, totalGainLoss, percentChange });
 
         const analyticsSectorColors = sectorBarColors(Array.from(sectorMap.keys()));
         const sectors: SectorRow[] = Array.from(sectorMap.entries())
@@ -275,7 +270,6 @@ export function Portfolio() {
         cacheRows.push({ scope, section: 'summary', sort_order: 0, label: 'totalValue', value: totalValue, percentage: 0, source_hash: sourceHash });
         cacheRows.push({ scope, section: 'summary', sort_order: 1, label: 'totalGainLoss', value: totalGainLoss, percentage: 0, source_hash: sourceHash });
         cacheRows.push({ scope, section: 'summary', sort_order: 2, label: 'percentChange', value: 0, percentage: percentChange, source_hash: sourceHash });
-        cacheRows.push({ scope, section: 'summary', sort_order: 3, label: 'cashBalance', value: cashBalance, percentage: 0, source_hash: sourceHash });
         sectors.forEach((s, i) => cacheRows.push({ scope, section: 'sector', sort_order: i, label: s.sector, value: s.value, percentage: s.percentage, source_hash: sourceHash }));
         entityRows.forEach((e, i) => cacheRows.push({ scope, section: 'entity', sort_order: i, label: e.name, value: e.value, percentage: e.percentage, extra_value: e.shares, source_hash: sourceHash }));
         performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
@@ -310,7 +304,7 @@ export function Portfolio() {
         supabase.from('daily_share_prices').select('share_id, share_price, effective_date').order('effective_date', { ascending: false }),
         supabase.from('dividends').select('share_id, amount_net'),
         supabase.from('buy_sell_notes').select('transaction_id, no_of_shares, gross_amount, note_type').not('transaction_id', 'is', null),
-        supabase.from('entities').select('id, name, current_balance'),
+        supabase.from('entities').select('id, name'),
         openingQuery,
       ]);
 
@@ -333,12 +327,8 @@ export function Portfolio() {
       });
 
       const entityNameMap = new Map<string, string>();
-      let cashBalance = 0;
-      (entitiesRes.data || []).forEach((e: { id: string; name: string; current_balance: number }) => {
+      (entitiesRes.data || []).forEach((e: { id: string; name: string }) => {
         entityNameMap.set(e.id, e.name);
-        if (!entityId || e.id === entityId) {
-          cashBalance += Number(e.current_balance) || 0;
-        }
       });
       setEntities((entitiesRes.data || []).map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
 
@@ -517,7 +507,6 @@ export function Portfolio() {
         totalValue,
         totalGainLoss,
         percentChange,
-        cashBalance,
       });
 
       // ── Store fallback results in portfolio_cache too ──────────────────
@@ -525,7 +514,6 @@ export function Portfolio() {
       cacheRows.push({ scope, section: 'summary', sort_order: 0, label: 'totalValue', value: totalValue, percentage: 0, source_hash: sourceHash });
       cacheRows.push({ scope, section: 'summary', sort_order: 1, label: 'totalGainLoss', value: totalGainLoss, percentage: 0, source_hash: sourceHash });
       cacheRows.push({ scope, section: 'summary', sort_order: 2, label: 'percentChange', value: 0, percentage: percentChange, source_hash: sourceHash });
-      cacheRows.push({ scope, section: 'summary', sort_order: 3, label: 'cashBalance', value: cashBalance, percentage: 0, source_hash: sourceHash });
       sectors.forEach((s, i) => cacheRows.push({ scope, section: 'sector', sort_order: i, label: s.sector, value: s.value, percentage: s.percentage, source_hash: sourceHash }));
       entityRows.forEach((e, i) => cacheRows.push({ scope, section: 'entity', sort_order: i, label: e.name, value: e.value, percentage: e.percentage, extra_value: e.shares, source_hash: sourceHash }));
       performers.filter(p => p.gainLoss > 0).slice(0, 3).forEach((p, i) => cacheRows.push({ scope, section: 'performer', sort_order: i, label: p.ticker, label_2: p.name, value: p.gainLoss, percentage: p.percentage, is_top_performer: true, source_hash: sourceHash }));
@@ -677,9 +665,14 @@ export function Portfolio() {
             <div>
               <p className="text-sm font-medium text-gray-500">Cash Balance</p>
               <p className="text-2xl font-bold text-gray-900 mt-2">
-                Rs. {portfolioData.cashBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {(() => {
+                  const balance = cash.combined(selectedEntityId || null);
+                  if (balance === undefined) return cash.error ? '—' : <Spinner size="sm" />;
+                  if (balance === null) return '—';
+                  return `Rs. ${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                })()}
               </p>
-              <p className="text-sm text-gray-500 mt-2">Available funds</p>
+              <p className="text-sm text-gray-500 mt-2">Cash Balance ledger, as at today</p>
             </div>
           </div>
         </div>

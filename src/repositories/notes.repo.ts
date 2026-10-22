@@ -117,3 +117,20 @@ export async function setIntradaySeq(assignments: SeqAssignment[]): Promise<void
     if (error) throw error;
   }
 }
+
+/** One note as stored, every column. */
+export async function getById(id: string): Promise<Record<string, unknown> & { id: string; transaction_id: string | null } | null> {
+  const { data, error } = await supabase.from('buy_sell_notes').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function update(id: string, values: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from('buy_sell_notes').update(values).eq('id', id);
+  if (error) throw error;
+}
+
+export async function remove(id: string): Promise<void> {
+  const { error } = await supabase.from('buy_sell_notes').delete().eq('id', id);
+  if (error) throw error;
+}

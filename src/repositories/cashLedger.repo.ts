@@ -159,6 +159,17 @@ export interface EntityEntryRow {
   amount: number | string;
 }
 
+/** Every entry of every entity, enough to sum each one's balance. */
+export async function listAllAmounts(): Promise<EntityEntryRow[]> {
+  const rows = await selectAll(() =>
+    supabase
+      .from('cash_balance_ledger')
+      .select('id, entity_id, type, amount')
+      .order('id', { ascending: true }),
+  );
+  return rows as unknown as EntityEntryRow[];
+}
+
 /** Every entry of one entity, enough to sum its balance. */
 export async function listForEntity(entityId: string): Promise<EntityEntryRow[]> {
   const rows = await selectAll(() =>
@@ -178,6 +189,7 @@ export interface ReferencedEntryRow {
   date: string;
   description: string | null;
   amount: number | string;
+  type: string;
 }
 
 /** Entries raised by one source record, a contract note or a dividend. */
@@ -185,7 +197,7 @@ export async function listByReference(referenceId: string): Promise<ReferencedEn
   const rows = await selectAll(() =>
     supabase
       .from('cash_balance_ledger')
-      .select('id, entity_id, bank_id, date, description, amount')
+      .select('id, entity_id, bank_id, date, description, amount, type')
       .eq('reference_id', referenceId)
       .order('id', { ascending: true }),
   );
@@ -205,9 +217,10 @@ export interface CashLedgerInsert {
   bank_id: string | null;
   reference_id: string | null;
   created_by: string;
+  notes?: string | null;
 }
 
-export type CashLedgerUpdate = Partial<Pick<CashLedgerInsert, 'entity_id' | 'bank_id' | 'date' | 'description' | 'amount'>>;
+export type CashLedgerUpdate = Partial<Pick<CashLedgerInsert, 'type' | 'entity_id' | 'bank_id' | 'date' | 'description' | 'amount'>>;
 
 export async function insert(entry: CashLedgerInsert): Promise<{ id: string }> {
   const { data, error } = await supabase
