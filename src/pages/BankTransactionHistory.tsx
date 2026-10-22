@@ -9,6 +9,7 @@ import { useAccountLedger, type AccountLedgerEntry } from '../hooks/useAccountLe
 import { exportData, type ExportColumn } from '../lib/exportData';
 import { DateRangeField } from '../components/DateField';
 import { LoadingState, Spinner } from '../components/Loading';
+import { DateTag } from '../components/DateTag';
 
 interface Entity {
   id: string;
@@ -625,8 +626,14 @@ export function BankTransactionHistory() {
                                             <td className="pl-12 pr-3 py-2 text-gray-600">{fmtDate(entry.date)}</td>
                                             {/* Only an entry raised by settling a contract note has these.
                                                 A manual entry gets an em dash, not the posting date. */}
-                                            <td className="px-3 py-2 text-gray-600">{fmtDate(entry.tradeDate)}</td>
-                                            <td className="px-3 py-2 text-gray-600">{fmtDate(entry.settlementDate)}</td>
+                                            <td className="px-3 py-2 text-gray-600">
+                                              {entry.tradeDate && <DateTag label={entry.dateLabels?.trade} />}
+                                              {fmtDate(entry.tradeDate)}
+                                            </td>
+                                            <td className="px-3 py-2 text-gray-600">
+                                              {entry.settlementDate && <DateTag label={entry.dateLabels?.settlement} />}
+                                              {fmtDate(entry.settlementDate)}
+                                            </td>
                                             <td className="px-3 py-2 text-gray-500 font-mono text-xs">{entry.code || '—'}</td>
                                             <td className="px-3 py-2 text-gray-700 max-w-xs truncate">{entry.description || '—'}</td>
                                             <td className="px-3 py-2 text-center">

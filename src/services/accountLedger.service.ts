@@ -4,7 +4,8 @@
  */
 
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
-import { accountRunningBalances, indexNoteDates, noteIdFor, tradeDatesFor } from './cashLedger.service';
+import { accountRunningBalances, noteIdFor, tradeDatesFor, type TradeDates } from './cashLedger.service';
+import { loadEntryDates } from './entryDates.service';
 
 export interface AccountLedgerEntry {
   id: string;
@@ -17,23 +18,24 @@ export interface AccountLedgerEntry {
   running_balance: number;
   /** The contract note this entry settles. Null for a manual or dividend entry. */
   noteId: string | null;
-  /** From the contract note this entry settles. Null otherwise. */
+  /** A trade's trade and settlement dates, or a dividend's XD and payment dates. */
   tradeDate: string | null;
   settlementDate: string | null;
+  /** Shown before each date when it is not a trade's; null otherwise. */
+  dateLabels: TradeDates['labels'];
 }
 
 export async function loadAccountLedger(bankId: string): Promise<AccountLedgerEntry[]> {
-  const [bankRows, noteDateRows] = await Promise.all([
+  const [bankRows, entryDates] = await Promise.all([
     cashLedgerRepo.listByBank(bankId),
-    cashLedgerRepo.listNoteDates(),
+    loadEntryDates(),
   ]);
-  const noteDates = indexNoteDates(noteDateRows);
   const series = accountRunningBalances(
     bankRows.map(r => ({ ...r, amount: Number(r.amount) || 0 })),
     bankId,
   );
   return series.map(({ row: r, balance }) => {
-    const dates = tradeDatesFor(r, noteDates);
+    const dates = tradeDatesFor(r, entryDates);
     return {
       id: r.id,
       date: r.date,
@@ -42,9 +44,10 @@ export async function loadAccountLedger(bankId: string): Promise<AccountLedgerEn
       code: r.code,
       amount: r.amount,
       running_balance: balance,
-      noteId: noteIdFor(r, noteDates),
+      noteId: noteIdFor(r, entryDates),
       tradeDate: dates.tradeDate,
       settlementDate: dates.settlementDate,
+      dateLabels: dates.labels,
     };
   });
 }

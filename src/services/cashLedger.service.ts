@@ -6,33 +6,44 @@
  */
 
 import type { NoteDatesRow } from '../repositories/cashLedger.repo';
+import type { DividendDatesRow } from '../repositories/dividends.repo';
 import { tradeLedgerDate } from '../lib/tradeDates';
 
-/** Trade and settlement dates, absent unless the entry came from a trade. */
+/**
+ * The dates behind a posted entry, for the Trade Date and Settlement Date
+ * columns: a trade's trade and settlement dates, or a dividend's XD and payment
+ * dates. `kind` says which, so a screen can label a dividend's as its own.
+ */
 export interface TradeDates {
   tradeDate: string | null;
   settlementDate: string | null;
+  kind: 'trade' | 'dividend' | null;
+  /** Shown before each date when it is not a trade's, as on the Dividends screen. */
+  labels: { trade: string; settlement: string } | null;
 }
 
-export const NO_TRADE_DATES: TradeDates = { tradeDate: null, settlementDate: null };
+export const NO_TRADE_DATES: TradeDates = { tradeDate: null, settlementDate: null, kind: null, labels: null };
+
+const DIVIDEND_DATE_LABELS = { trade: 'XD', settlement: 'Pay' };
 
 /**
- * Index note dates by note id, for resolving a ledger entry's origin.
- *
- * `cash_balance_ledger` stores only the posting date. A manual entry has no
- * trade behind it and never will; an entry raised by settling a contract note
- * carries that note's id in `reference_id`, and the dates belong to the note.
+ * Index the dates behind ledger entries by the id an entry carries in
+ * `reference_id`: a contract note's, or a dividend's. `cash_balance_ledger`
+ * stores only the posting date; the others belong to the note or the dividend.
  */
-export function indexNoteDates(rows: NoteDatesRow[]): Map<string, TradeDates> {
+export function indexEntryDates(notes: NoteDatesRow[], dividends: DividendDatesRow[]): Map<string, TradeDates> {
   const index = new Map<string, TradeDates>();
-  for (const r of rows) {
-    index.set(r.id, { tradeDate: r.trade_date, settlementDate: r.settlement_date });
+  for (const n of notes) {
+    index.set(n.id, { tradeDate: n.trade_date, settlementDate: n.settlement_date, kind: 'trade', labels: null });
+  }
+  for (const d of dividends) {
+    index.set(d.id, { tradeDate: d.dividend_date, settlementDate: d.payment_date, kind: 'dividend', labels: DIVIDEND_DATE_LABELS });
   }
   return index;
 }
 
 /**
- * The trade behind a posted entry, or nothing.
+ * The trade or dividend behind a posted entry, or nothing.
  *
  * Nothing is invented for a manual entry: it has no trade date, and showing the
  * posting date in that column would read as one. The caller renders an em dash.
@@ -50,7 +61,7 @@ export function noteIdFor(
   row: { reference_id?: string | null },
   index: Map<string, TradeDates>,
 ): string | null {
-  return row.reference_id && index.has(row.reference_id) ? row.reference_id : null;
+  return row.reference_id && index.get(row.reference_id)?.kind === 'trade' ? row.reference_id : null;
 }
 
 /**

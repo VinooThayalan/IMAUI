@@ -4,8 +4,6 @@ import { supabase, type CashTransaction } from '../lib/supabase';
 import * as cashLedgerRepo from '../repositories/cashLedger.repo';
 import { DateRangeField } from '../components/DateField';
 import {
-  indexNoteDates,
-  tradeDatesFor,
   matchesLedgerFilters,
   matchesPendingFilters,
   hasActiveFilter,
@@ -18,8 +16,9 @@ import {
   pendingEntryPosition,
   NO_FILTERS,
   type LedgerFilters,
-  type TradeDates,
 } from '../services/cashLedger.service';
+import { useLedgerEntryDates } from '../hooks/useLedgerEntryDates';
+import { DateTag } from '../components/DateTag';
 import { useAuth } from '../contexts/AuthContext';
 import { logAudit } from '../lib/auditLog';
 import { tradeLedgerDate } from '../lib/tradeDates';
@@ -88,7 +87,7 @@ export function CashBalance() {
   const [banks, setBanks] = useState<Bank[]>([]);
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
   const [pendingNotes, setPendingNotes] = useState<PendingNote[]>([]);
-  const [noteDates, setNoteDates] = useState<Map<string, TradeDates>>(new Map());
+  const { datesFor } = useLedgerEntryDates();
   const [filters, setFilters] = useState<LedgerFilters>(NO_FILTERS);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
@@ -128,10 +127,9 @@ export function CashBalance() {
 
       if (banksError) throw banksError;
 
-      const [transactionsData, pendingNotesData, noteDateRows] = await Promise.all([
+      const [transactionsData, pendingNotesData] = await Promise.all([
         cashLedgerRepo.listAll(),
         cashLedgerRepo.listPendingTradeNotes(),
-        cashLedgerRepo.listNoteDates(),
       ]);
 
       const parsedEntities = (entitiesData || []).map(entity => ({
@@ -184,7 +182,6 @@ export function CashBalance() {
       setBanks(parsedBanks);
       setTransactions(parsedTransactions);
       setPendingNotes(parsedPending);
-      setNoteDates(indexNoteDates(noteDateRows));
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -335,7 +332,7 @@ export function CashBalance() {
     const ledgerRows = filteredTransactions.map(t => {
       const entity = entities.find(e => e.id === t.entity_id);
       const bank = getBankById(t.bank_id || null);
-      const dates = tradeDatesFor(t, noteDates);
+      const dates = datesFor(t);
       const exported = ledgerBalances.byRowId.get(t.id);
       return [
         fmtLedgerDate(t.date || t.timestamp),
@@ -785,15 +782,16 @@ export function CashBalance() {
                         })}
                       </div>
                     </td>
-                    {/* An entry raised by settling a contract note carries that
-                        note's id, so its trade dates come from the note. A truly
-                        manual entry has none, and gets an em dash rather than the
-                        posting date standing in for a trade date it never had. */}
+                    {/* A trade's dates come from its note, a dividend's XD and
+                        payment dates from its dividend. A manual entry has none,
+                        and gets an em dash rather than the posting date. */}
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {fmtLedgerDate(tradeDatesFor(transaction, noteDates).tradeDate)}
+                      {datesFor(transaction).tradeDate && <DateTag label={datesFor(transaction).labels?.trade} />}
+                      {fmtLedgerDate(datesFor(transaction).tradeDate)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {fmtLedgerDate(tradeDatesFor(transaction, noteDates).settlementDate)}
+                      {datesFor(transaction).settlementDate && <DateTag label={datesFor(transaction).labels?.settlement} />}
+                      {fmtLedgerDate(datesFor(transaction).settlementDate)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {(() => {
